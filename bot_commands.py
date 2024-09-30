@@ -127,3 +127,45 @@ def setup_commands(tree, get_assistant_response):
         except Exception as e:
             await interaction.followup.send(f"Error sending messages: {str(e)}")
 
+    @tree.command(name="summarize", description="Summarize all messages starting from a given message ID.")
+    async def summarize(interaction: discord.Interaction, start: str):
+        await interaction.response.defer()  # Defer the response while processing
+
+        # Convert the start ID to an integer
+        try:
+            start_id = int(start)
+        except ValueError:
+            await interaction.followup.send("Invalid message ID format. Please provide a valid message ID.")
+            return
+
+        # Fetch the channel and the message
+        channel = interaction.channel
+        try:
+            start_message = await channel.fetch_message(start_id)
+        except discord.errors.NotFound:
+            await interaction.followup.send(f"Message with ID {start_id} not found.")
+            return
+
+        # Fetch all messages from the channel starting from the specified message
+        messages = []
+        async for message in channel.history(after=start_message, limit=100):
+            messages.append(f"{message.author.name}: {message.content}")
+
+        if not messages:
+            await interaction.followup.send("No messages found after the specified message.")
+            return
+
+        # Create a single string to summarize
+        conversation_history = "\n".join(messages)
+
+        # Send the conversation to the assistant for summarization
+        prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
+        response = await get_assistant_response(prompt, interaction.channel.id)
+
+        # Ensure the response doesn't exceed Discord's message length limit
+        if len(response) > 2000:
+            for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+                await interaction.followup.send(chunk)
+        else:
+            await interaction.followup.send(response)
+

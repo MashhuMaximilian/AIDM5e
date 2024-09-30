@@ -19,9 +19,16 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Get the tokens and API keys from the environment variables
-DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-openai.api_key =  os.getenv('OPENAI_API_KEY')
-ASSISTANT_ID = os.getenv('ASSISTANT_ID')
+
+DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN') or "MTI4NDgyMTMzMTU2MDUwMTMwOQ.GtJ3aN.lYkZyQoqaBGhmaXVPTQGrEM7qvCBae1Au9Q0A4"
+openai.api_key =  "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"
+ASSISTANT_ID = os.getenv('ASSISTANT_ID') or "asst_ZgqYeJqwcBoD2RZqPXb418zi"
+
+
+# Get the tokens and API keys from the environment variables
+# DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+# openai.api_key =  os.getenv('OPENAI_API_KEY')
+# ASSISTANT_ID = os.getenv('ASSISTANT_ID')
 
 # Headers for OpenAI API requests
 HEADERS = {
@@ -53,57 +60,51 @@ async def on_ready():
 async def get_assistant_response(user_message, channel_id, category_id=None):
     try:
         async with aiohttp.ClientSession() as session:
-            current_time = datetime.now()  # Store the current timestamp
+            current_time = datetime.now()
 
-            # Check if the category_id is provided and not None
+            # Get the channel object from the client to fetch category_id if it's not provided
+            channel = client.get_channel(channel_id)
+            if channel is None:
+                return f"Error: Channel {channel_id} not found."
+
+            # Fetch the category ID from the channel if it's not already provided
+            if category_id is None and channel.category_id:
+                category_id = channel.category_id
+
+            # Determine if the channel is part of a category
             if category_id:
-                # Check if there's an existing thread for the category
+                # Reuse or create a thread for the category
                 if category_id in category_threads:
                     thread_id = category_threads[category_id]
                     print(f"Reusing existing thread for category {category_id}: {thread_id}")
                 else:
-                    # Create a new thread for the category
                     print(f"Creating new thread for category {category_id}")
                     async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": user_message
-                            }
-                        ]
+                        "messages": [{"role": "user", "content": user_message}]
                     }) as thread_response:
                         if thread_response.status != 200:
                             return f"Error creating thread: {await thread_response.text()}"
                         thread_data = await thread_response.json()
                         thread_id = thread_data['id']
                         category_threads[category_id] = thread_id  # Store thread ID for the category
-                        category_conversations[category_id] = [
-                            {"role": "user", "content": user_message, "timestamp": current_time}
-                        ]
+                        category_conversations[category_id] = [{"role": "user", "content": user_message, "timestamp": current_time}]
                         print(f"New thread created for category {category_id} with thread ID: {thread_id}")
             else:
-                # If no category ID is available, use channel ID as fallback
+                # If no category ID is available, handle channel-specific threads
                 if channel_id in category_threads:
                     thread_id = category_threads[channel_id]
                     print(f"Reusing existing thread for channel {channel_id} (no category): {thread_id}")
                 else:
                     print(f"Creating new thread for channel {channel_id} (no category)")
                     async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": user_message
-                            }
-                        ]
+                        "messages": [{"role": "user", "content": user_message}]
                     }) as thread_response:
                         if thread_response.status != 200:
                             return f"Error creating thread: {await thread_response.text()}"
                         thread_data = await thread_response.json()
                         thread_id = thread_data['id']
                         category_threads[channel_id] = thread_id  # Store thread ID for the channel
-                        category_conversations[channel_id] = [  # Use channel_id here
-                            {"role": "user", "content": user_message, "timestamp": current_time}
-                        ]
+                        category_conversations[channel_id] = [{"role": "user", "content": user_message, "timestamp": current_time}]
                         print(f"New thread created for channel {channel_id} (no category) with thread ID: {thread_id}")
             
             # Add the user's message to the conversation history with timestamp
@@ -171,7 +172,6 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
 
     except Exception as e:
         return f"Error during the assistant interaction: {str(e)}"
-
 
 # Import command definitions from bot_commands.py and pass required objects
 bot_commands.setup_commands(tree, get_assistant_response)
