@@ -8,6 +8,9 @@ import asyncio  # Ensure this is included
 import logging
 from datetime import datetime
 import bot_commands  # No circular import here
+from dotenv import load_dotenv
+# Load the environment variables from the .env file
+load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
