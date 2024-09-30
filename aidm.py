@@ -19,16 +19,9 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Get the tokens and API keys from the environment variables
-
-DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN') or "MTI4NDgyMTMzMTU2MDUwMTMwOQ.GtJ3aN.lYkZyQoqaBGhmaXVPTQGrEM7qvCBae1Au9Q0A4"
-openai.api_key =  "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"
-ASSISTANT_ID = os.getenv('ASSISTANT_ID') or "asst_ZgqYeJqwcBoD2RZqPXb418zi"
-
-
-# Get the tokens and API keys from the environment variables
-# DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-# openai.api_key =  os.getenv('OPENAI_API_KEY')
-# ASSISTANT_ID = os.getenv('ASSISTANT_ID')
+DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN') 
+openai.api_key =  os.getenv('OPENAI_API_KEY')
+ASSISTANT_ID = os.getenv('ASSISTANT_ID')
 
 # Headers for OpenAI API requests
 HEADERS = {
