@@ -9,8 +9,12 @@ import logging
 from datetime import datetime
 import bot_commands  # No circular import here
 from dotenv import load_dotenv
+from pathlib import Path
+
+# Load environment variables from a specific path
+env_path = Path('.') / '.env'
+load_dotenv(dotenv_path=env_path)
 # Load the environment variables from the .env file
-load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
