@@ -42,10 +42,16 @@ category_threads = {}
 category_conversations = {}
 channel_character_sheets = {}
 
-# Load your prompt from a file
-with open('aidm_prompt.txt', 'r') as f:
+file_path = Path(__file__).parent.resolve() / 'aidm_prompt.txt'
+# Load your prompt from a file using the absolute path
+try:
+    with open(file_path, 'r') as f:
+        system_prompt = f.read()
+except FileNotFoundError:
+    raise FileNotFoundError(f"Could not find the file: {file_path}")
+# with open('aidm_prompt.txt', 'r') as f:
 # with open('/home/m_catalin_ion/aidm5e_discord/aidm_prompt.txt', 'r') as f: # this is useful when uploading to VM bc it has an issue with the one before
-    system_prompt = f.read()
+    # system_prompt = f.read()
 
 
 @client.event
