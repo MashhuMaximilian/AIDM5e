@@ -96,12 +96,26 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send(response)  # Send the final response if it's within the limit
 
-    @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
-    async def feedback(interaction: discord.Interaction, query: str):
-        await interaction.response.defer()  # Defer response while we process
-        prompt = f"This is feedback regarding the AIDM’s performance or the game experience. Please consider this feedback to improve future responses and gameplay interactions. {query}"
-        response = await get_assistant_response(prompt, interaction.channel.id)
-        await interaction.followup.send(response)
+
+    @tree.command(name="options", description="Choose an action: send messages, provide feedback, or summarize.")
+    @app_commands.choices(
+        option_type=[
+            app_commands.Choice(name="Send", value="send"),
+            app_commands.Choice(name="Feedback", value="feedback"),
+            app_commands.Choice(name="Summarize", value="summarize")
+        ]
+    )
+    async def options(interaction: discord.Interaction, option_type: app_commands.Choice[str], message: str = None):
+        await interaction.response.defer()  # Defer the response while we process
+
+        if option_type.value == "send":
+            await send(interaction, message)
+        
+        elif option_type.value == "feedback":
+            await feedback(interaction, message)
+
+        elif option_type.value == "summarize":
+            await summarize(interaction, message)
 
     @tree.command(name="send", description="Send specified messages or files to another channel.")
     async def send(interaction: discord.Interaction, message_ids: str, target_channel: discord.TextChannel):
@@ -120,8 +134,7 @@ def setup_commands(tree, get_assistant_response):
 
                 if message.attachments:
                     for attachment in message.attachments:
-                        await attachment.to_file()
-                        await target_channel.send(file=attachment)
+                        await target_channel.send(file=await attachment.to_file())
 
             await interaction.followup.send(f"Messages and files sent to {target_channel.mention}")
         except Exception as e:
@@ -169,3 +182,47 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send(response)
 
+    @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
+    async def feedback(interaction: discord.Interaction, query: str):
+        await interaction.response.defer()  # Defer response while we process
+
+        # Define the prompt for the feedback
+        prompt = f"This is feedback regarding the AIDM’s performance or the game experience. Please consider this feedback to improve future responses and gameplay interactions. {query}"
+
+        # Check the category of the current channel
+        category = interaction.channel.category
+
+        # Check if the #telldm channel exists within the same category
+        telldm_channel = discord.utils.get(category.channels, name="telldm") if category else None
+
+        # If the channel doesn't exist, create it
+        if telldm_channel is None:
+            # Ensure the bot has permission to create channels
+            telldm_channel = await category.create_text_channel(name="telldm")
+            await interaction.followup.send(f"The {telldm_channel.mention} channel was not found, so I created it.")
+
+
+        # Send the feedback to the #telldm channel
+        await telldm_channel.send(f"Feedback from {interaction.user}: {query}")
+
+        # Fetch message history from the #telldm channel
+        messages = []
+        async for message in telldm_channel.history(limit=100):
+            messages.append(f"{message.author.name}: {message.content}")
+
+        if not messages:
+            await interaction.followup.send("No messages found in the #telldm channel.")
+            return
+
+        # Create a conversation history from the messages
+        conversation_history = "\n".join(messages)
+
+        # Send the conversation to the assistant for summarization
+        response = await get_assistant_response(conversation_history, interaction.channel.id, category.id)
+
+        # Ensure the response doesn't exceed Discord’s message length limit
+        if len(response) > 2000:
+            for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+                await interaction.followup.send(chunk)
+        else:
+            await interaction.followup.send(response)

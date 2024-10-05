@@ -13,18 +13,25 @@ logging.basicConfig(level=logging.INFO)
 async def on_message(message):
     logging.info(f"Received message from {message.author}")
 
+    # Ignore messages from the bot itself
     if message.author == client.user:
         return
 
     user_message = message.content.strip() if message.content else "No message provided."
+    channel_name = message.channel.name
 
-    # Check for attachments
+    # Automatically respond to messages in the #telldm channel
+    if channel_name == "telldm":
+        await send_assistant_response(user_message, message.channel)
+        return  # Exit after responding
+
+    # Check for attachments in other channels
     if message.attachments:
         for attachment in message.attachments:
             logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
             await handle_attachments(attachment, user_message, message.channel)
 
-    # Respond to mentions
+    # Respond to mentions in other channels
     if client.user in message.mentions:
         cleaned_message = message.content.replace(f'<@{client.user.id}>', '').strip()
         await send_assistant_response(cleaned_message, message.channel)
