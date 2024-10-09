@@ -128,7 +128,7 @@ def setup_commands(tree, get_assistant_response):
         conversation_history = "\n".join(messages)
 
         # Send the conversation to the assistant for summarization
-        prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, ... Here is where you start:\n\n{conversation_history}"
+        prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
         response = await get_assistant_response(prompt, interaction.channel.id)
 
         # Check if 'session-summary' channel exists in the same category
@@ -147,47 +147,47 @@ def setup_commands(tree, get_assistant_response):
             await summary_channel.send(response)
 
         await interaction.followup.send(f"Summary has been posted to {summary_channel.mention}.")
+# uncomment this function if it does not work.
+        # async def summarize(interaction: discord.Interaction, start: str):
+        #     await interaction.response.defer()  # Defer the response while processing
 
-        async def summarize(interaction: discord.Interaction, start: str):
-            await interaction.response.defer()  # Defer the response while processing
+        #     # Convert the start ID to an integer
+        #     try:
+        #         start_id = int(start)
+        #     except ValueError:
+        #         await interaction.followup.send("Invalid message ID format. Please provide a valid message ID.")
+        #         return
 
-            # Convert the start ID to an integer
-            try:
-                start_id = int(start)
-            except ValueError:
-                await interaction.followup.send("Invalid message ID format. Please provide a valid message ID.")
-                return
+        #     # Fetch the channel and the message
+        #     channel = interaction.channel
+        #     try:
+        #         start_message = await channel.fetch_message(start_id)
+        #     except discord.errors.NotFound:
+        #         await interaction.followup.send(f"Message with ID {start_id} not found.")
+        #         return
 
-            # Fetch the channel and the message
-            channel = interaction.channel
-            try:
-                start_message = await channel.fetch_message(start_id)
-            except discord.errors.NotFound:
-                await interaction.followup.send(f"Message with ID {start_id} not found.")
-                return
+        #     # Fetch all messages from the channel starting from the specified message
+        #     messages = []
+        #     async for message in channel.history(after=start_message, limit=100):
+        #         messages.append(f"{message.author.name}: {message.content}")
 
-            # Fetch all messages from the channel starting from the specified message
-            messages = []
-            async for message in channel.history(after=start_message, limit=100):
-                messages.append(f"{message.author.name}: {message.content}")
+        #     if not messages:
+        #         await interaction.followup.send("No messages found after the specified message.")
+        #         return
 
-            if not messages:
-                await interaction.followup.send("No messages found after the specified message.")
-                return
+        #     # Create a single string to summarize
+        #     conversation_history = "\n".join(messages)
 
-            # Create a single string to summarize
-            conversation_history = "\n".join(messages)
+        #     # Send the conversation to the assistant for summarization
+        #     prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
+        #     response = await get_assistant_response(prompt, interaction.channel.id)
 
-            # Send the conversation to the assistant for summarization
-            prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
-            response = await get_assistant_response(prompt, interaction.channel.id)
-
-            # Ensure the response doesn't exceed Discord's message length limit
-            if len(response) > 2000:
-                for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-                    await interaction.followup.send(chunk)
-            else:
-                await interaction.followup.send(response)
+        #     # Ensure the response doesn't exceed Discord's message length limit
+        #     if len(response) > 2000:
+        #         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+        #             await interaction.followup.send(chunk)
+        #     else:
+        #         await interaction.followup.send(response)
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):

@@ -13,6 +13,9 @@ load_dotenv(dotenv_path=env_path)
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ASSISTANT_ID = os.getenv('ASSISTANT_ID')
+WHISPER_API_KEY = os.getenv('OPENAI_API_KEY')
+WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
+
 
 # Set up Discord bot client
 intents = discord.Intents.default()

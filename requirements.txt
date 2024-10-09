@@ -7,3 +7,8 @@ aiohttp==3.10.5
 PyPDF2==3.0.1
 python-dotenv==1.0.0 
 python-docx==1.1.2
+openai-whisper==latest
+PyNaCl==latest
+discord==2.3.2
+discord-ext-voice-recv==latest
+ffmpeg==latest

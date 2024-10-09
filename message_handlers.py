@@ -20,8 +20,8 @@ async def on_message(message):
     user_message = message.content.strip() if message.content else "No message provided."
     channel_name = message.channel.name
 
-    # Automatically respond to messages in the #telldm channel
-    if channel_name == "telldm":
+    # Automatically respond to messages in the #tefeedbacklldm channel
+    if channel_name == "feedback":
         await send_assistant_response(user_message, message.channel)
         return  # Exit after responding
 
