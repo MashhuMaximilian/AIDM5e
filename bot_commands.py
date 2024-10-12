@@ -3,25 +3,75 @@
 import discord
 from discord import app_commands
 from message_handlers import send_response_in_chunks
+from assistant_interactions import create_or_get_thread
+from config import HEADERS
+import aiohttp
+import logging
 
+# Dictionary to store thread IDs for the #telldm channel
+category_threads = {}
+category_conversations = {}
 
-async def send_to_tellme(interaction, response):
-    # Get the current channel
+async def create_openai_thread(session, user_message, category_id):
+    """Create a new OpenAI thread and store its ID for the category."""
+    logging.info(f"Creating new OpenAI thread for category {category_id}")
+    
+    async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
+        "messages": [{"role": "user", "content": user_message}]
+    }) as thread_response:
+        if thread_response.status != 200:
+            raise Exception(f"Error creating thread: {await thread_response.text()}")
+        thread_data = await thread_response.json()
+        thread_id = thread_data['id']
+        category_threads[category_id] = thread_id  # Store thread ID for the category
+        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id}")
+    
+    return thread_id
+
+async def send_to_telldm(interaction, response):
+    """Send a response to the #telldm channel and the corresponding OpenAI thread."""
+    
+    # Get the current channel and its category
     current_channel = interaction.channel
     category = current_channel.category
+    category_id = category.id  # Use the category ID for OpenAI thread management
 
-    # Check if #telldm exists in the same category
-    tell_channel = discord.utils.get(category.text_channels, name='telldm')
-    if not tell_channel:
-        # Create the #telldm channel if it doesn't exist
-        tell_channel = await category.create_text_channel('telldm')
+    # Initialize a variable to hold the thread ID
+    thread_id = None
+    
+    # Check if a thread already exists for this category
+    if category_id in category_threads:
+        thread_id = category_threads[category_id]
+        logging.info(f"Reusing existing OpenAI thread ID for category {category_id}: {thread_id}")
+    else:
+        # Create a new OpenAI thread if it doesn't exist
+        async with aiohttp.ClientSession() as session:
+            thread_id = await create_openai_thread(session, response, category_id)
+    
+    # Now send the response to the OpenAI thread
+    async with aiohttp.ClientSession() as session:
+        async with session.post(f"https://api.openai.com/v1/threads/{thread_id}/messages", headers=HEADERS, json={
+            "role": "assistant",  # Assuming the bot acts as the assistant
+            "content": response
+        }) as send_response:
+            if send_response.status != 200:
+                raise Exception(f"Error sending message to OpenAI thread: {await send_response.text()}")
 
-    # Send the response in chunks
-    await send_response_in_chunks(tell_channel, response)
+    # Find or create the #telldm channel in the same category
+    telldm_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=category)
+    if not telldm_channel:
+        # Create the channel if it doesn't exist
+        telldm_channel = await interaction.guild.create_text_channel('telldm', category=category)
+    
+    # Send the response to the #telldm Discord channel
+    if telldm_channel:
+        await send_response_in_chunks(telldm_channel, response)  # Send the response to the #telldm channel
+        logging.info(f"Response sent to #telldm channel: {response[:100]}")
+    else:
+        logging.error("Channel #telldm not found or could not be created.")
 
-    # Inform the user where the response was sent
-    await interaction.followup.send(f"Response has been posted to {tell_channel.mention}.")
-
+    # Inform the user where the response was sent, including a link to the channel
+    await interaction.followup.send(f"Response has been posted to the OpenAI thread and the {telldm_channel.mention} channel.")
 
 
 def setup_commands(tree, get_assistant_response):
@@ -62,7 +112,7 @@ def setup_commands(tree, get_assistant_response):
         # Get response from the assistant
         response = await get_assistant_response(prompt, interaction.channel.id)
         # Call the send_to_tellme function
-        await send_to_tellme(interaction, response)
+        await send_to_telldm(interaction, response)
 
 
     @tree.command(name="askdm", description="Inquire about rules, lore, monsters, and more.")
@@ -103,7 +153,7 @@ def setup_commands(tree, get_assistant_response):
         response = await get_assistant_response(prompt, interaction.channel.id)
 
         # Check if the response is longer than 2000 characters and split it
-        await send_to_tellme(interaction, response)
+        await send_to_telldm(interaction, response)
 
     @tree.command(name="summarize", description="Summarize all messages starting from a given message ID.")
     async def summarize(interaction: discord.Interaction, start: str):
