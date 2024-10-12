@@ -194,25 +194,25 @@ def setup_commands(tree, get_assistant_response):
         await interaction.response.defer()  # Defer the response while processing the feedback
 
         # Step 1: Check if 'telldm' channel exists in the same category
-        telldm_channel = discord.utils.get(interaction.channel.category.channels, name="telldm")
+        feedback_channel = discord.utils.get(interaction.channel.category.channels, name="feedback")
 
         # If the channel doesn't exist, create it
-        if telldm_channel is None:
+        if feedback_channel is None:
             guild = interaction.guild
-            telldm_channel = await guild.create_text_channel(name="telldm", category=interaction.channel.category)
+            feedback_channel = await guild.create_text_channel(name="feedback", category=interaction.channel.category)
             await interaction.followup.send(f"The #telldm channel was not found, so I created it in the same category.")
 
         # Step 2: Send the feedback message to #telldm
-        feedback_message = await telldm_channel.send(f"Feedback from {interaction.user.name}: {suggestions}")
-        await interaction.followup.send(f"Your feedback has been sent to {telldm_channel.mention}.")
+        feedback_message = await feedback_channel.send(f"Feedback from {interaction.user.name}: {suggestions}")
+        await interaction.followup.send(f"Your feedback has been sent to {feedback_channel.mention}.")
 
         # Step 3: Fetch all messages from the #telldm channel
         messages = []
-        async for message in telldm_channel.history(limit=100):
+        async for message in feedback_channel.history(limit=100):
             messages.append(f"{message.author.name}: {message.content}")
 
         if not messages:
-            await interaction.followup.send(f"No messages found in {telldm_channel.mention}.")
+            await interaction.followup.send(f"No messages found in {feedback_channel.mention}.")
             return
 
         # Step 4: Get the last message for focus in summarization
@@ -233,12 +233,12 @@ def setup_commands(tree, get_assistant_response):
         # Step 6: Ensure the response doesn't exceed Discord's message length limit
         if len(response) > 2000:
             for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-                await telldm_channel.send(chunk)
+                await feedback_channel.send(chunk)
         else:
-            await telldm_channel.send(response)
+            await feedback_channel.send(response)
 
         # Step 7: Confirm that the feedback was processed
-        await interaction.followup.send(f"Feedback has been processed and a summary has been posted in {telldm_channel.mention}.")
+        await interaction.followup.send(f"Feedback has been processed and a summary has been posted in {feedback_channel.mention}.")
 
     class ChannelInCategoryTransformer(app_commands.Transformer):
         async def transform(self, interaction: discord.Interaction, value: str) -> discord.TextChannel:

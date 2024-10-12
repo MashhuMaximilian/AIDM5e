@@ -1,4 +1,3 @@
-# aidm.py
 import logging
 import bot_commands
 from pathlib import Path
@@ -17,6 +16,9 @@ try:
         system_prompt = f.read()
 except FileNotFoundError:
     raise FileNotFoundError(f"Could not find the file: {file_path}")
+
+# Create a single instance of VoiceRecorder
+recorder = transcription.VoiceRecorder()
 
 @client.event
 async def on_ready():
@@ -37,24 +39,17 @@ async def on_voice_state_update(member, before, after):
             try:
                 voice_client = await after.channel.connect()  # Join the voice channel
                 logging.info(f"Bot has joined the voice channel: {after.channel.name}")
-                recorder = transcription.VoiceRecorder()  # Create a recorder instance
                 await recorder.capture_audio(voice_client)  # Start capturing audio
             except discord.ClientException:
                 logging.info(f"Already connected to {after.channel.name}")
 
     # Check if a user has left a voice channel
     elif before.channel and len(before.channel.members) == 1 and before.channel.members[0].id == client.user.id:
-        # If the bot is the only one left, summarize and then disconnect
+        # If the bot is the only one left, let capture_audio handle the summarization and disconnect
         voice_client = discord.utils.get(client.voice_clients, channel=before.channel)
         if voice_client:
-            logging.info(f"Summarizing transcript before leaving the voice channel {before.channel.name}...")
-            
-            # Summarize transcript before disconnecting
-            recorder = transcription.VoiceRecorder()
-            await recorder.summarize_transcript(before.channel.id)
-            
-            await voice_client.disconnect()  # Leave the voice channel
-            logging.info(f"Bot has left the voice channel: {before.channel.name}")
+            logging.info(f"Bot is the last member in the voice channel: {before.channel.name}.")
+            # No need to summarize here; it will be handled in capture_audio.
 
 # Run the bot
 def run_bot():
