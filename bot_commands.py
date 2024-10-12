@@ -2,6 +2,26 @@
 
 import discord
 from discord import app_commands
+from message_handlers import send_response_in_chunks
+
+
+async def send_to_tellme(interaction, response):
+    # Get the current channel
+    current_channel = interaction.channel
+    category = current_channel.category
+
+    # Check if #telldm exists in the same category
+    tell_channel = discord.utils.get(category.text_channels, name='telldm')
+    if not tell_channel:
+        # Create the #telldm channel if it doesn't exist
+        tell_channel = await category.create_text_channel('telldm')
+
+    # Send the response in chunks
+    await send_response_in_chunks(tell_channel, response)
+
+    # Inform the user where the response was sent
+    await interaction.followup.send(f"Response has been posted to {tell_channel.mention}.")
+
 
 
 def setup_commands(tree, get_assistant_response):
@@ -41,14 +61,8 @@ def setup_commands(tree, get_assistant_response):
 
         # Get response from the assistant
         response = await get_assistant_response(prompt, interaction.channel.id)
-
-        # Check if the response is longer than 2000 characters and split it
-        if len(response) > 2000:
-            chunks = [response[i:i + 2000] for i in range(0, len(response), 2000)]
-            for chunk in chunks:
-                await interaction.followup.send(chunk)
-        else:
-            await interaction.followup.send(response)  # Send the final response if it's within the limit
+        # Call the send_to_tellme function
+        await send_to_tellme(interaction, response)
 
 
     @tree.command(name="askdm", description="Inquire about rules, lore, monsters, and more.")
@@ -89,12 +103,7 @@ def setup_commands(tree, get_assistant_response):
         response = await get_assistant_response(prompt, interaction.channel.id)
 
         # Check if the response is longer than 2000 characters and split it
-        if len(response) > 2000:
-            chunks = [response[i:i + 2000] for i in range(0, len(response), 2000)]
-            for chunk in chunks:
-                await interaction.followup.send(chunk)
-        else:
-            await interaction.followup.send(response)  # Send the final response if it's within the limit
+        await send_to_tellme(interaction, response)
 
     @tree.command(name="summarize", description="Summarize all messages starting from a given message ID.")
     async def summarize(interaction: discord.Interaction, start: str):
@@ -140,54 +149,7 @@ def setup_commands(tree, get_assistant_response):
             await interaction.followup.send(f"The #session-summary channel was not found, so I created it in the same category.")
 
         # Send the summary to the session-summary channel
-        if len(response) > 2000:
-            for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-                await summary_channel.send(chunk)
-        else:
-            await summary_channel.send(response)
-
-        await interaction.followup.send(f"Summary has been posted to {summary_channel.mention}.")
-# uncomment this function if it does not work.
-        # async def summarize(interaction: discord.Interaction, start: str):
-        #     await interaction.response.defer()  # Defer the response while processing
-
-        #     # Convert the start ID to an integer
-        #     try:
-        #         start_id = int(start)
-        #     except ValueError:
-        #         await interaction.followup.send("Invalid message ID format. Please provide a valid message ID.")
-        #         return
-
-        #     # Fetch the channel and the message
-        #     channel = interaction.channel
-        #     try:
-        #         start_message = await channel.fetch_message(start_id)
-        #     except discord.errors.NotFound:
-        #         await interaction.followup.send(f"Message with ID {start_id} not found.")
-        #         return
-
-        #     # Fetch all messages from the channel starting from the specified message
-        #     messages = []
-        #     async for message in channel.history(after=start_message, limit=100):
-        #         messages.append(f"{message.author.name}: {message.content}")
-
-        #     if not messages:
-        #         await interaction.followup.send("No messages found after the specified message.")
-        #         return
-
-        #     # Create a single string to summarize
-        #     conversation_history = "\n".join(messages)
-
-        #     # Send the conversation to the assistant for summarization
-        #     prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
-        #     response = await get_assistant_response(prompt, interaction.channel.id)
-
-        #     # Ensure the response doesn't exceed Discord's message length limit
-        #     if len(response) > 2000:
-        #         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-        #             await interaction.followup.send(chunk)
-        #     else:
-        #         await interaction.followup.send(response)
+        await send_response_in_chunks(response)
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):
@@ -230,12 +192,8 @@ def setup_commands(tree, get_assistant_response):
 
         response = await get_assistant_response(prompt, interaction.channel.id)
 
-        # Step 6: Ensure the response doesn't exceed Discord's message length limit
-        if len(response) > 2000:
-            for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-                await feedback_channel.send(chunk)
-        else:
-            await feedback_channel.send(response)
+        await send_response_in_chunks(response)
+
 
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a summary has been posted in {feedback_channel.mention}.")
@@ -265,7 +223,7 @@ def setup_commands(tree, get_assistant_response):
 
         # Convert the string target_channel (ID) to a TextChannel object
         channel = interaction.guild.get_channel(int(target_channel))
-        
+
         # Check that the target channel is in the same category (this is a safety check)
         if channel.category != interaction.channel.category:
             await interaction.followup.send("You can only send messages to channels in the same category.")
@@ -282,7 +240,8 @@ def setup_commands(tree, get_assistant_response):
                 message = await interaction.channel.fetch_message(msg_id)
 
                 if message.content:
-                    await channel.send(content=f"{message.author} said: {message.content}")
+                    # Use send_response_in_chunks to send long messages
+                    await send_response_in_chunks(channel, f"{message.author} said: {message.content}")
 
                 if message.attachments:
                     for attachment in message.attachments:

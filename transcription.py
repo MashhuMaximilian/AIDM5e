@@ -24,7 +24,7 @@ class VoiceRecorder:
 
 
 
-    async def capture_audio(self, voice_client, duration=240):
+    async def capture_audio(self, voice_client, duration=250):
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
