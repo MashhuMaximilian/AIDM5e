@@ -51,6 +51,9 @@ async def on_voice_state_update(member, before, after):
             logging.info(f"Bot is the last member in the voice channel: {before.channel.name}.")
             # No need to summarize here; it will be handled in capture_audio.
 
+bot_commands.setup_commands(tree, get_assistant_response)
+
+
 # Run the bot
 def run_bot():
     client.run(DISCORD_BOT_TOKEN)

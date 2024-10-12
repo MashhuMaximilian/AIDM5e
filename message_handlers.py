@@ -1,3 +1,4 @@
+
 import aiohttp
 import logging
 from config import client
@@ -5,6 +6,7 @@ from assistant_interactions import get_assistant_response
 import PyPDF2
 import io
 from docx import Document
+import docx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,8 +22,8 @@ async def on_message(message):
     user_message = message.content.strip() if message.content else "No message provided."
     channel_name = message.channel.name
 
-    # Automatically respond to messages in the #tefeedbacklldm channel
-    if channel_name == "feedback":
+    # Automatically respond to messages in the #telldm channel
+    if channel_name == "telldm":
         await send_assistant_response(user_message, message.channel)
         return  # Exit after responding
 
@@ -46,6 +48,7 @@ async def handle_attachments(attachment, user_message, channel):
             if resp.status == 200:
                 logging.info(f"Successfully retrieved attachment: {attachment.filename}")
                 content_type = attachment.content_type  # Get content type to differentiate files
+                logging.info(f"Attachment content type: {content_type}")  # Log the content type
 
                 if "image" in content_type:
                     # Process image files
@@ -66,15 +69,18 @@ async def handle_attachments(attachment, user_message, channel):
                     ]
                     await send_assistant_response(gpt_request_content, channel)
 
-                elif content_type in ["text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
-                    # Process .txt, .docx, and .doc files
+                # Update the condition to handle text files with different content types
+                elif "text/plain" in content_type:  # Check if "text/plain" is part of content type
                     file_data = await resp.read()  # Read the file data
-                    extracted_text = await extract_text_from_file(file_url, content_type)  # Call the unified extraction function
-                    combined_message = f"{user_message}\n\nExtracted text:\n{extracted_text}"
+                    file_content = file_data.decode("utf-8")  # Decode bytes to string
+                    combined_message = f"{user_message}\n\nExtracted text:\n{file_content}"
                     gpt_request_content = [
                         {"type": "text", "text": combined_message}
                     ]
                     await send_assistant_response(gpt_request_content, channel)
+
+                else:
+                    logging.error(f"Unsupported file type: {content_type}")
 
             else:
                 logging.error(f"Failed to retrieve attachment: {attachment.filename}, Status: {resp.status}")
@@ -90,23 +96,26 @@ def extract_text_from_pdf(pdf_data):
 
 async def extract_text_from_file(file_url, content_type):
     """Extract text based on file type."""
-    if "text/plain" in content_type:
+    try:
         async with aiohttp.ClientSession() as session:
             async with session.get(file_url) as resp:
-                return await resp.text()  # Directly return the text for .txt files
+                if content_type == "text/plain" or file_url.endswith('.txt'):
+                    return await resp.text()  # Directly return the text for .txt files
 
-    elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
-        # For .docx files
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                docx_data = await resp.read()
-                return extract_text_from_docx(docx_data)
+                elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
+                    # For .docx files
+                    docx_data = await resp.read()
+                    return extract_text_from_docx(docx_data)
 
-    elif "application/msword" in content_type:
-        # For .doc files (you can implement extraction logic here as needed)
-        raise NotImplementedError("Extraction from .doc files is not implemented.")
-    else:
-        raise ValueError("Unsupported file format.")
+                elif "application/msword" in content_type:
+                    # For .doc files (you can implement extraction logic here as needed)
+                    raise NotImplementedError("Extraction from .doc files is not implemented.")
+                
+                else:
+                    raise ValueError("Unsupported file format.")
+    except Exception as e:
+        logging.error(f"Error extracting text from file: {e}")
+
 
 def extract_text_from_docx(docx_data):
     """Extract text from a DOCX file."""
@@ -124,8 +133,8 @@ async def send_assistant_response(gpt_request_content, channel):
         await send_response_in_chunks(channel, response)
 
 async def send_response_in_chunks(channel, response):
-    if len(response) > 2000:
-        for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+    if len(response) > 1999:
+        for chunk in [response[i:i + 1999] for i in range(0, len(response), 1999)]:
             await channel.send(chunk)
     else:
         await channel.send(response)

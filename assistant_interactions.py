@@ -104,6 +104,9 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
             # Create or get a thread for the conversation
             thread_id = await create_or_get_thread(session, user_message, channel_id, category_id)
 
+            # Log the user message being sent
+            logging.info(f"Sending user message to assistant: {user_message}")
+
             # Add the user's message to the conversation history
             conversation_key = category_id if category_id else channel_id
             if conversation_key not in category_conversations:
@@ -128,4 +131,5 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
             return assistant_response
 
     except Exception as e:
+        logging.error(f"Error during the assistant interaction: {str(e)}")  # Log the error
         return f"Error during the assistant interaction: {str(e)}"
