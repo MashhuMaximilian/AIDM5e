@@ -20,9 +20,11 @@ class VoiceRecorder:
     def __init__(self):
         self.voice_client = None
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
+        self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
 
 
-    async def capture_audio(self, voice_client, duration=15):
+
+    async def capture_audio(self, voice_client, duration=240):
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
@@ -99,7 +101,7 @@ class VoiceRecorder:
 
         # Clear contents of transcript.txt
         try:
-            with open('transcript.txt', 'w', encoding='utf-8') as file:
+            with open(self.transcript_path, 'w', encoding='utf-8') as file:
                 file.truncate(0)  # Clear the file
             logging.info("Transcript file cleared.")
         except Exception as e:
@@ -139,10 +141,10 @@ class VoiceRecorder:
                         ) as response:
                             if response.status == 200:
                                 transcription = await response.json()
-                                logging.info(f"Received transcription from Whisper API: {transcription['text']}")
+                                logging.info(f"Received transcription from Whisper API: {transcription['text'][:100]}")
 
                                 # Append transcription to transcript.txt
-                                with open('transcript.txt', 'a', encoding='utf-8') as transcript_file:
+                                with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
                                     transcript_file.write(f"{transcription['text']}\n")
                                 break  # Exit the loop if successful
                             else:
@@ -174,14 +176,54 @@ class VoiceRecorder:
                 logging.info("Created new 'session-summary' channel.")
 
             try:
-                with open('transcript.txt', 'r', encoding='utf-8') as transcript_file:
+                with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
                     transcript_content = transcript_file.read()
                     logging.info("Transcript content loaded for summarization.")
 
-                # Send the transcript to the assistant for summarization
                 if transcript_content:
-                    # Ensure to pass the required channel_id for summarization
-                    await get_assistant_response(summary_channel.id, transcript_content)  # Use the correct call for summarization
+                    characters_per_chunk = 14000
+                    # Split transcript_content into chunks and summarize each
+                    chunks = [transcript_content[i:i + characters_per_chunk] for i in range(0, len(transcript_content), characters_per_chunk)]
+
+                    # Summarize the first chunk with a specific prompt
+                    first_prompt = (
+                        "Summarize the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
+                        "It may be a lot of random conversation here. Summarize the events of this D&D session in detail, "
+                        "assuming the players might forget everything by next week. Include all important story elements, "
+                        "player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail "
+                        "so the players can pick up where they left off without confusion. Mention character names, key decisions, "
+                        "challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. "
+                        "End the summary by outlining what the players need to remember or focus on for the next session. "
+                        "I remind you, it may be a lot of random conversation here. There will probably be more batches of this summary."
+                        f"\n\n{chunks[0]}"
+                    )
+
+                    initial_summary = await get_assistant_response(first_prompt, summary_channel.id)
+                    if "Error" in initial_summary:
+                        await summary_channel.send(initial_summary)  # Send the error to the channel
+                    else:
+                        await send_response_in_chunks(summary_channel, initial_summary)
+
+                    # Summarize subsequent chunks with a different prompt
+                    for chunk in chunks[1:]:
+                        continue_prompt = (
+                            "Please summarize the following text in the same detailed manner as before. "
+                            "This is part of our D&D gameplay session, which may include random conversations. "
+                            "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
+                            "Include character names, major decisions, challenges faced, and any unresolved plot points. "
+                            "Highlight any significant revelations or twists. There will be more chunks to summarize. "
+                            "Here is the next batch:\n\n"
+                            f"{chunk}"
+                        )
+
+                        continued_summary = await get_assistant_response(continue_prompt, summary_channel.id)
+                        
+                        if "Error" in continued_summary:
+                            await summary_channel.send(continued_summary)  # Send the error to the channel
+                        else:
+                            await send_response_in_chunks(summary_channel, continued_summary)
+
+
                 else:
                     logging.warning("Transcript is empty. No summary generated.")
 

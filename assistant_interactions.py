@@ -94,8 +94,14 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
         async with aiohttp.ClientSession() as session:
             current_time = datetime.now()
             channel = client.get_channel(channel_id)
+
+            # Log the channel ID for debugging purposes
+            logging.info(f"Attempting to fetch channel with ID: {channel_id}")
+            
             if channel is None:
-                return f"Error: Channel {channel_id} not found."
+                error_message = f"Error: Channel with ID {channel_id} not found."
+                logging.error(error_message)
+                return error_message  # Return an error message without sending to Discord
 
             # Determine category ID
             if category_id is None and channel.category_id:
@@ -105,7 +111,7 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
             thread_id = await create_or_get_thread(session, user_message, channel_id, category_id)
 
             # Log the user message being sent
-            logging.info(f"Sending user message to assistant: {user_message}")
+            logging.info(f"Sending user message to assistant: {user_message[:100]}")
 
             # Add the user's message to the conversation history
             conversation_key = category_id if category_id else channel_id
