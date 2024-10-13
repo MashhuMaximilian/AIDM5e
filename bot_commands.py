@@ -5,160 +5,8 @@ from discord import app_commands
 from message_handlers import send_response_in_chunks
 from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
-import aiohttp
-import logging
 
-# Dictionary to store thread IDs for the #telldm channel
-category_threads = {}
-category_conversations = {}
-
-async def create_openai_thread(session, user_message, category_id):
-    """Create a new OpenAI thread and store its ID for the category."""
-    logging.info(f"Creating new OpenAI thread for category {category_id}")
-    
-    async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
-        "messages": [{"role": "user", "content": user_message}]
-    }) as thread_response:
-        if thread_response.status != 200:
-            raise Exception(f"Error creating thread: {await thread_response.text()}")
-        thread_data = await thread_response.json()
-        thread_id = thread_data['id']
-        category_threads[category_id] = thread_id  # Store thread ID for the category
-        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id}")
-    
-    return thread_id
-
-async def send_to_telldm(interaction, response):
-    """Send a response to the #telldm channel and the corresponding OpenAI thread."""
-    
-    # Get the current channel and its category
-    current_channel = interaction.channel
-    category = current_channel.category
-    category_id = category.id  # Use the category ID for OpenAI thread management
-
-    # Initialize a variable to hold the thread ID
-    thread_id = None
-    
-    # Check if a thread already exists for this category
-    if category_id in category_threads:
-        thread_id = category_threads[category_id]
-        logging.info(f"Reusing existing OpenAI thread ID for category {category_id}: {thread_id}")
-    else:
-        # Create a new OpenAI thread if it doesn't exist
-        async with aiohttp.ClientSession() as session:
-            thread_id = await create_openai_thread(session, response, category_id)
-    
-    # Now send the response to the OpenAI thread
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f"https://api.openai.com/v1/threads/{thread_id}/messages", headers=HEADERS, json={
-            "role": "assistant",  # Assuming the bot acts as the assistant
-            "content": response
-        }) as send_response:
-            if send_response.status != 200:
-                raise Exception(f"Error sending message to OpenAI thread: {await send_response.text()}")
-
-    # Find or create the #telldm channel in the same category
-    telldm_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=category)
-    if not telldm_channel:
-        # Create the channel if it doesn't exist
-        telldm_channel = await interaction.guild.create_text_channel('telldm', category=category)
-    
-    # Send the response to the #telldm Discord channel
-    if telldm_channel:
-        await send_response_in_chunks(telldm_channel, response)  # Send the response to the #telldm channel
-        logging.info(f"Response sent to #telldm channel: {response[:100]}")
-    else:
-        logging.error("Channel #telldm not found or could not be created.")
-
-    # Inform the user where the response was sent, including a link to the channel
-    await interaction.followup.send(f"Response has been posted to the OpenAI thread and the {telldm_channel.mention} channel.")
-
-async def fetch_discord_threads(category):
-    """Fetches all available threads in a given category."""
-    discord_threads = []
-    for channel in category.channels:
-        if isinstance(channel, discord.Thread):
-            discord_threads.append(channel)
-    return discord_threads
-
-# Function to summarize the conversation
-async def summarize_conversation(interaction, conversation_history, options, query):
-    if options['type'] == 'messages':
-        history = "\n".join(conversation_history)
-    elif options['type'] == 'from':
-        start_index = options['start_index']
-        history = "\n".join(conversation_history[start_index:])
-    elif options['type'] == 'between':
-        start_index, end_index = options['start_index'], options['end_index']
-        history = "\n".join(conversation_history[start_index:end_index])
-    else:
-        logging.error("Invalid options for summarization.")
-        return "Invalid options for summarization."
-
-    prompt = (f"Summarize the following conversation history or messages. Only focus on essential information."
-              f"Here is the conversation history:\n\n{history}"
-              f"Here are other requests I want about the summary:\n\n{query}"
-              )
-    
-    response = await get_assistant_response(prompt, interaction.channel.id)
-    return response
-
-async def fetch_conversation_history(channel, start=None, end=None, message_ids=None):
-    # Initialize an empty list to store the conversation history
-    conversation_history = []
-
-    # Handle 'from' option
-    if start is not None:
-        try:
-            start_id = int(start)
-            start_message = await channel.fetch_message(start_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid start message ID format or message not found."
-
-        # Fetch messages after the start message
-        async for message in channel.history(after=start_message, limit=100):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        if not conversation_history:
-            return None, "No messages found after the specified message."
-
-        return conversation_history, {'type': 'from', 'start_index': 0}
-
-    # Handle 'between' option
-    if end is not None:
-        try:
-            end_id = int(end)
-            end_message = await channel.fetch_message(end_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid end message ID format or message not found."
-
-        # Fetch messages between the start and end messages
-        async for message in channel.history(after=start_message, before=end_message):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        if not conversation_history:
-            return None, "No messages found between the specified messages."
-
-        return conversation_history, {
-            'type': 'between',
-            'start_index': 0,
-            'end_index': len(conversation_history)  # Length will determine where to slice
-        }
-
-    # Handle 'messages' option
-    if message_ids is not None:
-        message_ids_list = message_ids.split(',')
-        for message_id in message_ids_list:
-            try:
-                message = await channel.fetch_message(int(message_id.strip()))
-                conversation_history.append(f"{message.author.name}: {message.content}")
-            except (ValueError, discord.errors.NotFound):
-                return None, f"Message ID {message_id.strip()} not found."
-
-        return conversation_history, {'type': 'messages'}
-
-    # Error if no valid options provided
-    return None, "You must provide at least one of the options."
+from helper_functions import *
 
 def setup_commands(tree, get_assistant_response):
 
@@ -323,55 +171,120 @@ def setup_commands(tree, get_assistant_response):
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a summary has been posted in {feedback_channel.mention}.")
 
+
+
     class ChannelInCategoryTransformer(app_commands.Transformer):
         async def transform(self, interaction: discord.Interaction, value: str) -> discord.TextChannel:
-            # Convert the value (which should be a channel ID) into a channel object
             channel = interaction.guild.get_channel(int(value))
             if channel and channel.category == interaction.channel.category:
                 return channel
-            raise app_commands.TransformError(f"Channel is not in the same category as the current channel.")
+            raise app_commands.TransformError("Channel is not in the same category.")
 
         async def autocomplete(self, interaction: discord.Interaction, current: str):
-            # Filter channels in the same category
             current_category = interaction.channel.category
             channels_in_category = [
                 app_commands.Choice(name=channel.name, value=str(channel.id))
                 for channel in interaction.guild.text_channels if channel.category == current_category
             ]
             return channels_in_category
+    class ThreadInChannelTransformer(app_commands.Transformer):
+        async def transform(self, interaction: discord.Interaction, value: str) -> discord.Thread:
+            thread = interaction.guild.get_thread(int(value))
+            if thread and thread.parent_id == interaction.target_channel.id:
+                return thread
+            raise app_commands.TransformError("Thread does not belong to the specified channel.")
 
-    @tree.command(name="send", description="Send specified messages or files to another channel in the same category.")
-    @app_commands.describe(message_ids="Comma-separated message IDs", target_channel="Select the target channel")
-    @app_commands.autocomplete(target_channel=ChannelInCategoryTransformer().autocomplete)
-    async def send(interaction: discord.Interaction, message_ids: str, target_channel: str):
+        async def autocomplete(self, interaction: discord.Interaction, current: str):
+            # Get the selected target channel's threads
+            target_channel = interaction.data.get('options')[0].get('value')  # Get the ID from the previous selection
+            if target_channel:
+                target_channel = interaction.guild.get_channel(int(target_channel))
+                if target_channel:
+                    threads = await fetch_discord_threads(target_channel)
+                    return [
+                        app_commands.Choice(name=thread.name, value=str(thread.id))
+                        for thread in threads
+                    ]
+            return []
+
+
+    @tree.command(name="send", description="Send specified messages to another channel.")
+    @app_commands.describe(
+        target_channel="Channel(s) to send messages to (select from the same category).",
+        target_thread="Select a thread in the target channel (optional).",
+        start="Message ID to start from (if applicable).",
+        end="Message ID to end at (if applicable).",
+        message_ids="Individual message IDs to send (comma-separated if multiple).",
+        summarize_options="Options for summarization: yes, no, only summary."
+    )
+    @app_commands.choices(summarize_options=[
+        app_commands.Choice(name="Yes", value="yes"),
+        app_commands.Choice(name="No", value="no"),
+        app_commands.Choice(name="Only Summary", value="only summary")
+    ])
+    async def send(
+        interaction: discord.Interaction,
+        target_channel: ChannelInCategoryTransformer,
+        target_thread: ThreadInChannelTransformer = None,
+        start: str = None,
+        end: str = None,
+        message_ids: str = None,
+        summarize_options: str = "no"
+    ):
         await interaction.response.defer()  # Defer the response while processing
 
-        # Convert the string target_channel (ID) to a TextChannel object
-        channel = interaction.guild.get_channel(int(target_channel))
+        # Fetch the current channel
+        channel = interaction.channel
 
-        # Check that the target channel is in the same category (this is a safety check)
-        if channel.category != interaction.channel.category:
-            await interaction.followup.send("You can only send messages to channels in the same category.")
+        # Fetch conversation history based on provided parameters
+        conversation_history, options_or_error = await fetch_conversation_history(channel, start, end, message_ids)
+
+        # Check if the response is an error message
+        if isinstance(options_or_error, str):
+            await interaction.followup.send(options_or_error)  # Send error message
             return
 
-        # Proceed with sending the messages if categories match
-        ids = message_ids.strip("[]").split(",")
-        ids = [id.strip() for id in ids]
+        # Check if the selected target_channel is in the same category
+        if target_channel.category == channel.category:
+            # Fetch threads for the selected target_channel
+            discord_threads = await fetch_discord_threads(target_channel)
 
-        try:
-            for msg_id in ids:
-                msg_id = int(msg_id.strip())
-                # Retrieve the message object
-                message = await interaction.channel.fetch_message(msg_id)
+            # If there are threads, send them as options to the user
+            if discord_threads:
+                thread_names = ", ".join(thread.name for thread in discord_threads)
+                await interaction.followup.send(f"Available threads in {target_channel.name}: {thread_names}")
+            else:
+                await interaction.followup.send(f"No threads available in {target_channel.name}.")
 
-                if message.content:
-                    # Use send_response_in_chunks to send long messages
-                    await send_response_in_chunks(channel, f"{message.author} said: {message.content}")
+            # Use the target thread if specified, otherwise use the target channel directly
+            target = target_thread if target_thread else target_channel
 
-                if message.attachments:
-                    for attachment in message.attachments:
-                        await channel.send(file=await attachment.to_file())
+            # Flag to track if messages were sent
+            messages_sent = False
 
-            await interaction.followup.send(f"Messages and files sent to {channel.mention}")
-        except Exception as e:
-            await interaction.followup.send(f"Error sending messages: {str(e)}")
+            # Handle summarization based on the summarize_options
+            if summarize_options == "yes" or summarize_options == "no":
+                # Send messages first
+                for message in conversation_history:
+                    await send_response_in_chunks(target, message)
+                    messages_sent = True
+
+            # Now handle summary
+            if summarize_options == "yes":
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, "")
+                if summary:
+                    await send_response_in_chunks(target, summary)
+                await interaction.followup.send("Messages and summary sent successfully.")
+            
+            elif summarize_options == "no":
+                if messages_sent:
+                    await interaction.followup.send("Messages sent successfully.")
+            
+            elif summarize_options == "only summary":
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, "")
+                if summary:
+                    await send_response_in_chunks(target, summary)
+                await interaction.followup.send("Summary sent successfully.")
+
+        else:
+            await interaction.followup.send(f"Cannot send messages to {target_channel.name}. Must be in the same category.")

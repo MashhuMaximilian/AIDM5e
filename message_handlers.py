@@ -6,7 +6,6 @@ from assistant_interactions import get_assistant_response
 import PyPDF2
 import io
 from docx import Document
-import docx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

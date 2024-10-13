@@ -5,7 +5,7 @@ import aiohttp
 import asyncio
 import logging
 from config import WHISPER_API_URL, WHISPER_API_KEY
-from assistant_interactions import get_assistant_response, create_or_get_thread
+from assistant_interactions import get_assistant_response
 from pathlib import Path
 from message_handlers import send_response_in_chunks
 

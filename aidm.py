@@ -1,8 +1,7 @@
 import logging
 import bot_commands
 from pathlib import Path
-from config import DISCORD_BOT_TOKEN, ASSISTANT_ID, client, tree, HEADERS, category_threads, category_conversations, channel_character_sheets
-from message_handlers import on_message, send_response_in_chunks
+from config import *
 from assistant_interactions import get_assistant_response
 import transcription  
 import discord
