@@ -3,7 +3,7 @@
 import discord
 from discord import app_commands
 from message_handlers import send_response_in_chunks
-from assistant_interactions import create_or_get_thread
+from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
 import aiohttp
 import logging
@@ -73,6 +73,91 @@ async def send_to_telldm(interaction, response):
     # Inform the user where the response was sent, including a link to the channel
     await interaction.followup.send(f"Response has been posted to the OpenAI thread and the {telldm_channel.mention} channel.")
 
+async def fetch_discord_threads(category):
+    """Fetches all available threads in a given category."""
+    discord_threads = []
+    for channel in category.channels:
+        if isinstance(channel, discord.Thread):
+            discord_threads.append(channel)
+    return discord_threads
+
+async def summarize_conversation(interaction, conversation_history, options):
+    if options['type'] == 'messages':
+        history = "\n".join(conversation_history)
+    elif options['type'] == 'from':
+        start_index = options['start_index']
+        history = "\n".join(conversation_history[start_index:])
+    elif options['type'] == 'between':
+        start_index, end_index = options['start_index'], options['end_index']
+        history = "\n".join(conversation_history[start_index:end_index])
+    else:
+        logging.error("Invalid options for summarization.")
+        return "Invalid options for summarization."
+
+    prompt = (f"Summarize the following conversation history or messages. Only focus on essential information."
+              f"Here is the conversation history:\n\n{history}")
+
+    # Call the assistant API
+    response = await get_assistant_response(prompt, interaction.channel.id)
+
+    return response
+
+async def fetch_conversation_history(channel, start=None, end=None, message_ids=None):
+    # Initialize an empty list to store the conversation history
+    conversation_history = []
+
+    # Handle 'from' option
+    if start is not None:
+        try:
+            start_id = int(start)
+            start_message = await channel.fetch_message(start_id)
+        except (ValueError, discord.errors.NotFound):
+            return None, "Invalid start message ID format or message not found."
+
+        # Fetch messages after the start message
+        async for message in channel.history(after=start_message, limit=100):
+            conversation_history.append(f"{message.author.name}: {message.content}")
+
+        if not conversation_history:
+            return None, "No messages found after the specified message."
+
+        return conversation_history, {'type': 'from', 'start_index': 0}
+
+    # Handle 'between' option
+    if end is not None:
+        try:
+            end_id = int(end)
+            end_message = await channel.fetch_message(end_id)
+        except (ValueError, discord.errors.NotFound):
+            return None, "Invalid end message ID format or message not found."
+
+        # Fetch messages between the start and end messages
+        async for message in channel.history(after=start_message, before=end_message):
+            conversation_history.append(f"{message.author.name}: {message.content}")
+
+        if not conversation_history:
+            return None, "No messages found between the specified messages."
+
+        return conversation_history, {
+            'type': 'between',
+            'start_index': 0,
+            'end_index': len(conversation_history)  # Length will determine where to slice
+        }
+
+    # Handle 'messages' option
+    if message_ids is not None:
+        message_ids_list = message_ids.split(',')
+        for message_id in message_ids_list:
+            try:
+                message = await channel.fetch_message(int(message_id.strip()))
+                conversation_history.append(f"{message.author.name}: {message.content}")
+            except (ValueError, discord.errors.NotFound):
+                return None, f"Message ID {message_id.strip()} not found."
+
+        return conversation_history, {'type': 'messages'}
+
+    # Error if no valid options provided
+    return None, "You must provide at least one of the options."
 
 def setup_commands(tree, get_assistant_response):
 
@@ -154,52 +239,38 @@ def setup_commands(tree, get_assistant_response):
 
         # Check if the response is longer than 2000 characters and split it
         await send_to_telldm(interaction, response)
-
-    @tree.command(name="summarize", description="Summarize all messages starting from a given message ID.")
-    async def summarize(interaction: discord.Interaction, start: str):
+    
+    @tree.command(name="summarize", description="Summarize messages based on different options.")
+    @app_commands.describe(
+        start="Message ID to start from (if applicable).",
+        end="Message ID to end at (if applicable).",
+        message_ids="Individual message IDs to summarize."
+    )
+    async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None):
         await interaction.response.defer()  # Defer the response while processing
 
-        # Convert the start ID to an integer
-        try:
-            start_id = int(start)
-        except ValueError:
-            await interaction.followup.send("Invalid message ID format. Please provide a valid message ID.")
-            return
-
-        # Fetch the channel and the message
+        # Fetch the channel
         channel = interaction.channel
-        try:
-            start_message = await channel.fetch_message(start_id)
-        except discord.errors.NotFound:
-            await interaction.followup.send(f"Message with ID {start_id} not found.")
+        
+        # Fetch conversation history based on provided parameters
+        conversation_history, options_or_error = await fetch_conversation_history(channel, start, end, message_ids)
+
+        # Check if the response is an error message
+        if isinstance(options_or_error, str):
+            await interaction.followup.send(options_or_error)  # Send error message
             return
 
-        # Fetch all messages from the channel starting from the specified message
-        messages = []
-        async for message in channel.history(after=start_message, limit=100):
-            messages.append(f"{message.author.name}: {message.content}")
+        options = options_or_error  # Assign the options for summarization
 
-        if not messages:
-            await interaction.followup.send("No messages found after the specified message.")
-            return
+        # Summarize the conversation
+        response = await summarize_conversation(interaction, conversation_history, options)
 
-        # Create a single string to summarize
-        conversation_history = "\n".join(messages)
-
-        # Send the conversation to the assistant for summarization
-        prompt = f"Summarize the following conversation. Summarize the events of this D&D session in detail, assuming the players might forget everything by next week. Include all important story elements, player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail so the players can pick up where they left off without confusion. Mention character names, key decisions, challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. End the summary by outlining what the players need to remember or focus on for the next session. Here is where you start:\n\n{conversation_history}"
-        response = await get_assistant_response(prompt, interaction.channel.id)
-
-        # Check if 'session-summary' channel exists in the same category
-        summary_channel = discord.utils.get(interaction.channel.category.channels, name="session-summary")
-
-        if summary_channel is None:
-            # Create the 'session-summary' channel in the same category
-            summary_channel = await interaction.guild.create_text_channel(name="session-summary", category=interaction.channel.category)
-            await interaction.followup.send(f"The #session-summary channel was not found, so I created it in the same category.")
-
-        # Send the summary to the session-summary channel
-        await send_response_in_chunks(response)
+        # Send the summarized response in chunks
+        if response:  # Ensure response is not empty
+            await send_response_in_chunks(interaction.channel, response)  # Send only here
+            await interaction.followup.send("Summary has been sent.")  # Optional acknowledgment
+        else:
+            await interaction.followup.send("No content to summarize.")  # Optional: handle empty response
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):
