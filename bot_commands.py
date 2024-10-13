@@ -81,7 +81,8 @@ async def fetch_discord_threads(category):
             discord_threads.append(channel)
     return discord_threads
 
-async def summarize_conversation(interaction, conversation_history, options):
+# Function to summarize the conversation
+async def summarize_conversation(interaction, conversation_history, options, query):
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)
     elif options['type'] == 'from':
@@ -95,11 +96,11 @@ async def summarize_conversation(interaction, conversation_history, options):
         return "Invalid options for summarization."
 
     prompt = (f"Summarize the following conversation history or messages. Only focus on essential information."
-              f"Here is the conversation history:\n\n{history}")
-
-    # Call the assistant API
+              f"Here is the conversation history:\n\n{history}"
+              f"Here are other requests I want about the summary:\n\n{query}"
+              )
+    
     response = await get_assistant_response(prompt, interaction.channel.id)
-
     return response
 
 async def fetch_conversation_history(channel, start=None, end=None, message_ids=None):
@@ -240,13 +241,15 @@ def setup_commands(tree, get_assistant_response):
         # Check if the response is longer than 2000 characters and split it
         await send_to_telldm(interaction, response)
     
+   
     @tree.command(name="summarize", description="Summarize messages based on different options.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
-        message_ids="Individual message IDs to summarize."
+        message_ids="Individual message IDs to summarize.",
+        query="Additional requests or context for the summary."
     )
-    async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None):
+    async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None):
         await interaction.response.defer()  # Defer the response while processing
 
         # Fetch the channel
@@ -263,14 +266,15 @@ def setup_commands(tree, get_assistant_response):
         options = options_or_error  # Assign the options for summarization
 
         # Summarize the conversation
-        response = await summarize_conversation(interaction, conversation_history, options)
+        response = await summarize_conversation(interaction, conversation_history, options, query)
 
         # Send the summarized response in chunks
         if response:  # Ensure response is not empty
-            await send_response_in_chunks(interaction.channel, response)  # Send only here
-            await interaction.followup.send("Summary has been sent.")  # Optional acknowledgment
+            await send_response_in_chunks(interaction.channel, response)
         else:
             await interaction.followup.send("No content to summarize.")  # Optional: handle empty response
+
+
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):
