@@ -207,7 +207,6 @@ def setup_commands(tree, get_assistant_response):
                     ]
             return []
 
-
     @tree.command(name="send", description="Send specified messages to another channel.")
     @app_commands.describe(
         target_channel="Channel(s) to send messages to (select from the same category).",
@@ -215,7 +214,8 @@ def setup_commands(tree, get_assistant_response):
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to send (comma-separated if multiple).",
-        summarize_options="Options for summarization: yes, no, only summary."
+        summarize_options="Options for summarization: yes, no, only summary.",
+        query="Additional requests or context for the messages."
     )
     @app_commands.choices(summarize_options=[
         app_commands.Choice(name="Yes", value="yes"),
@@ -229,7 +229,8 @@ def setup_commands(tree, get_assistant_response):
         start: str = None,
         end: str = None,
         message_ids: str = None,
-        summarize_options: str = "no"
+        summarize_options: str = "no",
+        query: str = None  # New query parameter
     ):
         await interaction.response.defer()  # Defer the response while processing
 
@@ -271,7 +272,7 @@ def setup_commands(tree, get_assistant_response):
 
             # Now handle summary
             if summarize_options == "yes":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, "")
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summarize
                 if summary:
                     await send_response_in_chunks(target, summary)
                 await interaction.followup.send("Messages and summary sent successfully.")
@@ -281,7 +282,7 @@ def setup_commands(tree, get_assistant_response):
                     await interaction.followup.send("Messages sent successfully.")
             
             elif summarize_options == "only summary":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, "")
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summarize
                 if summary:
                     await send_response_in_chunks(target, summary)
                 await interaction.followup.send("Summary sent successfully.")
