@@ -106,45 +106,6 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
     # Initialize an empty list to store the conversation history
     conversation_history = []
 
-    # Handle 'from' option
-    if start is not None:
-        try:
-            start_id = int(start)
-            start_message = await channel.fetch_message(start_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid start message ID format or message not found."
-
-        # Fetch messages after the start message
-        async for message in channel.history(after=start_message, limit=100):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        if not conversation_history:
-            return None, "No messages found after the specified message."
-
-        return conversation_history, {'type': 'from', 'start_index': 0}
-
-    # Handle 'between' option
-    if end is not None:
-        try:
-            end_id = int(end)
-            end_message = await channel.fetch_message(end_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid end message ID format or message not found."
-
-        # Fetch messages between the start and end messages
-        async for message in channel.history(after=start_message, before=end_message):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        if not conversation_history:
-            return None, "No messages found between the specified messages."
-
-        return conversation_history, {
-            'type': 'between',
-            'start_index': 0,
-            'end_index': len(conversation_history)  # Length will determine where to slice
-        }
-
-    # Handle 'messages' option
     if message_ids is not None:
         message_ids_list = message_ids.split(',')
         for message_id in message_ids_list:
@@ -153,8 +114,42 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
                 conversation_history.append(f"{message.author.name}: {message.content}")
             except (ValueError, discord.errors.NotFound):
                 return None, f"Message ID {message_id.strip()} not found."
-
         return conversation_history, {'type': 'messages'}
+
+    # Handle 'from' option
+    if start is not None and end is not None:
+        try:
+            start_id = int(start)
+            end_id = int(end)
+            start_message = await channel.fetch_message(start_id)
+            end_message = await channel.fetch_message(end_id)
+        except (ValueError, discord.errors.NotFound):
+            return None, "Invalid message ID format or message not found."
+
+        # Fetch messages between the start and end messages
+        async for message in channel.history(after=start_message, before=end_message):
+            conversation_history.append(f"{message.author.name}: {message.content}")
+
+        if not conversation_history:
+            return None, "No messages found between the specified messages."
+
+        return conversation_history, {'type': 'between', 'start_index': 0, 'end_index': len(conversation_history)}
+
+    # Handle 'from' option only
+    if start is not None:
+        try:
+            start_id = int(start)
+            start_message = await channel.fetch_message(start_id)
+        except (ValueError, discord.errors.NotFound):
+            return None, "Invalid start message ID format or message not found."
+
+        async for message in channel.history(after=start_message, limit=100):
+            conversation_history.append(f"{message.author.name}: {message.content}")
+
+        if not conversation_history:
+            return None, "No messages found after the specified message."
+
+        return conversation_history, {'type': 'from', 'start_index': 0}
 
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
