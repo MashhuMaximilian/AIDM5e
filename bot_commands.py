@@ -333,18 +333,18 @@ def setup_commands(tree, get_assistant_response):
                 summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
-                await interaction.followup.send(f"Messages and summary sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
+                await interaction.followup.send(f"Messages and summary sent successfully to {'subchannel' if subchannel else 'channel'} <#{target.id}>.")
 
             elif summarize_options == "no":
                 if messages_sent:
-                    await interaction.followup.send(f"Messages sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
+                    await interaction.followup.send(f"Messages sent successfully to {'subchannel' if subchannel else 'channel'} <#{target.id}>.")
 
             elif summarize_options == "only summary":
                 summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
                 # await interaction.followup.send("Summary sent successfully to {target.mention}.")
-                await interaction.followup.send(f"Summary sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
+                await interaction.followup.send(f"Summary sent successfully to {'subchannel' if subchannel else 'channel'} <#{target.id}>.")
 
         else:
             await interaction.followup.send(f"Cannot send messages to {target_channel.name}. Must be in the same category.")
