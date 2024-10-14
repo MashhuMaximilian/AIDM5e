@@ -126,9 +126,16 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
         except (ValueError, discord.errors.NotFound):
             return None, "Invalid message ID format or message not found."
 
-        # Fetch messages between the start and end messages
-        async for message in channel.history(after=start_message, before=end_message):
+        # Fetch messages including the start and end messages
+        async for message in channel.history(after=start_message.created_at, before=end_message.created_at):
             conversation_history.append(f"{message.author.name}: {message.content}")
+
+        # Add start message explicitly
+        conversation_history.insert(0, f"{start_message.author.name}: {start_message.content}")
+        
+        # Add end message explicitly if it's different from start
+        if start_id != end_id:
+            conversation_history.append(f"{end_message.author.name}: {end_message.content}")
 
         if not conversation_history:
             return None, "No messages found between the specified messages."
@@ -143,8 +150,11 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
         except (ValueError, discord.errors.NotFound):
             return None, "Invalid start message ID format or message not found."
 
-        async for message in channel.history(after=start_message, limit=100):
+        async for message in channel.history(after=start_message.created_at, limit=100):
             conversation_history.append(f"{message.author.name}: {message.content}")
+
+        # Add the start message explicitly
+        conversation_history.insert(0, f"{start_message.author.name}: {start_message.content}")
 
         if not conversation_history:
             return None, "No messages found after the specified message."
@@ -153,25 +163,3 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
 
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
-
-async def send_messages(interaction, channel, options, summarize_options):
-    # Fetch the conversation history based on the options provided
-    conversation_history, options_or_error = await fetch_conversation_history(channel, options['start'], options['end'], options['message_ids'])
-
-    # Check if the response is an error message
-    if isinstance(options_or_error, str):
-        await interaction.followup.send(options_or_error)  # Send error message
-        return
-
-    # Send the conversation messages based on the specified options
-    for message in conversation_history:
-        await send_response_in_chunks(channel, message)
-
-    # Handle summarization based on the summarize options
-    for summarize_option in summarize_options:
-        if summarize_option.lower() == "yes":
-            summary = await summarize_conversation(interaction, conversation_history, options, "")
-            await send_response_in_chunks(channel, summary)
-        elif summarize_option.lower() == "only summary":
-            summary = await summarize_conversation(interaction, conversation_history, options, "")
-            await send_response_in_chunks(channel, summary)

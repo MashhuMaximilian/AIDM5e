@@ -8,6 +8,12 @@ from config import HEADERS
 
 from helper_functions import *
 
+import logging
+
+    # Set up logging (you can configure this as needed)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def setup_commands(tree, get_assistant_response):
 
     @tree.command(name="tellme", description="Info about spells, items, NPCs, character status, inventory, or roll checks.")
@@ -143,7 +149,7 @@ def setup_commands(tree, get_assistant_response):
 
         # Step 3: Fetch all messages from the #telldm channel
         messages = []
-        async for message in feedback_channel.history(limit=100):
+        async for message in feedback_channel.history(limit=300):
             messages.append(f"{message.author.name}: {message.content}")
 
         if not messages:
@@ -189,28 +195,81 @@ def setup_commands(tree, get_assistant_response):
             return channels_in_category
     class ThreadInChannelTransformer(app_commands.Transformer):
         async def transform(self, interaction: discord.Interaction, value: str) -> discord.Thread:
-            thread = interaction.guild.get_thread(int(value))
-            if thread and thread.parent_id == interaction.target_channel.id:
-                return thread
-            raise app_commands.TransformError("Thread does not belong to the specified channel.")
+            try:
+                thread_id = int(value)
+            except ValueError:
+                raise app_commands.TransformerError(
+                    f"Invalid thread ID: {value}",
+                    opt_type=self.__class__,
+                    transformer=self
+                )
+
+            # Fetch the thread by its ID
+            thread = interaction.guild.get_thread(thread_id)
+            if thread is None:
+                raise app_commands.TransformerError(
+                    f"No thread found with ID: {thread_id}",
+                    opt_type=self.__class__,
+                    transformer=self
+                )
+
+            # Fetch target_channel object from the interaction namespace (autocomplete might pass a string)
+            target_channel = interaction.namespace.target_channel
+            if isinstance(target_channel, discord.TextChannel):
+                # We already have the channel object from autocomplete
+                pass
+            elif isinstance(target_channel, str):
+                # Convert target_channel string (ID) to an actual channel object
+                try:
+                    target_channel = interaction.guild.get_channel(int(target_channel))
+                except (ValueError, TypeError):
+                    raise app_commands.TransformerError(
+                        f"Invalid channel ID: {target_channel}",
+                        opt_type=self.__class__,
+                        transformer=self
+                    )
+            else:
+                raise app_commands.TransformerError(
+                    "Unable to determine target channel.",
+                    opt_type=self.__class__,
+                    transformer=self
+                )
+
+            # Debugging: log thread and parent information
+            logger.info(f"Checking thread: {thread.name} (ID: {thread.id})")
+            logger.info(f"Thread parent ID: {thread.parent_id}, Target Channel ID: {target_channel.id}")
+
+            # Ensure the thread belongs to the selected target channel
+            if thread.parent_id != target_channel.id:
+                raise app_commands.TransformerError(
+                    "Selected thread does not belong to the specified channel.",
+                    opt_type=self.__class__,
+                    transformer=self
+                )
+
+            return thread
 
         async def autocomplete(self, interaction: discord.Interaction, current: str):
             # Get the selected target channel's threads
-            target_channel = interaction.data.get('options')[0].get('value')  # Get the ID from the previous selection
-            if target_channel:
-                target_channel = interaction.guild.get_channel(int(target_channel))
+            target_channel_id = interaction.data.get('options')[0].get('value')  # Get the ID from the previous selection
+            if target_channel_id:
+                target_channel = interaction.guild.get_channel(int(target_channel_id))
                 if target_channel:
+                    # Log the channel being fetched
+                    logger.info(f"Fetching threads for channel: {target_channel.name} (ID: {target_channel.id})")
                     threads = await fetch_discord_threads(target_channel)
+                    logger.info(f"Fetched threads: {[thread.name for thread in threads]}")  # Log fetched threads
                     return [
                         app_commands.Choice(name=thread.name, value=str(thread.id))
                         for thread in threads
                     ]
             return []
 
+
     @tree.command(name="send", description="Send specified messages to another channel.")
     @app_commands.describe(
         target_channel="Channel(s) to send messages to (select from the same category).",
-        target_thread="Select a thread in the target channel (optional).",
+        subchannel="Select a thread in the target channel (optional).",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to send (comma-separated if multiple).",
@@ -225,7 +284,7 @@ def setup_commands(tree, get_assistant_response):
     async def send(
         interaction: discord.Interaction,
         target_channel: ChannelInCategoryTransformer,
-        target_thread: ThreadInChannelTransformer = None,
+        subchannel: ThreadInChannelTransformer = None,
         start: str = None,
         end: str = None,
         message_ids: str = None,
@@ -253,12 +312,11 @@ def setup_commands(tree, get_assistant_response):
             # If there are threads, send them as options to the user
             if discord_threads:
                 thread_names = ", ".join(thread.name for thread in discord_threads)
-                await interaction.followup.send(f"Available threads in {target_channel.name}: {thread_names}")
             else:
                 await interaction.followup.send(f"No threads available in {target_channel.name}.")
 
             # Use the target thread if specified, otherwise use the target channel directly
-            target = target_thread if target_thread else target_channel
+            target = subchannel if subchannel else target_channel
 
             # Flag to track if messages were sent
             messages_sent = False
@@ -270,22 +328,23 @@ def setup_commands(tree, get_assistant_response):
                     await send_response_in_chunks(target, message)
                     messages_sent = True
 
-            # Now handle summary
+            # Handle summary
             if summarize_options == "yes":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summarize
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
-                await interaction.followup.send("Messages and summary sent successfully.")
-            
+                await interaction.followup.send(f"Messages and summary sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
+
             elif summarize_options == "no":
                 if messages_sent:
-                    await interaction.followup.send("Messages sent successfully.")
-            
+                    await interaction.followup.send(f"Messages sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
+
             elif summarize_options == "only summary":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summarize
+                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
-                await interaction.followup.send("Summary sent successfully.")
+                # await interaction.followup.send("Summary sent successfully to {target.mention}.")
+                await interaction.followup.send(f"Summary sent successfully to {'thread' if subchannel else 'channel'} <#{target.id}>.")
 
         else:
             await interaction.followup.send(f"Cannot send messages to {target_channel.name}. Must be in the same category.")
