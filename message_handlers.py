@@ -3,6 +3,7 @@ import aiohttp
 import logging
 from config import client
 from assistant_interactions import get_assistant_response
+from shared_functions import always_on_channels
 import PyPDF2
 import io
 from docx import Document
@@ -20,6 +21,12 @@ async def on_message(message):
 
     user_message = message.content.strip() if message.content else "No message provided."
     channel_name = message.channel.name
+
+    # Check if the channel is in the always_on_channels
+    if message.channel.id in always_on_channels and always_on_channels[message.channel.id]:
+        # If the channel is always on, respond to every message
+        await send_assistant_response(user_message, message.channel)
+        return  # Exit after responding
 
     # Automatically respond to messages in the #telldm channel
     if channel_name == "telldm":

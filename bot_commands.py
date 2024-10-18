@@ -2,6 +2,7 @@
 
 import discord
 from discord import app_commands
+from shared_functions import set_always_on
 from message_handlers import send_response_in_chunks
 from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
@@ -348,3 +349,71 @@ def setup_commands(tree, get_assistant_response):
 
         else:
             await interaction.followup.send(f"Cannot send messages to {target_channel.name}. Must be in the same category.")
+
+
+
+    @tree.command(name="startnew", description="Create a new channel or subchannel with options.")
+    @app_commands.describe(
+        channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
+        subchannel="Automatically create a new subchannel (thread) in the chosen channel? (true/false)",
+        name="Name for the new channel or subchannel.",
+        always_on="Set the assistant always on or off."
+    )
+    @app_commands.choices(always_on=[
+        app_commands.Choice(name="On", value="on"),
+        app_commands.Choice(name="Off", value="off")
+    ])
+    async def startnew(interaction: discord.Interaction, channel: str, subchannel: bool, name: str, always_on: app_commands.Choice[str]):
+        await interaction.response.defer()  # Defer response while processing
+
+        logging.info(f"Creating new channel with name: {name}, in channel: {channel}, subchannel: {subchannel}, always_on: {always_on.name}")
+
+        guild = interaction.guild
+        category = interaction.channel.category  # Use the current channel's category
+
+        # Initialize target_channel variable
+        target_channel = None
+
+        # Check if 'NEW CHANNEL' was selected
+        if channel == "NEW CHANNEL":
+            # Create a new channel
+            target_channel = await guild.create_text_channel(name, category=category)
+            await interaction.followup.send(f"New channel created: {target_channel.mention}")
+        else:
+            # Assuming channel is the ID of the selected channel
+            target_channel = guild.get_channel(int(channel))  # Ensure it's an int
+            if target_channel is None:
+                await interaction.followup.send("Error: Target channel not found.")
+                return
+            await interaction.followup.send(f"Using existing channel: <#{target_channel.id}>")
+
+        # Create a subchannel (thread) if requested
+        if subchannel:
+            thread = await target_channel.create_thread(name=name)
+            await interaction.followup.send(f"New thread created: {thread.mention} in channel: <#{target_channel.id}>")
+            # Set the target_channel to the thread for always_on setting if it was created
+            target_channel = thread
+
+    # Set the assistant mode based on the always_on parameter
+        await set_always_on(target_channel, always_on.value)  # Pass the value directly
+
+
+    @startnew.autocomplete('channel')
+    async def channel_autocomplete(interaction: discord.Interaction, current: str):
+            # Get the current category from the interaction channel
+            current_category = interaction.channel.category
+            
+            if current_category is None:
+                return []  # No category, return an empty list
+
+            # Get channels in the same category
+            channels_in_category = [
+                app_commands.Choice(name=channel.name, value=str(channel.id))
+                for channel in interaction.guild.text_channels if channel.category == current_category
+            ]
+            
+            # Add the "NEW CHANNEL" option
+            channels_in_category.append(app_commands.Choice(name="NEW CHANNEL", value="NEW CHANNEL"))
+
+            # Filter choices based on user input
+            return [choice for choice in channels_in_category if current.lower() in choice.name.lower()]

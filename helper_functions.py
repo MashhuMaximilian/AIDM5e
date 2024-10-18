@@ -2,6 +2,7 @@
 
 import discord
 from message_handlers import send_response_in_chunks
+
 from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
 import aiohttp
