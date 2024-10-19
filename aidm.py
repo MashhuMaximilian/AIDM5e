@@ -84,8 +84,8 @@ async def on_guild_channel_create(channel):
             category_threads[str(channel.id)]['gameplay'] = gameplay_thread_id
             category_threads[str(channel.id)]['out-of-game'] = out_of_game_thread_id
             
-            # Save the updated data with the new category added
-            save_thread_data({str(channel.id): category_threads[str(channel.id)]})
+            # Save the updated data with the entire category_threads
+            save_thread_data(category_threads)  # Pass category_threads as an argument
             logging.info(f'Thread data updated for new category {channel.id}.')
 
 
@@ -110,12 +110,14 @@ async def on_guild_channel_delete(channel):
 
             # Remove the category and its associated threads from the thread data
             del category_threads[category_id]
-            
+
             # Log the state after deletion
             logging.debug(f"State after deletion: {category_threads}")
 
             # Save the updated data
             save_thread_data(category_threads)
+
+            # Log successful save confirmation
             logging.info(f"Thread data updated. Category {category_id} removed.")
         else:
             logging.warning(f"Deleted category {category_id} not found in thread data.")

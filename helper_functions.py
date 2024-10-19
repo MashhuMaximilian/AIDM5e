@@ -203,17 +203,21 @@ thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
 category_threads = {}
 
 
+
 def save_thread_data(new_data):
     """Save thread data to a JSON file."""
     global category_threads
 
     # Write the new data directly to the file
-    with open(thread_data_path, 'w') as json_file:
-        json.dump(new_data, json_file, indent=4)  # Ensure indentation for readability
-    logging.info("Thread data saved.")
+    try:
+        with open(thread_data_path, 'w') as json_file:
+            json.dump(new_data, json_file, indent=4)  # Ensure indentation for readability
 
-    # Update the global category_threads with the new data
-    category_threads = new_data
+        # Update the global category_threads with the new data
+        category_threads = new_data
+        logging.info("Thread data saved successfully.")
+    except Exception as e:
+        logging.error(f"Failed to save thread data: {e}")
 
 
 def load_thread_data():
