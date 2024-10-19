@@ -1,4 +1,6 @@
 .env
 app.yaml
 __pycache__/
+threads.json
+
 
