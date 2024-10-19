@@ -1,3 +1,5 @@
+#aidm.py
+
 import logging
 import bot_commands
 from pathlib import Path
@@ -5,6 +7,13 @@ from config import *
 from assistant_interactions import get_assistant_response
 import transcription  
 import discord
+import aiohttp
+from helper_functions import create_openai_thread
+from pathlib import Path
+from helper_functions import load_thread_data, save_thread_data
+import json
+
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -19,14 +28,105 @@ except FileNotFoundError:
 # Create a single instance of VoiceRecorder
 recorder = transcription.VoiceRecorder()
 
+
+def get_all_categories():
+    return [category.id for category in client.guilds[0].categories]  # Adjust if your bot is in multiple guilds
+
+
+
 @client.event
 async def on_ready():
-    logging.info(f'Bot has logged in as {client.user}')
-    try:
-        await tree.sync()
-        logging.info("Slash commands have been successfully synced.")
-    except Exception as e:
-        logging.error(f"Error syncing commands: {e}")
+    print(f'Bot has logged in as {client.user}')
+    
+    # Create an aiohttp session here
+    client.session = aiohttp.ClientSession()
+    
+    # Load existing thread data from threads.json
+    load_thread_data()
+
+    data_changed = False  # Flag to track if any data is changed
+
+    # Iterate through each category ID to set up threads
+    for category_id, threads in category_threads.items():
+        logging.info("Processing category %s...", category_id)
+
+        # Only create new threads if they don't already exist
+        if 'gameplay' not in threads:
+            logging.info("Creating new OpenAI thread for category %s of type gameplay", category_id)
+            gameplay_thread_id = await create_openai_thread(client.session, category_id, 'gameplay')  # Function to create a new thread
+            threads['gameplay'] = gameplay_thread_id
+            logging.info("New 'gameplay' thread created with ID: %s for category %s", gameplay_thread_id, category_id)
+            data_changed = True  # Mark that data has changed
+
+        if 'out-of-game' not in threads:
+            logging.info("Creating new OpenAI thread for category %s of type out-of-game", category_id)
+            out_of_game_thread_id = await create_openai_thread(client.session, category_id, 'out-of-game')  # Function to create a new thread
+            threads['out-of-game'] = out_of_game_thread_id
+            logging.info("New 'out-of-game' thread created with ID: %s for category %s", out_of_game_thread_id, category_id)
+            data_changed = True  # Mark that data has changed
+
+    # Only save if there were changes
+    if data_changed:
+        save_thread_data(category_threads)
+
+
+@client.event
+async def on_guild_channel_create(channel):
+    if isinstance(channel, discord.CategoryChannel):
+        if str(channel.id) not in category_threads:
+            logging.info(f'New category created: {channel.id}. Adding to thread data.')
+            category_threads[str(channel.id)] = {}
+
+            user_message = "Starting a new gameplay thread"
+            gameplay_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'gameplay')
+            out_of_game_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'out-of-game')
+
+            category_threads[str(channel.id)]['gameplay'] = gameplay_thread_id
+            category_threads[str(channel.id)]['out-of-game'] = out_of_game_thread_id
+            
+            # Save the updated data with the new category added
+            save_thread_data({str(channel.id): category_threads[str(channel.id)]})
+            logging.info(f'Thread data updated for new category {channel.id}.')
+
+
+# Load the initial data
+category_threads = load_thread_data()
+
+
+@client.event
+async def on_guild_channel_delete(channel):
+    if isinstance(channel, discord.CategoryChannel):
+        category_id = str(channel.id).strip()  # Ensure the ID is a string
+
+        # Log the channel deletion event
+        logging.info(f"Channel deleted: {category_id} - Type: {type(channel)}")
+
+        # Debugging: Log the current thread data
+        logging.debug(f"Current thread data before deletion: {category_threads}")
+
+        # Check if the deleted category exists in the thread data
+        if category_id in category_threads:
+            logging.info(f"Category {category_id} found. Removing from thread data.")
+
+            # Remove the category and its associated threads from the thread data
+            del category_threads[category_id]
+            
+            # Log the state after deletion
+            logging.debug(f"State after deletion: {category_threads}")
+
+            # Save the updated data
+            save_thread_data(category_threads)
+            logging.info(f"Thread data updated. Category {category_id} removed.")
+        else:
+            logging.warning(f"Deleted category {category_id} not found in thread data.")
+
+
+@client.event
+async def on_close():
+    await client.session.close()  # Close the session when the bot is closing
+
+client.run(DISCORD_BOT_TOKEN)
+
 
 # Automatically join and leave voice channels
 @client.event
@@ -52,6 +152,9 @@ async def on_voice_state_update(member, before, after):
 
 bot_commands.setup_commands(tree, get_assistant_response)
 
+@client.event
+async def on_close():
+    await client.session.close()
 
 # Run the bot
 def run_bot():

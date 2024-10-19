@@ -1,30 +1,43 @@
-
+# helper_funtions
 
 import discord
 from message_handlers import send_response_in_chunks
-
+import json
 from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
 import aiohttp
 import logging
+from pathlib import Path
+import os
+
 
 # Dictionary to store thread IDs for the #telldm channel
 category_threads = {}
 category_conversations = {}
 
-async def create_openai_thread(session, user_message, category_id):
+
+
+
+async def create_openai_thread(session, user_message, category_id, thread_type):
     """Create a new OpenAI thread and store its ID for the category."""
-    logging.info(f"Creating new OpenAI thread for category {category_id}")
+    logging.info(f"Creating new OpenAI thread for category {category_id} of type {thread_type}")
     
     async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
         "messages": [{"role": "user", "content": user_message}]
     }) as thread_response:
         if thread_response.status != 200:
             raise Exception(f"Error creating thread: {await thread_response.text()}")
+        
         thread_data = await thread_response.json()
         thread_id = thread_data['id']
-        category_threads[category_id] = thread_id  # Store thread ID for the category
-        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id}")
+        
+        # Store thread ID in the category-specific structure
+        if category_id not in category_threads:
+            category_threads[category_id] = {}
+
+        # Store the thread under the appropriate thread type
+        category_threads[category_id][thread_type] = thread_id
+        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id} of type {thread_type}")
     
     return thread_id
 
@@ -46,7 +59,9 @@ async def send_to_telldm(interaction, response):
     else:
         # Create a new OpenAI thread if it doesn't exist
         async with aiohttp.ClientSession() as session:
+
             thread_id = await create_openai_thread(session, response, category_id)
+
     
     # Now send the response to the OpenAI thread
     async with aiohttp.ClientSession() as session:
@@ -164,3 +179,61 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
 
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
+
+async def handle_channel_creation(interaction, channel, channel_name):
+    guild = interaction.guild
+    category = interaction.channel.category
+    target_channel = None
+
+    if channel == "NEW CHANNEL":
+        target_channel = await guild.create_text_channel(channel_name, category=category)
+        await interaction.followup.send(f"New channel created: {target_channel.mention}")
+    else:
+        target_channel = guild.get_channel(int(channel))
+        if target_channel is None:
+            await interaction.followup.send("Error: Target channel not found.")
+            return None
+        await interaction.followup.send(f"Using existing channel: <#{target_channel.id}>")
+
+    return target_channel
+
+
+# Path to store thread data
+thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
+category_threads = {}
+
+
+def save_thread_data(new_data):
+    """Save thread data to a JSON file."""
+    global category_threads
+
+    # Write the new data directly to the file
+    with open(thread_data_path, 'w') as json_file:
+        json.dump(new_data, json_file, indent=4)  # Ensure indentation for readability
+    logging.info("Thread data saved.")
+
+    # Update the global category_threads with the new data
+    category_threads = new_data
+
+
+def load_thread_data():
+    """Load thread data from the JSON file."""
+    global category_threads  # Ensure we're using the global variable
+
+    if os.path.exists(thread_data_path):
+        if os.path.getsize(thread_data_path) == 0:
+            logging.error("Thread data file is empty. Initializing an empty dictionary.")
+            category_threads = {}
+        else:
+            with open(thread_data_path, 'r') as f:
+                try:
+                    category_threads = json.load(f)
+                    logging.info(f"Loaded thread data: {category_threads}")
+                except json.JSONDecodeError as e:
+                    logging.error(f"Error loading JSON data: {e}. Initializing empty thread data.")
+                    category_threads = {}
+    else:
+        logging.warning(f"Thread data file not found. Initializing empty thread data.")
+        category_threads = {}
+
+    return category_threads  # Return loaded data

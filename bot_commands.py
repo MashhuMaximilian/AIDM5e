@@ -6,9 +6,7 @@ from shared_functions import set_always_on
 from message_handlers import send_response_in_chunks
 from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS
-
 from helper_functions import *
-
 import logging
 
     # Set up logging (you can configure this as needed)
@@ -352,21 +350,46 @@ def setup_commands(tree, get_assistant_response):
 
 
 
-    @tree.command(name="startnew", description="Create a new channel or subchannel with options.")
+    @tree.command(name="startnew", description="Create a new channel or new thread with options.")
     @app_commands.describe(
         channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
-        subchannel="Automatically create a new subchannel (thread) in the chosen channel? (true/false)",
-        name="Name for the new channel or subchannel.",
+        newthread="Automatically create a new thread in the chosen channel? (true/false).",
+        channel_name="Name for the new channel (only if 'NEW CHANNEL' is selected).",
+        thread_name="Name for the new thread (only if newthread is True).",
+        memory="Choose an existing OpenAI thread or create a new memory.",
+        memory_name="Provide a name for the new OpenAI thread (only if 'Create new memory' is selected).",
         always_on="Set the assistant always on or off."
     )
     @app_commands.choices(always_on=[
         app_commands.Choice(name="On", value="on"),
         app_commands.Choice(name="Off", value="off")
     ])
-    async def startnew(interaction: discord.Interaction, channel: str, subchannel: bool, name: str, always_on: app_commands.Choice[str]):
+    async def startnew(
+        interaction: discord.Interaction,
+        channel: str,
+        always_on: app_commands.Choice[str],
+        newthread: bool,
+        memory: str,
+        memory_name: str = None,
+        channel_name: str = None,
+        thread_name: str = None
+    ):
         await interaction.response.defer()  # Defer response while processing
 
-        logging.info(f"Creating new channel with name: {name}, in channel: {channel}, subchannel: {subchannel}, always_on: {always_on.name}")
+        # Check conditions before proceeding
+        if channel == "NEW CHANNEL" and channel_name is None:
+            await interaction.followup.send("Error: You must provide a name for the new channel.")
+            return
+
+        if newthread and thread_name is None:
+            await interaction.followup.send("Error: You must provide a name for the new thread.")
+            return
+
+        if memory == "CREATE NEW MEMORY" and memory_name is None:
+            await interaction.followup.send("Error: You must provide a name for the new memory.")
+            return
+
+        logging.info(f"Creating new channel with channel_name: {channel_name}, in channel: {channel}, newthread: {newthread}, thread_name: {thread_name}, memory: {memory}, memory_name: {memory_name}, always_on: {always_on.name}")
 
         guild = interaction.guild
         category = interaction.channel.category  # Use the current channel's category
@@ -376,8 +399,8 @@ def setup_commands(tree, get_assistant_response):
 
         # Check if 'NEW CHANNEL' was selected
         if channel == "NEW CHANNEL":
-            # Create a new channel
-            target_channel = await guild.create_text_channel(name, category=category)
+            # Create a new channel with the specified channel_name
+            target_channel = await guild.create_text_channel(channel_name, category=category)
             await interaction.followup.send(f"New channel created: {target_channel.mention}")
         else:
             # Assuming channel is the ID of the selected channel
@@ -387,33 +410,99 @@ def setup_commands(tree, get_assistant_response):
                 return
             await interaction.followup.send(f"Using existing channel: <#{target_channel.id}>")
 
-        # Create a subchannel (thread) if requested
-        if subchannel:
-            thread = await target_channel.create_thread(name=name)
+        # Handle creating new threads based on user input
+        if newthread:
+            existing_threads = [t for t in target_channel.threads if t.name == (thread_name or "New Thread")]
+            if existing_threads:
+                await interaction.followup.send(f"A thread with the name '{thread_name}' already exists.")
+                return
+            
+            thread_name = thread_name or "New Thread"
+            thread = await target_channel.create_thread(name=thread_name)
             await interaction.followup.send(f"New thread created: {thread.mention} in channel: <#{target_channel.id}>")
-            # Set the target_channel to the thread for always_on setting if it was created
+
             target_channel = thread
 
-    # Set the assistant mode based on the always_on parameter
+            category_id = interaction.channel.category.id
+
+            async with aiohttp.ClientSession() as session:
+                # Check for memory_name only if it exists and matches "gameplay" or "out-of-game"
+                if memory_name and memory_name.lower() == "gameplay":
+                    thread_id = await create_openai_thread(session, "Gameplay context message", category_id, "gameplay")
+                elif memory_name and memory_name.lower() == "out-of-game":
+                    thread_id = await create_openai_thread(session, "Out-of-game context message", category_id, "out-of-game")
+
+        # Handle the "memory" selection and save using memory_name
+        if memory == "CREATE NEW MEMORY":
+            async with aiohttp.ClientSession() as session:
+                # Create the OpenAI thread with the provided memory_name
+                memory_thread_id = await create_openai_thread(session, memory_name, interaction.channel.category.id, memory_name)
+                logging.info(f"New OpenAI memory thread created with ID: {memory_thread_id}")
+                
+                # Save using memory_name as the key instead of "memory"
+                if interaction.channel.category.id not in category_threads:
+                    category_threads[interaction.channel.category.id] = {}
+                category_threads[interaction.channel.category.id][memory_name] = memory_thread_id
+                
+                save_thread_data()  # Save data persistently
+                await interaction.followup.send(f"New OpenAI memory thread created: {memory_name}")
+
+
+
+        # Set the assistant mode based on the always_on parameter
         await set_always_on(target_channel, always_on.value)  # Pass the value directly
 
-
+    # Autocomplete for the channel parameter
     @startnew.autocomplete('channel')
     async def channel_autocomplete(interaction: discord.Interaction, current: str):
-            # Get the current category from the interaction channel
-            current_category = interaction.channel.category
-            
-            if current_category is None:
-                return []  # No category, return an empty list
+        current_category = interaction.channel.category
 
-            # Get channels in the same category
-            channels_in_category = [
-                app_commands.Choice(name=channel.name, value=str(channel.id))
-                for channel in interaction.guild.text_channels if channel.category == current_category
-            ]
-            
-            # Add the "NEW CHANNEL" option
-            channels_in_category.append(app_commands.Choice(name="NEW CHANNEL", value="NEW CHANNEL"))
+        if current_category is None:
+            return []  # No category, return an empty list
 
-            # Filter choices based on user input
-            return [choice for choice in channels_in_category if current.lower() in choice.name.lower()]
+        channels_in_category = [
+            app_commands.Choice(name=channel.name, value=str(channel.id))
+            for channel in interaction.guild.text_channels if channel.category == current_category
+        ]
+
+        # Add the "NEW CHANNEL" option
+        channels_in_category.append(app_commands.Choice(name="NEW CHANNEL", value="NEW CHANNEL"))
+
+        # Filter choices based on user input
+        return [choice for choice in channels_in_category if current.lower() in choice.name.lower()]
+
+
+    # Autocomplete for memory
+    @startnew.autocomplete('memory')
+    async def memory_autocomplete(interaction: discord.Interaction, current: str):
+        current_category = interaction.channel.category.id  # Get the current category ID
+        
+        # Initialize the predefined threads
+        # Add predefined OpenAI threads to memory options
+        predefined_threads = ["gameplay", "out-of-game"]
+
+        # Ensure that the predefined threads exist for the current category
+        if current_category not in category_threads:
+            category_threads[current_category] = {}
+
+        async with aiohttp.ClientSession() as session:
+            for predefined_thread in predefined_threads:
+                # Check if the thread already exists
+                if predefined_thread not in category_threads[current_category]:
+                    # Create the OpenAI thread only if it doesn't exist
+                    category_threads[current_category][predefined_thread] = await create_openai_thread(
+                        session, f"{predefined_thread} context message", current_category, predefined_thread
+                    )
+
+
+        # Generate memory options from existing threads for the current category
+        memory_options = [
+            app_commands.Choice(name=thread_name, value=thread_name)
+            for thread_name in category_threads.get(current_category, {}).keys()  # Fetch threads specific to the category
+        ]
+
+        # Add the "Create new memory" option
+        memory_options.append(app_commands.Choice(name="CREATE NEW MEMORY", value="CREATE NEW MEMORY"))
+
+        # Filter options based on user input
+        return [choice for choice in memory_options if current.lower() in choice.name.lower()]

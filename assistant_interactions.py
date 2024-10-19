@@ -32,7 +32,6 @@ async def create_or_get_thread(session, user_message, channel_id, category_id):
     
     return thread_id
 
-
 async def send_user_message(session, thread_id, user_message):
     """Send user message to the assistant."""
     async with session.post(f"https://api.openai.com/v1/threads/{thread_id}/messages", headers=HEADERS, json={
