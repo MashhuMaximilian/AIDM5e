@@ -219,8 +219,16 @@ def save_thread_data(new_data):
     except Exception as e:
         logging.error(f"Failed to save thread data: {e}")
 
-
 def load_thread_data():
+    """Load thread data from the JSON file."""
+    try:
+        with open(thread_data_path, 'r') as json_file:
+            return json.load(json_file)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        logging.error(f"Failed to load thread data: {e}")
+        return {}
     """Load thread data from the JSON file."""
     global category_threads  # Ensure we're using the global variable
 

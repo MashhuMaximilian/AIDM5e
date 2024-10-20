@@ -36,36 +36,44 @@ def get_all_categories():
 
 @client.event
 async def on_ready():
-    print(f'Bot has logged in as {client.user}')
-    
+    logging.info(f'Bot has logged in as {client.user}')
+
     # Create an aiohttp session here
     client.session = aiohttp.ClientSession()
-    
-    # Load existing thread data from threads.json
-    load_thread_data()
+
+    try:
+        await tree.sync()
+        logging.info("Slash commands have been successfully synced.")
+    except Exception as e:
+        logging.error(f"Error syncing commands: {e}")
+
+    # Load the initial data
+    global category_threads
+    category_threads = load_thread_data()
 
     data_changed = False  # Flag to track if any data is changed
 
-    # Iterate through each category ID to set up threads
+    # Only process categories that are already in threads.json
     for category_id, threads in category_threads.items():
-        logging.info("Processing category %s...", category_id)
+        logging.info("Processing existing category %s...", category_id)
 
-        # Only create new threads if they don't already exist
+        # Check if 'gameplay' thread already exists
         if 'gameplay' not in threads:
             logging.info("Creating new OpenAI thread for category %s of type gameplay", category_id)
-            gameplay_thread_id = await create_openai_thread(client.session, category_id, 'gameplay')  # Function to create a new thread
+            gameplay_thread_id = await create_openai_thread(client.session, category_id, 'gameplay')
             threads['gameplay'] = gameplay_thread_id
             logging.info("New 'gameplay' thread created with ID: %s for category %s", gameplay_thread_id, category_id)
-            data_changed = True  # Mark that data has changed
+            data_changed = True
 
+        # Check if 'out-of-game' thread already exists
         if 'out-of-game' not in threads:
             logging.info("Creating new OpenAI thread for category %s of type out-of-game", category_id)
-            out_of_game_thread_id = await create_openai_thread(client.session, category_id, 'out-of-game')  # Function to create a new thread
+            out_of_game_thread_id = await create_openai_thread(client.session, category_id, 'out-of-game')
             threads['out-of-game'] = out_of_game_thread_id
             logging.info("New 'out-of-game' thread created with ID: %s for category %s", out_of_game_thread_id, category_id)
-            data_changed = True  # Mark that data has changed
+            data_changed = True
 
-    # Only save if there were changes
+    # Save only if there were changes
     if data_changed:
         save_thread_data(category_threads)
 
@@ -75,17 +83,24 @@ async def on_guild_channel_create(channel):
     if isinstance(channel, discord.CategoryChannel):
         if str(channel.id) not in category_threads:
             logging.info(f'New category created: {channel.id}. Adding to thread data.')
+
+            # Initialize category entry
             category_threads[str(channel.id)] = {}
 
-            user_message = "Starting a new gameplay thread"
-            gameplay_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'gameplay')
-            out_of_game_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'out-of-game')
+            user_message = "Starting a new thread for this category"  # Placeholder message for OpenAI threads
 
+            # Create 'gameplay' thread
+            gameplay_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'gameplay')
             category_threads[str(channel.id)]['gameplay'] = gameplay_thread_id
+            logging.info(f"New 'gameplay' thread created with ID: {gameplay_thread_id} for category {channel.id}")
+
+            # Create 'out-of-game' thread
+            out_of_game_thread_id = await create_openai_thread(client.session, user_message, channel.id, 'out-of-game')
             category_threads[str(channel.id)]['out-of-game'] = out_of_game_thread_id
-            
-            # Save the updated data with the entire category_threads
-            save_thread_data(category_threads)  # Pass category_threads as an argument
+            logging.info(f"New 'out-of-game' thread created with ID: {out_of_game_thread_id} for category {channel.id}")
+
+            # Save the updated data
+            save_thread_data(category_threads)
             logging.info(f'Thread data updated for new category {channel.id}.')
 
 
@@ -122,12 +137,6 @@ async def on_guild_channel_delete(channel):
         else:
             logging.warning(f"Deleted category {category_id} not found in thread data.")
 
-
-@client.event
-async def on_close():
-    await client.session.close()  # Close the session when the bot is closing
-
-client.run(DISCORD_BOT_TOKEN)
 
 
 # Automatically join and leave voice channels
