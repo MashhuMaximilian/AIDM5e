@@ -34,25 +34,38 @@ def get_all_categories():
 
 async def create_threads_for_category(category_id):
     user_message = "Starting a new thread for this category"  # Placeholder message for OpenAI threads
-    threads = {}
     
-    # Create 'gameplay' thread
-    threads['gameplay'] = await create_openai_thread(client.session, user_message, category_id, 'gameplay')
-    logging.info(f"New 'gameplay' thread created with ID: {threads['gameplay']} for category {category_id}")
+    # Ensure category exists in the global data
+    if str(category_id) not in category_threads:
+        category_threads[str(category_id)] = {}
 
-    # Create 'out-of-game' thread
-    threads['out-of-game'] = await create_openai_thread(client.session, user_message, category_id, 'out-of-game')
-    logging.info(f"New 'out-of-game' thread created with ID: {threads['out-of-game']} for category {category_id}")
+    threads = category_threads[str(category_id)]
+
+    # Check if 'gameplay' thread exists, if not create it
+    if 'gameplay' not in threads:
+        threads['gameplay'] = await create_openai_thread(client.session, user_message, category_id, 'gameplay')
+        logging.info(f"New 'gameplay' thread created with ID: {threads['gameplay']} for category {category_id}")
+    
+    # Check if 'out-of-game' thread exists, if not create it
+    if 'out-of-game' not in threads:
+        threads['out-of-game'] = await create_openai_thread(client.session, user_message, category_id, 'out-of-game')
+        logging.info(f"New 'out-of-game' thread created with ID: {threads['out-of-game']} for category {category_id}")
 
     return threads
 
 async def handle_new_category(channel):
     # Load existing thread data before checking for a new category
     global category_threads
-    category_threads = load_thread_data()
+    existing_data = load_thread_data()
+
+    # Merge existing data into the global category_threads
+    if existing_data:
+        category_threads.update(existing_data)
 
     if str(channel.id) not in category_threads:
         logging.info(f'New category created: {channel.id}. Adding to thread data.')
+        
+        # Create threads for the new category
         category_threads[str(channel.id)] = await create_threads_for_category(channel.id)
 
         # Save the updated data

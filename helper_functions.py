@@ -19,9 +19,9 @@ category_conversations = {}
 
 
 
-async def create_openai_thread(session, user_message, category_id, thread_type):
+async def create_openai_thread(session, user_message, category_id, memory_name):
     """Create a new OpenAI thread and store its ID for the category."""
-    logging.info(f"Creating new OpenAI thread for category {category_id} of type {thread_type}")
+    logging.info(f"Creating new OpenAI thread for category {category_id} of type {memory_name}")
     
     async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
         "messages": [{"role": "user", "content": user_message}]
@@ -37,8 +37,8 @@ async def create_openai_thread(session, user_message, category_id, thread_type):
             category_threads[category_id] = {}
 
         # Store the thread under the appropriate thread type
-        category_threads[category_id][thread_type] = thread_id
-        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id} of type {thread_type}")
+        category_threads[category_id][memory_name] = thread_id
+        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id} of type {memory_name}")
     
     return thread_id
 
@@ -200,22 +200,50 @@ async def handle_channel_creation(channel, channel_name, guild, category, intera
 thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
 category_threads = {}
 
-
-
 def save_thread_data(new_data):
     """Save thread data to a JSON file."""
     global category_threads
 
-    # Write the new data directly to the file
+    # Load existing data from the JSON file
+    try:
+        with open(thread_data_path, 'r') as json_file:
+            existing_data = json.load(json_file)
+    except FileNotFoundError:
+        existing_data = {}
+    except json.JSONDecodeError as e:
+        logging.error(f"Error loading existing JSON data: {e}. Starting with empty data.")
+        existing_data = {}
+
+    # Log existing data before merging
+    logging.info(f"Existing data before merge: {existing_data}")
+
+    # Convert all category IDs to strings to ensure consistency
+    existing_data = {str(key): value for key, value in existing_data.items()}
+
+    # Merge the new data with the existing data
+    for category_id, threads in new_data.items():
+        category_id_str = str(category_id)  # Ensure category ID is a string
+        if category_id_str in existing_data:
+            # Update only the threads within the existing category
+            existing_data[category_id_str].update(threads)
+        else:
+            # If the category doesn't exist, add it
+            existing_data[category_id_str] = threads
+
+    # Log data after merging
+    logging.info(f"Data after merge: {existing_data}")
+
+    # Save the merged data back to the file
     try:
         with open(thread_data_path, 'w') as json_file:
-            json.dump(new_data, json_file, indent=4)  # Ensure indentation for readability
+            json.dump(existing_data, json_file, indent=4)  # Ensure indentation for readability
 
-        # Update the global category_threads with the new data
-        category_threads = new_data
+        # Update the global category_threads with the merged data
+        category_threads = existing_data
         logging.info("Thread data saved successfully.")
     except Exception as e:
         logging.error(f"Failed to save thread data: {e}")
+
 
 def load_thread_data():
     """Load thread data from the JSON file."""
@@ -256,15 +284,31 @@ async def set_default_thread(category_id):
         save_thread_data(category_threads)  # Save the updated data
         logging.info(f"Default thread set for category {category_id}.")
 
-async def assign_thread(category_id, thread_type, thread_id):
-    """Assign a thread ID to a specific thread type for a category."""
-    global category_threads
-    if category_id in category_threads:
-        category_threads[category_id][thread_type] = thread_id
-        save_thread_data(category_threads)  # Save the updated data
-        logging.info(f"Assigned thread ID {thread_id} to {thread_type} for category {category_id}.")
-    else:
-        logging.error(f"Category {category_id} not found. Cannot assign thread.")
+async def assign_memory(category_id, memory_name, memory_thread_id):
+    # Load existing thread data from JSON
+    category_threads = load_thread_data()
+
+    # Ensure category_id is a string for consistent JSON handling
+    category_id_str = str(category_id)
+
+    # Log current data for this category
+    logging.info(f"Current data for category {category_id_str}: {category_threads.get(category_id_str, {})}")
+
+    # Check if the category exists in the loaded data
+    if category_id_str not in category_threads:
+        # Initialize if the category does not exist
+        category_threads[category_id_str] = {}
+
+    # Append the new memory thread to the existing category
+    category_threads[category_id_str][memory_name] = memory_thread_id
+
+    # Log updated data before saving
+    logging.info(f"Updated data for category {category_id_str}: {category_threads[category_id_str]}")
+
+    # Save the updated thread data back to the JSON file
+    save_thread_data(category_threads)
+    logging.info(f"Assigned new memory '{memory_name}' with thread ID '{memory_thread_id}' to category {category_id_str}.")
+
 
 
 async def create_or_assign_memory(session, memory, memory_name, category_id):
