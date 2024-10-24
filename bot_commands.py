@@ -439,7 +439,6 @@ def setup_commands(tree, get_assistant_response):
             return await get_memory_options(interaction.channel.category.id, session, ["gameplay", "out-of-game"])
 
 
-
     @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
     async def assign_memory(
         interaction: discord.Interaction,
@@ -466,39 +465,49 @@ def setup_commands(tree, get_assistant_response):
         category_id_str = str(interaction.channel.category.id)
         category_threads = load_thread_data()
 
-        # Check if the category exists in the loaded data
+        # Ensure the category exists in the loaded data
         if category_id_str not in category_threads:
             category_threads[category_id_str] = {
                 'memory': {},
                 'channels': {}
             }
 
+        # Process the memory assignment
+        memory_thread_id = None
+
+        if memory == "CREATE NEW MEMORY":
+            # Create a new memory and get its thread ID
+            async with aiohttp.ClientSession() as session:
+                memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
+
+                # Add the new memory to the category's memory section
+                category_threads[category_id_str][memory_name] = memory_thread_id
+        else:
+            # Fetch the existing memory's thread ID
+            memory_thread_id = category_threads[category_id_str]['memory'].get(memory_name, {}).get('assigned_memory')
+            if not memory_thread_id:
+                await interaction.followup.send(f"Error: Memory '{memory_name}' does not exist.")
+                return
+
         # Check if the channel already exists
         if channel_id_str in category_threads[category_id_str]['channels']:
             # Update existing channel entry
             channel_data = category_threads[category_id_str]['channels'][channel_id_str]
-            channel_data['assigned_memory'] = f"thread_{memory_name}"  # Update assigned_memory
+            channel_data['assigned_memory'] = memory_thread_id  # Update to the correct assigned_memory
             channel_data['memory_name'] = memory_name  # Update memory_name
         else:
-            # If no specific channel is provided, create a new channel entry
+            # Create a new channel entry
             category_threads[category_id_str]['channels'][channel_id_str] = {
                 "name": channel_obj.name,
-                "assigned_memory": f"thread_{memory_name}",
+                "assigned_memory": memory_thread_id,
                 "memory_name": memory_name,
                 "threads": {}  # Initialize empty threads for new channels
             }
 
-        # Process the memory assignment
-        async with aiohttp.ClientSession() as session:
-            memory_response = await create_or_assign_memory(session, memory, memory_name, category_id_str)
-
-            if memory_response:
-                await interaction.followup.send(memory_response)
-            else:
-                await interaction.followup.send("Failed to assign memory. Please try again.")
-
         # Save the updated thread data back to the JSON file
         save_thread_data(category_threads)
+
+        await interaction.followup.send(f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
 
     # Autocomplete for 'channel' parameter
     @assign_memory.autocomplete('channel')

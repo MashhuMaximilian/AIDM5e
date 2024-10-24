@@ -201,10 +201,12 @@
             },
             "1298305190671159317": {
                 "name": "test5",
-                "assigned_memory": "thread_testnewwww",
-                "memory_name": "testnewwww",
+                "assigned_memory": "thread_O7GXPKtM25x6Zf1ruiQFG32D",
+                "memory_name": "testnewlastmaybe",
                 "threads": {}
             }
-        }
+        },
+        "testkjnfsdkfladb": "thread_fctRXHx8nTIZqs4umt648OEH",
+        "testnewlastmaybe": "thread_O7GXPKtM25x6Zf1ruiQFG32D"
     }
 }
