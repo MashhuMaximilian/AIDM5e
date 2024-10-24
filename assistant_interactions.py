@@ -87,7 +87,7 @@ def extract_assistant_response(messages_data):
             break
     return assistant_response
 
-async def get_assistant_response(user_message, channel_id, category_id=None):
+async def get_assistant_response(user_message, channel_id, memory_name, category_id=None):
     """Main function to interact with the assistant and return the response."""
     try:
         async with aiohttp.ClientSession() as session:
@@ -106,8 +106,8 @@ async def get_assistant_response(user_message, channel_id, category_id=None):
             if category_id is None and channel.category_id:
                 category_id = channel.category_id
 
-            # Create or get a thread for the conversation
-            thread_id = await create_or_get_thread(session, user_message, channel_id, category_id)
+            # Create or get a thread for the conversation, using the memory_name
+            thread_id = await create_or_get_thread(session, user_message, channel_id, memory_name, category_id)
 
             # Log the user message being sent
             logging.info(f"Sending user message to assistant: {user_message[:100]}")

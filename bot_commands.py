@@ -86,15 +86,19 @@ def setup_commands(tree, get_assistant_response):
             prompt = f"This is a query about specific rule clarifications. Please provide a clear and detailed explanation based on official sources, and include any applicable errata or optional rules. Reference the PHB, DMG, or other official sourcebooks or links from https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
         
         elif query_type.value == "race_class":
-            prompt = f"This is a question about a D&D race, class, or subclass, including official content or homebrew. Please provide details on abilities, traits, key features, and how to optimize gameplay. Include lore, background, and roleplaying suggest for the race or class. If possible, compare it with similar races or classes. Provide references to the source material and links to reliable websites like https://forgottenrealms.fandom.com/wiki, https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
+            prompt = f"This is a question about a D&D race, class, or subclass, including official content or homebrew. Please provide details on abilities, traits, key features, and how to optimize gameplay. Include lore, background, and roleplaying suggestions for the race or class. If possible, compare it with similar races or classes. Provide references to the source material and links to reliable websites like https://forgottenrealms.fandom.com/wiki, https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
 
         # Get response from the assistant
-        response = await get_assistant_response(prompt, interaction.channel.id)
+       # Get the memory name for the channel/category
+        memory_name = 'out-of-game'  # Implement this function as needed
 
-        # Check if the response is longer than 2000 characters and split it
-        await send_to_telldm(interaction, response)
+        # Get response from the assistant
+        response = await get_assistant_response(prompt, interaction.channel.id, memory_name)
+
+        # Now send the response to the telldm channel using out-of-game memory
+        category_id = get_category_id(interaction)  # Ensure this function is defined
+        await send_to_telldm(interaction, response, category_id, "out-of-game")
     
-   
     @tree.command(name="summarize", description="Summarize messages based on different options.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
@@ -436,13 +440,12 @@ def setup_commands(tree, get_assistant_response):
 
 
 
-
-    @tree.command(name="assign_memory", description="Assign a memory to a Discord thread.")
+    @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
     async def assign_memory(
         interaction: discord.Interaction,
         channel: str,
-        thread: discord.Thread,
         memory: str,
+        thread: discord.Thread = None,
         memory_name: str = None,
     ):
         await interaction.response.defer()
@@ -451,16 +454,58 @@ def setup_commands(tree, get_assistant_response):
             await interaction.followup.send("Error: You must provide a name for the new memory.")
             return
 
+        # Fetch the channel object using the provided channel ID
+        channel_id_str = str(channel)
+        channel_obj = interaction.guild.get_channel(int(channel))
+
+        if not channel_obj:
+            await interaction.followup.send("Invalid channel specified. Please specify a valid channel.")
+            return
+
+        # Load existing thread data from JSON
+        category_id_str = str(interaction.channel.category.id)
+        category_threads = load_thread_data()
+
+        # Check if the category exists in the loaded data
+        if category_id_str not in category_threads:
+            category_threads[category_id_str] = {
+                'memory': {},
+                'channels': {}
+            }
+
+        # Check if the channel already exists
+        if channel_id_str in category_threads[category_id_str]['channels']:
+            # Update existing channel entry
+            channel_data = category_threads[category_id_str]['channels'][channel_id_str]
+            channel_data['assigned_memory'] = f"thread_{memory_name}"  # Update assigned_memory
+            channel_data['memory_name'] = memory_name  # Update memory_name
+        else:
+            # If no specific channel is provided, create a new channel entry
+            category_threads[category_id_str]['channels'][channel_id_str] = {
+                "name": channel_obj.name,
+                "assigned_memory": f"thread_{memory_name}",
+                "memory_name": memory_name,
+                "threads": {}  # Initialize empty threads for new channels
+            }
+
+        # Process the memory assignment
         async with aiohttp.ClientSession() as session:
-            memory_response = await create_or_assign_memory(session, memory, memory_name, interaction.channel.category.id)
+            memory_response = await create_or_assign_memory(session, memory, memory_name, category_id_str)
+
             if memory_response:
                 await interaction.followup.send(memory_response)
+            else:
+                await interaction.followup.send("Failed to assign memory. Please try again.")
 
-    # Autocomplete for 'channel' and 'memory' parameters
+        # Save the updated thread data back to the JSON file
+        save_thread_data(category_threads)
+
+    # Autocomplete for 'channel' parameter
     @assign_memory.autocomplete('channel')
     async def channel_autocomplete(interaction: discord.Interaction, current: str):
         return await get_channels_in_category(interaction.channel.category, interaction.guild)
 
+    # Autocomplete for 'memory' parameter
     @assign_memory.autocomplete('memory')
     async def memory_autocomplete(interaction: discord.Interaction, current: str):
         async with aiohttp.ClientSession() as session:

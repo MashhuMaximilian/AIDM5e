@@ -10,7 +10,7 @@ import discord
 import aiohttp
 from helper_functions import create_openai_thread
 from pathlib import Path
-from helper_functions import load_thread_data, save_thread_data
+from helper_functions import *
 import json
 
 # Set up logging
@@ -84,22 +84,34 @@ async def on_ready():
     except Exception as e:
         logging.error(f"Error syncing commands: {e}")
 
+    # Loop through existing guilds
+    for guild in client.guilds:
+        # Initialize threads for each guild
+        await initialize_threads(guild)
+
+    # Load existing thread data
     global category_threads
     category_threads = load_thread_data()
-    
+
     data_changed = False
 
+    # Loop through existing categories and set default memory
     for category_id, threads in category_threads.items():
         logging.info("Processing existing category %s...", category_id)
         
         # Check and create threads if they don't exist
-        if 'gameplay' not in threads or 'out-of-game' not in threads:
-            new_threads = await create_threads_for_category(category_id)
-            threads.update(new_threads)
-            data_changed = True
+        new_threads = await create_threads_for_category(category_id)
+        threads.update(new_threads)
+
+        # Set default memory for the category
+        await set_default_memory(category_id)
+
+        data_changed = True
 
     if data_changed:
         save_thread_data(category_threads)
+
+    logging.info("Bot is ready and all categories have been processed.")
 
 @client.event
 async def on_guild_channel_create(channel):
