@@ -204,9 +204,18 @@
                 "assigned_memory": "thread_O7GXPKtM25x6Zf1ruiQFG32D",
                 "memory_name": "testnewlastmaybe",
                 "threads": {}
+            },
+            "1298952693234274414": {
+                "name": "asdfsdd",
+                "assigned_memory": "thread_KQwz3mrP1tzxP92htVcKdsTa",
+                "memory_name": "newestmemoryname",
+                "threads": {}
             }
         },
         "testkjnfsdkfladb": "thread_fctRXHx8nTIZqs4umt648OEH",
-        "testnewlastmaybe": "thread_O7GXPKtM25x6Zf1ruiQFG32D"
+        "testnewlastmaybe": "thread_O7GXPKtM25x6Zf1ruiQFG32D",
+        "newestmemoryname": {
+            "assigned_memory": "thread_KQwz3mrP1tzxP92htVcKdsTa"
+        }
     }
 }
