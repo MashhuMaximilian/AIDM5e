@@ -2,220 +2,339 @@
     "478629423822798849": {
         "name": "Text Channels",
         "default_memory": "gameplay",
-        "gameplay": "thread_0c8rZfdUlwvHXhkm3ix9cIF1",
-        "out-of-game": "thread_CrmsNipeQldswos53iTBnMF1",
+        "memory_threads": {
+            "gameplay": "thread_76unZzd1MG1wWOiwqZK9Tmes",
+            "out-of-game": "thread_NXgBGkOtH7ZzogBPCAfO4ubl"
+        },
         "channels": {
             "606235918004649984": {
                 "name": "tripsters",
-                "assigned_memory": "thread_0c8rZfdUlwvHXhkm3ix9cIF1",
+                "assigned_memory": "thread_76unZzd1MG1wWOiwqZK9Tmes",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "606235986380193823": {
                 "name": "chaosbringers",
-                "assigned_memory": "thread_0c8rZfdUlwvHXhkm3ix9cIF1",
+                "assigned_memory": "thread_76unZzd1MG1wWOiwqZK9Tmes",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "606236282133282826": {
                 "name": "fried-heads",
-                "assigned_memory": "thread_0c8rZfdUlwvHXhkm3ix9cIF1",
+                "assigned_memory": "thread_76unZzd1MG1wWOiwqZK9Tmes",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "606236334671265803": {
                 "name": "lost-ones",
-                "assigned_memory": "thread_0c8rZfdUlwvHXhkm3ix9cIF1",
+                "assigned_memory": "thread_76unZzd1MG1wWOiwqZK9Tmes",
                 "memory_name": "gameplay",
                 "threads": {}
             }
-        }
+        },
+        "gameplay": "thread_76unZzd1MG1wWOiwqZK9Tmes",
+        "out-of-game": "thread_NXgBGkOtH7ZzogBPCAfO4ubl"
     },
     "1285514953641426984": {
         "name": "Test DND",
         "default_memory": "gameplay",
-        "gameplay": "thread_iqdy7y5w0rH4VUhYbRuXOeDW",
-        "out-of-game": "thread_SJoL1vrZAK1CuQXetLrqvmne",
+        "memory_threads": {
+            "gameplay": "thread_kFqPJwILG34kc3HP0VDhOERw",
+            "out-of-game": "thread_6Nwzqd5wSaUyV4PuoV2gwgI5"
+        },
         "channels": {
             "1285514860171362335": {
                 "name": "dnd1",
-                "assigned_memory": "thread_iqdy7y5w0rH4VUhYbRuXOeDW",
+                "assigned_memory": "thread_kFqPJwILG34kc3HP0VDhOERw",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1285268966104895499": {
                 "name": "dnd",
-                "assigned_memory": "thread_iqdy7y5w0rH4VUhYbRuXOeDW",
+                "assigned_memory": "thread_kFqPJwILG34kc3HP0VDhOERw",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287421509215981651": {
                 "name": "session-summary",
-                "assigned_memory": "thread_iqdy7y5w0rH4VUhYbRuXOeDW",
+                "assigned_memory": "thread_kFqPJwILG34kc3HP0VDhOERw",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1294689272250761337": {
                 "name": "telldm",
-                "assigned_memory": "thread_SJoL1vrZAK1CuQXetLrqvmne",
+                "assigned_memory": "thread_6Nwzqd5wSaUyV4PuoV2gwgI5",
                 "memory_name": "out-of-game",
                 "threads": {}
             }
-        }
+        },
+        "gameplay": "thread_kFqPJwILG34kc3HP0VDhOERw",
+        "out-of-game": "thread_6Nwzqd5wSaUyV4PuoV2gwgI5"
     },
     "1286219880403701760": {
         "name": "CAMPAIGN1",
         "default_memory": "gameplay",
-        "gameplay": "thread_gcK5oDfgI7J06eM19tVpp7gR",
-        "out-of-game": "thread_nlGJIoZbavcCF11Md6pfBwMH",
+        "memory_threads": {
+            "gameplay": "thread_LYL13k2JCxdVPX3p346VxHRX",
+            "out-of-game": "thread_0qziVMx7WPsMex5gdWW0gb0z"
+        },
         "channels": {
             "1286220005637099591": {
                 "name": "gameplay",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286220070019665930": {
                 "name": "character-sheets",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286220100357197949": {
                 "name": "npcs",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286222356276052029": {
                 "name": "items",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286222506876735552": {
                 "name": "lore",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286222537726103623": {
                 "name": "teasers",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286222656965709888": {
                 "name": "encounters",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1286222718462726187": {
                 "name": "session-summary",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287054543107915878": {
                 "name": "2dm",
-                "assigned_memory": "thread_gcK5oDfgI7J06eM19tVpp7gR",
+                "assigned_memory": "thread_LYL13k2JCxdVPX3p346VxHRX",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287054600481804380": {
                 "name": "telldm",
-                "assigned_memory": "thread_nlGJIoZbavcCF11Md6pfBwMH",
+                "assigned_memory": "thread_0qziVMx7WPsMex5gdWW0gb0z",
                 "memory_name": "out-of-game",
                 "threads": {}
             }
-        }
+        },
+        "gameplay": "thread_LYL13k2JCxdVPX3p346VxHRX",
+        "out-of-game": "thread_0qziVMx7WPsMex5gdWW0gb0z"
     },
     "478629423822798851": {
         "name": "One-shot 1",
         "default_memory": "gameplay",
-        "gameplay": "thread_rC01dMzRjqhYNTjJyBO1whzN",
-        "out-of-game": "thread_XcEJg84AslDXuuib2KfZBQC7",
+        "memory_threads": {
+            "gameplay": "thread_tODIvdeheGy0ElAIGEszap5b",
+            "out-of-game": "thread_XRFlUUwJteLZaxjHDiYyu83n"
+        },
         "channels": {
             "1287054748033482762": {
                 "name": "gameplay",
-                "assigned_memory": "thread_rC01dMzRjqhYNTjJyBO1whzN",
+                "assigned_memory": "thread_tODIvdeheGy0ElAIGEszap5b",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287054795097509979": {
                 "name": "character-sheets",
-                "assigned_memory": "thread_rC01dMzRjqhYNTjJyBO1whzN",
+                "assigned_memory": "thread_tODIvdeheGy0ElAIGEszap5b",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287054923816636509": {
                 "name": "telldm",
-                "assigned_memory": "thread_XcEJg84AslDXuuib2KfZBQC7",
+                "assigned_memory": "thread_XRFlUUwJteLZaxjHDiYyu83n",
                 "memory_name": "out-of-game",
                 "threads": {}
             },
             "1287055085821759489": {
                 "name": "lore-and-more",
-                "assigned_memory": "thread_rC01dMzRjqhYNTjJyBO1whzN",
+                "assigned_memory": "thread_tODIvdeheGy0ElAIGEszap5b",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1287054869164724376": {
                 "name": "2dm",
-                "assigned_memory": "thread_rC01dMzRjqhYNTjJyBO1whzN",
+                "assigned_memory": "thread_tODIvdeheGy0ElAIGEszap5b",
                 "memory_name": "gameplay",
                 "threads": {}
             }
-        }
+        },
+        "gameplay": "thread_tODIvdeheGy0ElAIGEszap5b",
+        "out-of-game": "thread_XRFlUUwJteLZaxjHDiYyu83n"
     },
     "1287097422622757078": {
         "name": "testdnd 2",
         "default_memory": "gameplay",
-        "gameplay": "thread_gMk2H8JHU2A0lKZL7r51gwU3",
-        "out-of-game": "thread_uJDSH7DtpNtnBx37RrMQDwZa",
+        "memory_threads": {
+            "gameplay": "thread_TzIBBBY25WB5oWAugqrTLJau",
+            "out-of-game": "thread_i7vyjZKjyqTiNHEr4xB8GGQr"
+        },
         "channels": {
+            "1298952693234274414": {
+                "name": "asdfsdd",
+                "assigned_memory": "thread_IiLkacacbYenSkDjpyEc1h5W",
+                "memory_name": "newtestmemasdf",
+                "threads": {}
+            },
             "1287097440729567292": {
                 "name": "test",
-                "assigned_memory": "thread_gMk2H8JHU2A0lKZL7r51gwU3",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
                 "memory_name": "gameplay",
-                "threads": {}
+                "threads": {
+                    "1296775167510450189": {
+                        "name": "testThread",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1296783295484264479": {
+                        "name": "testthread",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1296784466601185361": {
+                        "name": "testThread",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    }
+                }
             },
             "1292204952722345994": {
                 "name": "feedback",
-                "assigned_memory": "thread_gMk2H8JHU2A0lKZL7r51gwU3",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1292383755687821407": {
                 "name": "session-summary",
-                "assigned_memory": "thread_gMk2H8JHU2A0lKZL7r51gwU3",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
                 "memory_name": "gameplay",
                 "threads": {}
             },
             "1294221710416941127": {
                 "name": "telldm",
-                "assigned_memory": "thread_uJDSH7DtpNtnBx37RrMQDwZa",
+                "assigned_memory": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
                 "memory_name": "out-of-game",
-                "threads": {}
+                "threads": {
+                    "1294681065239351317": {
+                        "name": "extras",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "out-of-game"
+                    },
+                    "1294940844486561813": {
+                        "name": "monsters and creatures",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "out-of-game"
+                    }
+                }
             },
             "1298305190671159317": {
                 "name": "test5",
-                "assigned_memory": "thread_O7GXPKtM25x6Zf1ruiQFG32D",
-                "memory_name": "testnewlastmaybe",
-                "threads": {}
-            },
-            "1298952693234274414": {
-                "name": "asdfsdd",
-                "assigned_memory": "thread_KQwz3mrP1tzxP92htVcKdsTa",
-                "memory_name": "newestmemoryname",
-                "threads": {}
+                "assigned_memory": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
+                "memory_name": "out-of-game",
+                "threads": {
+                    "1298307364960604242": {
+                        "name": "test5kkk",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298308054260912291": {
+                        "name": "test5,1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298309494878638196": {
+                        "name": "test5.2",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298317870291488902": {
+                        "name": "test5.3",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298323784503132261": {
+                        "name": "test5.4",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298325007021248605": {
+                        "name": "test55",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298325400572788770": {
+                        "name": "test56",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298325556252905562": {
+                        "name": "test57",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298335746758803557": {
+                        "name": "test54674",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298336702531764285": {
+                        "name": "test7776",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298337806099419216": {
+                        "name": "tetttttt",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298534218242068494": {
+                        "name": "3245",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298536124976726046": {
+                        "name": "sadasdfas",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298660697923911793": {
+                        "name": "newtest",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    },
+                    "1298950061153320972": {
+                        "name": "test66666",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    }
+                }
             }
         },
-        "testkjnfsdkfladb": "thread_fctRXHx8nTIZqs4umt648OEH",
-        "testnewlastmaybe": "thread_O7GXPKtM25x6Zf1ruiQFG32D",
-        "newestmemoryname": {
-            "assigned_memory": "thread_KQwz3mrP1tzxP92htVcKdsTa"
-        }
+        "gameplay": "thread_TzIBBBY25WB5oWAugqrTLJau",
+        "out-of-game": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
+        "newtestmemasdf": "thread_IiLkacacbYenSkDjpyEc1h5W"
     }
 }

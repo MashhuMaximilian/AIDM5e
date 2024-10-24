@@ -471,19 +471,14 @@ def setup_commands(tree, get_assistant_response):
         if memory == "CREATE NEW MEMORY":
             async with aiohttp.ClientSession() as session:
                 memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
-                category_data[memory_name] = {
-                    'assigned_memory': memory_thread_id
-                }
-                # Set memory_name to the created memory_name
-                memory_name = memory_name
+                # Directly set the new memory as a key-value pair
+                category_data[memory_name] = memory_thread_id  # Change this line to set as key-value pair
         else:
-            # Attempt to fetch the memory thread ID directly from category_data
             memory_thread_id = category_data.get(memory)
             if memory_thread_id is None:
                 await interaction.followup.send(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'. Available memories: {list(category_data.keys())}.")
                 return
 
-            # Here, set the memory_name to the current memory type being assigned
             memory_name = memory  # Use memory as the name
 
         # Update or create the channel entry
