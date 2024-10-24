@@ -438,7 +438,6 @@ def setup_commands(tree, get_assistant_response):
         async with aiohttp.ClientSession() as session:
             return await get_memory_options(interaction.channel.category.id, session, ["gameplay", "out-of-game"])
 
-
     @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
     async def assign_memory(
         interaction: discord.Interaction,
@@ -468,35 +467,59 @@ def setup_commands(tree, get_assistant_response):
 
         category_data = category_threads[category_id_str]
 
+        # Create new memory if necessary
         if memory == "CREATE NEW MEMORY":
             async with aiohttp.ClientSession() as session:
                 memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
-                # Directly set the new memory as a key-value pair
-                category_data[memory_name] = memory_thread_id  # Change this line to set as key-value pair
+                category_data['memory_threads'][memory_name] = memory_thread_id  # Set the new memory in memory_threads
         else:
-            memory_thread_id = category_data.get(memory)
+            memory_thread_id = category_data['memory_threads'].get(memory)
             if memory_thread_id is None:
-                await interaction.followup.send(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'. Available memories: {list(category_data.keys())}.")
+                await interaction.followup.send(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'. Available memories: {list(category_data['memory_threads'].keys())}.")
                 return
 
             memory_name = memory  # Use memory as the name
 
         # Update or create the channel entry
         channel_id_str = str(channel)
-        if channel_id_str in category_data['channels']:
-            channel_data = category_data['channels'][channel_id_str]
-            channel_data['assigned_memory'] = memory_thread_id
-            channel_data['memory_name'] = memory_name  # Update memory_name here
-        else:
-            category_data['channels'][channel_id_str] = {
+        channel_data = category_data['channels'].get(channel_id_str)
+
+        if not channel_data:
+            # If no channel data exists, create a new channel entry
+            channel_data = {
                 "name": channel_obj.name,
                 "assigned_memory": memory_thread_id,
-                "memory_name": memory_name,  # Set memory_name here
+                "memory_name": memory_name,
                 "threads": {}
             }
+            category_data['channels'][channel_id_str] = channel_data
 
+        # Update memory assignment for a specific thread if provided
+        if thread:
+            thread_id_str = str(thread.id)
+            thread_name = thread.name
+            # Assign the memory to the thread within the channel
+            channel_data['threads'][thread_id_str] = {
+                "name": thread_name,
+                "assigned_memory": memory_thread_id,
+                "memory_name": memory_name
+            }
+            # Also add the thread to memory_threads if it's not already there
+            category_data['memory_threads'][memory_name] = memory_thread_id
+        else:
+            # If no thread is specified, assign the memory to the entire channel
+            channel_data['assigned_memory'] = memory_thread_id
+            channel_data['memory_name'] = memory_name
+            # Update the memory_threads with the channel-wide memory
+            category_data['memory_threads'][memory_name] = memory_thread_id
+
+        # Save the updated JSON data
         save_thread_data(category_threads)
-        await interaction.followup.send(f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
+
+        if thread:
+            await interaction.followup.send(f"Memory '{memory_name}' assigned to thread '{thread.name}' in channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
+        else:
+            await interaction.followup.send(f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
 
     # Autocomplete for 'channel' parameter
     @assign_memory.autocomplete('channel')

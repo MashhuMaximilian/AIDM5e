@@ -190,13 +190,16 @@
         "default_memory": "gameplay",
         "memory_threads": {
             "gameplay": "thread_TzIBBBY25WB5oWAugqrTLJau",
-            "out-of-game": "thread_i7vyjZKjyqTiNHEr4xB8GGQr"
+            "out-of-game": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
+            "testmemoryyyyyy": "thread_WpCaIW1zGjRcJKtvzksSctju",
+            "newestmemoryname": "thread_05x4XVfdIQWl1HeXAjwexl2M",
+            "newmemorytestdforthrewadisitwhreithastobe": "thread_EvwnfdJsrVfrbbxm3T94zpeq"
         },
         "channels": {
             "1298952693234274414": {
                 "name": "asdfsdd",
-                "assigned_memory": "thread_IiLkacacbYenSkDjpyEc1h5W",
-                "memory_name": "newtestmemasdf",
+                "assigned_memory": "thread_05x4XVfdIQWl1HeXAjwexl2M",
+                "memory_name": "newestmemoryname",
                 "threads": {}
             },
             "1287097440729567292": {
@@ -258,17 +261,17 @@
                     "1298307364960604242": {
                         "name": "test5kkk",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298308054260912291": {
                         "name": "test5,1",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298309494878638196": {
                         "name": "test5.2",
-                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "assigned_memory": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
+                        "memory_name": "newmemorytestdforthrewadisitwhreithastobe"
                     },
                     "1298317870291488902": {
                         "name": "test5.3",
@@ -278,63 +281,66 @@
                     "1298323784503132261": {
                         "name": "test5.4",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298325007021248605": {
                         "name": "test55",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298325400572788770": {
                         "name": "test56",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298325556252905562": {
                         "name": "test57",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298335746758803557": {
                         "name": "test54674",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298336702531764285": {
                         "name": "test7776",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298337806099419216": {
                         "name": "tetttttt",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298534218242068494": {
                         "name": "3245",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298536124976726046": {
                         "name": "sadasdfas",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298660697923911793": {
                         "name": "newtest",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     },
                     "1298950061153320972": {
                         "name": "test66666",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": "gameplay"
+                        "memory_name": "out-of-game"
                     }
                 }
             }
         },
         "gameplay": "thread_TzIBBBY25WB5oWAugqrTLJau",
         "out-of-game": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
-        "newtestmemasdf": "thread_IiLkacacbYenSkDjpyEc1h5W"
+        "testmemoryyyyyy": "thread_WpCaIW1zGjRcJKtvzksSctju",
+        "testtjread5555": "thread_ejCqdP14hlbmAl0A8drNuUjg",
+        "newestmemoryname": "thread_05x4XVfdIQWl1HeXAjwexl2M",
+        "newmemorytestdforthrewadisitwhreithastobe": "thread_EvwnfdJsrVfrbbxm3T94zpeq"
     }
 }
