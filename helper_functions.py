@@ -56,11 +56,17 @@ async def send_to_telldm(interaction, response, category_id, memory_name):
             logging.error("Channel #telldm not found.")
 
 async def fetch_discord_threads(channel):
-    """Fetches all available threads in a given channel."""
+    """Fetches all available threads in a given channel and populates from the JSON file."""
     discord_threads = []
-    # Check for threads in the specified channel
+    # Fetching threads directly from Discord
     for thread in channel.threads:
         discord_threads.append(thread)
+    
+    # Load the category threads from the JSON file to compare or augment
+    category_id = str(channel.category.id) if channel.category else None
+    if category_id in category_threads:
+        logging.info(f"Threads for category {category_id}: {category_threads[category_id]}")
+    
     return discord_threads
 
 # Function to summarize the conversation
@@ -192,7 +198,7 @@ def load_thread_data():
             with open(thread_data_path, 'r') as f:
                 try:
                     category_threads = json.load(f)
-                    logging.info(f"Loaded thread data: {category_threads}")
+                    logging.info(f"Loaded thread data: {str(category_threads)[-100:]}")
                 except json.JSONDecodeError as e:
                     logging.error(f"Error loading JSON data: {e}. Initializing empty thread data.")
                     category_threads = {}

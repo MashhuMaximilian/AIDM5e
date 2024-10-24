@@ -131,8 +131,6 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send("No content to summarize.")  # Optional: handle empty response
 
-
-
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):
         await interaction.response.defer()  # Defer the response while processing the feedback
@@ -438,17 +436,20 @@ def setup_commands(tree, get_assistant_response):
         async with aiohttp.ClientSession() as session:
             return await get_memory_options(interaction.channel.category.id, session, ["gameplay", "out-of-game"])
 
+
+
+
     @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
     async def assign_memory(
         interaction: discord.Interaction,
         channel: str,
         memory: str,
-        thread: discord.Thread = None,
+        thread: str = None,  # Keep as str
         memory_name: str = None,
     ):
         await interaction.response.defer()
 
-        if memory == "CREATE NEW MEMORY" and memory_name is None:
+        if memory == "CREATE NEW MEMORY" and not memory_name:
             await interaction.followup.send("Error: You must provide a name for the new memory.")
             return
 
@@ -496,8 +497,14 @@ def setup_commands(tree, get_assistant_response):
 
         # Update memory assignment for a specific thread if provided
         if thread:
-            thread_id_str = str(thread.id)
-            thread_name = thread.name
+            # Convert the thread ID string back to a Thread object
+            thread_obj = await interaction.guild.fetch_channel(int(thread))  # Assuming `thread` is the ID of the thread
+            if not isinstance(thread_obj, discord.Thread):
+                await interaction.followup.send(f"Error: Thread with ID '{thread}' not found or is not a thread.")
+                return
+
+            thread_id_str = str(thread_obj.id)
+            thread_name = thread_obj.name
             # Assign the memory to the thread within the channel
             channel_data['threads'][thread_id_str] = {
                 "name": thread_name,
@@ -517,17 +524,67 @@ def setup_commands(tree, get_assistant_response):
         save_thread_data(category_threads)
 
         if thread:
-            await interaction.followup.send(f"Memory '{memory_name}' assigned to thread '{thread.name}' in channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
+            await interaction.followup.send(f"Memory '{memory_name}' assigned to thread '{thread_obj.name}' in channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
         else:
             await interaction.followup.send(f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
+
+# Autocomplete for 'thread' parameter
+    @assign_memory.autocomplete('thread')
+    async def thread_autocomplete(interaction: discord.Interaction, current: str):
+        # Access the channel ID directly from the interaction data
+        channel_id = int(interaction.data['options'][0]['value'])  # Get the channel ID
+        channel_obj = interaction.guild.get_channel(channel_id)
+
+        if not channel_obj:
+            return []
+
+        # Fetch active threads
+        active_threads = channel_obj.threads  # This is a list of active threads
+
+        # Fetch archived threads
+        archived_threads = []
+        async for thread in channel_obj.archived_threads():  # Iterate over the async generator
+            archived_threads.append(thread)
+
+        all_threads = active_threads + archived_threads
+
+        # Filter threads by current input
+        matching_threads = [
+            discord.app_commands.Choice(name=thread.name, value=str(thread.id))  # Ensure value is a string
+            for thread in all_threads if current.lower() in thread.name.lower()
+        ]
+
+        return matching_threads[:25]  # Limit to 25 suggestions
+
 
     # Autocomplete for 'channel' parameter
     @assign_memory.autocomplete('channel')
     async def channel_autocomplete(interaction: discord.Interaction, current: str):
         return await get_channels_in_category(interaction.channel.category, interaction.guild)
 
-    # Autocomplete for 'memory' parameter
+    # Autocomplete for 'memory' parameter to get all threads from memory_threads
     @assign_memory.autocomplete('memory')
     async def memory_autocomplete(interaction: discord.Interaction, current: str):
-        async with aiohttp.ClientSession() as session:
-            return await get_memory_options(interaction.channel.category.id, session, ["gameplay", "out-of-game"])
+        category_id_str = str(interaction.channel.category.id)
+
+        # Load the memory_threads from the JSON
+        category_threads = load_thread_data()  # Load your JSON data
+        if category_id_str not in category_threads:
+            return []
+
+        # Get all memory threads from the category
+        memory_threads = category_threads[category_id_str].get('memory_threads', {})
+
+        # Create a list for matching memories, including the "Create New Memory" option
+        matching_memories = [
+            discord.app_commands.Choice(name="Create New Memory", value="CREATE NEW MEMORY")
+        ]
+
+        # Filter memory thread names by user input
+        matching_memories += [
+            discord.app_commands.Choice(name=memory_name, value=memory_name)
+            for memory_name in memory_threads if current.lower() in memory_name.lower()
+        ]
+
+        return matching_memories[:25]  # Limit to 25 suggestions
+ 
