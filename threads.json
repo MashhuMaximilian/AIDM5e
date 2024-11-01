@@ -195,7 +195,10 @@
             "newestmemoryname": "thread_05x4XVfdIQWl1HeXAjwexl2M",
             "newmemorytestdforthrewadisitwhreithastobe": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
             "memoryforExtranewTest": "thread_ixXxaUrs600JsP2KSY6D13KA",
-            "novthread": "thread_55ZIvxQF2knvFQnX7utW8Oro"
+            "novthread": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+            "null": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+            "newestTestMemoryy": "thread_2HZIOaesENGerbSAkW6xpHId",
+            "newestTESTmemory": "thread_pYLXKrnjp0wDPbFgkZcozgeR"
         },
         "channels": {
             "1298952693234274414": {
@@ -262,8 +265,8 @@
             },
             "1298305190671159317": {
                 "name": "test5",
-                "assigned_memory": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
-                "memory_name": "newmemorytestdforthrewadisitwhreithastobe",
+                "assigned_memory": "'thread_pYLXKrnjp0wDPbFgkZcozgeR'.",
+                "memory_name": "newestTESTmemory",
                 "threads": {
                     "1298307364960604242": {
                         "name": "test5kkk",
@@ -344,28 +347,271 @@
             },
             "1299003181275287636": {
                 "name": "test16",
-                "assigned_memory": "thread_55ZIvxQF2knvFQnX7utW8Oro",
-                "memory_name": "novthread",
+                "assigned_memory": "thread_i7vyjZKjyqTiNHEr4xB8GGQr",
+                "memory_name": "out-of-game",
                 "threads": {
                     "1299003628262129758": {
                         "name": "test166",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": null
+                        "memory_name": "out-of-game"
                     },
                     "1299004671167434812": {
                         "name": "test16666",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": null
+                        "memory_name": "out-of-game"
                     },
                     "1299008926167207946": {
                         "name": "test16test",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
-                        "memory_name": null
+                        "memory_name": "out-of-game"
                     },
                     "1299010282634612840": {
                         "name": "test16new",
                         "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "testmemoryyyyyy"
+                    },
+                    "1301845004498763807": {
+                        "name": "novDiscThread",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "out-of-game"
+                    },
+                    "1301845386146746368": {
+                        "name": "tetnov",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "out-of-game"
+                    }
+                }
+            },
+            "1301864026426576939": {
+                "name": "test17new",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                "memory_name": "gameplay",
+                "threads": {
+                    "1301864031514267669": {
+                        "name": "TEST17NEWthread",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    }
+                }
+            },
+            "1301865359598686259": {
+                "name": "test18",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                "memory_name": "gameplay",
+                "threads": {
+                    "1301865361737519164": {
+                        "name": "test18.2",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    }
+                }
+            },
+            "1301867671729471559": {
+                "name": "test19",
+                "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                "memory_name": "gameplay",
+                "threads": {
+                    "1301867673759776829": {
+                        "name": "test199afkjb",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "gameplay"
+                    }
+                }
+            },
+            "1301869100821123096": {
+                "name": "test20",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301869102897565771": {
+                        "name": "test20.1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
                         "memory_name": null
+                    }
+                }
+            },
+            "1301869327317860422": {
+                "name": "test21",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301869329457090682": {
+                        "name": "test2122",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301872571117211688": {
+                "name": "test222",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301872573323411486": {
+                        "name": "test222.22",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301874213157732373": {
+                "name": "test23",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {}
+            },
+            "1301874724552445965": {
+                "name": "test24",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {}
+            },
+            "1301878081447006290": {
+                "name": "test25",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301878082902425660": {
+                        "name": "test25.5",
+                        "assigned_memory": null,
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301880239709884416": {
+                "name": "test26",
+                "assigned_memory": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
+                "memory_name": "newmemorytestdforthrewadisitwhreithastobe",
+                "threads": {
+                    "1301880240695676968": {
+                        "name": "test266",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "newmemorytestdforthrewadisitwhreithastobe"
+                    }
+                }
+            },
+            "1301881314986692618": {
+                "name": "test27",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301881315917828237": {
+                        "name": "test27.1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301883161122443284": {
+                "name": "test28",
+                "assigned_memory": "thread_2HZIOaesENGerbSAkW6xpHId",
+                "memory_name": "newestTestMemoryy",
+                "threads": {
+                    "1301883162389119018": {
+                        "name": "test28.8",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "newestTestMemoryy"
+                    }
+                }
+            },
+            "1301884665426087936": {
+                "name": "test29",
+                "assigned_memory": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+                "memory_name": "novthread",
+                "threads": {
+                    "1301884666520928268": {
+                        "name": "test29.1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "novthread"
+                    }
+                }
+            },
+            "1301885182277845124": {
+                "name": "test30",
+                "assigned_memory": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+                "memory_name": "novthread",
+                "threads": {
+                    "1301885183783604254": {
+                        "name": "test30.1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "novthread"
+                    }
+                }
+            },
+            "1301885974799847486": {
+                "name": "test31",
+                "assigned_memory": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+                "memory_name": "novthread",
+                "threads": {
+                    "1301885975999545375": {
+                        "name": "test31.1",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "novthread"
+                    }
+                }
+            },
+            "1301886374445715477": {
+                "name": "test32",
+                "assigned_memory": "thread_2HZIOaesENGerbSAkW6xpHId",
+                "memory_name": "newestTestMemoryy",
+                "threads": {
+                    "1301886375481835621": {
+                        "name": "test322",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "newestTestMemoryy"
+                    }
+                }
+            },
+            "1301887315693670450": {
+                "name": "test33",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301887316662685778": {
+                        "name": "test33.3",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301888376215175229": {
+                "name": "test24",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301888377645170789": {
+                        "name": "test244",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301888945537286165": {
+                "name": "test35",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1301888946145591309": {
+                        "name": "test355",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
+            },
+            "1301891768505204818": {
+                "name": "test36",
+                "assigned_memory": "'thread_EvwnfdJsrVfrbbxm3T94zpeq'.",
+                "memory_name": "newmemorytestdforthrewadisitwhreithastobe",
+                "threads": {
+                    "1301891769725882388": {
+                        "name": "test266",
+                        "assigned_memory": "'thread_pYLXKrnjp0wDPbFgkZcozgeR'.",
+                        "memory_name": "newestTESTmemory"
+                    },
+                    "1301891878806884444": {
+                        "name": "test366",
+                        "assigned_memory": "'thread_EvwnfdJsrVfrbbxm3T94zpeq'.",
+                        "memory_name": "newmemorytestdforthrewadisitwhreithastobe"
                     }
                 }
             }

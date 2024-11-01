@@ -153,20 +153,58 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
 
-async def handle_channel_creation(channel, channel_name, guild, category, interaction):
+async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
-        new_channel = await guild.create_text_channel(channel_name, category=category)
-        await interaction.followup.send(f"New channel created: {new_channel.mention}")
+        # Create new channel
+        new_channel = await guild.create_text_channel(name=channel_name, category=category)
+        logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")
         return new_channel
     else:
-        # Attempt to find the channel by ID or name
-        existing_channel = discord.utils.get(guild.channels, id=int(channel))  # Ensure channel ID is an integer
-        if existing_channel:
-            return existing_channel
-        else:
-            await interaction.followup.send(f"Error: Channel '{channel}' not found.")
+        # Retrieve existing channel
+        target_channel = guild.get_channel(int(channel))  # Ensure channel ID is converted to int
+        if target_channel is None:
+            await interaction.followup.send("Error: Channel not found.")
             return None
+        return target_channel
 
+async def handle_thread_creation(interaction, channel, thread_name, category_id, memory_name=None):
+    # Example logic for creating a thread
+    if thread_name:
+        existing_threads = [t for t in channel.threads if t.name == thread_name]
+        if existing_threads:
+            return None, f"A thread with the name '{thread_name}' already exists."
+        
+        thread = await channel.create_thread(name=thread_name)
+        logging.info(f"Created new thread: {thread.id} ({thread.name})")
+        
+        # Immediately update JSON for the new thread
+        category_threads = load_thread_data()
+        category_id_str = str(category_id)
+
+        # Create an entry for the new thread in the JSON
+        if category_id_str in category_threads:
+            channel_data = category_threads[category_id_str]['channels'].setdefault(str(channel.id), {
+                "name": channel.name,
+                "assigned_memory": None,
+                "memory_name": None,
+                "threads": {}
+            })
+            channel_data['threads'][str(thread.id)] = {
+                "name": thread.name,
+                "assigned_memory": None,
+                "memory_name": None
+            }
+
+            # Save the updated JSON data
+            save_thread_data(category_threads)
+
+            # Optionally assign memory to the new thread if provided
+            if memory_name:
+                await assign_memory(interaction, memory_name, str(channel.id), str(thread.id))
+
+        return thread, None
+    else:
+        return None, "Error: You must provide a name for the new thread."
 
 # Path to store thread data
 thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
@@ -208,7 +246,6 @@ def load_thread_data():
 
     return category_threads  # Return loaded data
 
-
 async def set_default_memory(category_id):
     """Set the default memory for a category to 'gameplay' if not already set."""
     global category_threads
@@ -222,72 +259,107 @@ async def set_default_memory(category_id):
     save_thread_data(category_threads)  # Save the updated data
     logging.info(f"Default memory set for category {category_id}.")
 
-async def assign_memory(category_id, memory_name, channel_id=None):
-    """Assign memory to a category or a specific channel."""
-    # Load existing thread data from JSON
+async def create_memory(interaction: discord.Interaction, memory_name: str, category_id_str: str):
+    async with aiohttp.ClientSession() as session:
+        memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
+
+    # Load the current category threads data
     category_threads = load_thread_data()
-
-    # Ensure category_id is a string for consistent JSON handling
-    category_id_str = str(category_id)
-
-    # Log current data for this category
-    logging.info(f"Current data for category {category_id_str}: {category_threads.get(category_id_str, {})}")
-
-    # Check if the category exists in the loaded data
     if category_id_str not in category_threads:
-        # Initialize if the category does not exist
-        category_threads[category_id_str] = {
-            'memory': {},
-            'channels': {}
-        }
+        category_threads[category_id_str] = {'memory_threads': {}, 'channels': {}}
 
-    # Assign memory to the specified channel or category
-    if channel_id is not None:
-        channel_id_str = str(channel_id)
-        if channel_id_str not in category_threads[category_id_str]['channels']:
-            # Initialize channel data if it doesn't exist
-            category_threads[category_id_str]['channels'][channel_id_str] = {
-                "memory_name": memory_name,
-                "assigned_memory": "",  # Initially empty
-                "threads": {}
-            }
+    # Store the new memory in the memory_threads
+    category_threads[category_id_str]['memory_threads'][memory_name] = memory_thread_id
 
-        # Now, find the thread ID corresponding to the memory_name in the category's memory section
-        memory_thread_id = category_threads[category_id_str]['memory'].get(memory_name, {}).get('assigned_memory')
-
-        if memory_thread_id is None:
-            logging.error(f"No thread ID found for memory '{memory_name}' in category '{category_id_str}'.")
-            return "Error: No thread ID found for the specified memory."
-
-        # Update assigned_memory for the channel
-        category_threads[category_id_str]['channels'][channel_id_str]['assigned_memory'] = memory_thread_id
-
-        # Also, create/update the thread in that channel
-        category_threads[category_id_str]['channels'][channel_id_str]['threads'][memory_thread_id] = {
-            "name": memory_name,  # Use memory_name for the thread name
-            "assigned_memory": memory_thread_id,  # Set to the correct thread ID
-            "memory_name": memory_name
-        }
-
-    # Save the updated thread data back to the JSON file
+    # Save the updated JSON data
     save_thread_data(category_threads)
 
-async def create_or_assign_memory(session, memory, memory_name, category_id_str):
-    # Your logic for creating or retrieving a memory thread ID
-    new_thread_id = f"thread_{memory_name}"  # Replace this with your logic to get the actual thread ID
+    return memory_thread_id  # Return the ID of the created memory thread
 
-    # Update the category_threads dictionary with the correct thread ID
-    if category_id_str in category_threads:
-        for channel_id, channel_data in category_threads[category_id_str]['channels'].items():
-            if channel_data['memory_name'] == memory_name:  # If memory name matches
-                channel_data['assigned_memory'] = new_thread_id  # Update assigned_memory to the thread ID
+async def assign_memory(
+    interaction: discord.Interaction,
+    memory: str,
+    channel_id: str = None,
+    thread_id: str = None,
+    memory_name: str = None,
+):
+    # No need to defer again since it's already been done
+    logging.info(f"Assigning memory: {memory}, channel_id: {channel_id}, thread_id: {thread_id}, memory_name: {memory_name}")
 
-            # Update the threads within that channel
-            for thread_id, thread_data in channel_data.get('threads', {}).items():
-                if thread_data['memory_name'] == memory_name:
-                    thread_data['assigned_memory'] = new_thread_id  # Ensure assigned_memory is updated to the thread ID
+    if memory == "CREATE NEW MEMORY" and not memory_name:
+        logging.error("Error: You must provide a name for the new memory.")
+        return "Error: You must provide a name for the new memory."
 
-    return new_thread_id  # Return the new thread ID if needed
+    channel_obj = interaction.guild.get_channel(int(channel_id))
+    if not channel_obj:
+        logging.error("Invalid channel specified.")
+        return "Invalid channel specified. Please specify a valid channel."
+
+    category_id_str = str(interaction.channel.category.id)
+    category_threads = load_thread_data()  # Load your JSON data
+
+    if category_id_str not in category_threads:
+        logging.error(f"Error: Category ID '{category_id_str}' does not exist.")
+        return f"Error: Category ID '{category_id_str}' does not exist."
+
+    category_data = category_threads[category_id_str]
+
+    # Create a new memory if necessary
+    if memory == "CREATE NEW MEMORY":
+        async with aiohttp.ClientSession() as session:
+            memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
+            category_data['memory_threads'][memory_name] = memory_thread_id  # Set the new memory in memory_threads
+            logging.info(f"New memory created: {memory_name} with ID: {memory_thread_id}")
+    else:
+        memory_thread_id = category_data['memory_threads'].get(memory)
+        if memory_thread_id is None:
+            logging.error(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'.")
+            return f"Error: Memory '{memory}' does not exist in category '{category_id_str}'. Available memories: {list(category_data['memory_threads'].keys())}."
+
+        memory_name = memory  # Use memory as the name
+        logging.info(f"Using existing memory: {memory_name}")
+
+    # Update or create the channel entry
+    channel_data = category_data['channels'].setdefault(str(channel_id), {
+        "name": channel_obj.name,
+        "assigned_memory": None,
+        "memory_name": None,
+        "threads": {}
+    })
+
+    # Update memory assignment for a specific thread if provided
+    if thread_id:
+        thread_obj = await interaction.guild.fetch_channel(int(thread_id))  # Assuming `thread` is the ID of the thread
+        if not isinstance(thread_obj, discord.Thread):
+            logging.error(f"Error: Thread with ID '{thread_id}' not found or is not a thread.")
+            return f"Error: Thread with ID '{thread_id}' not found or is not a thread."
+
+        thread_id_str = str(thread_obj.id)
+        thread_name = thread_obj.name
+
+        logging.info(f"Assigning memory to thread: {thread_name}, ID: {thread_id_str}")
+        # Assign the memory to the thread within the channel
+        channel_data['threads'][thread_id_str] = {
+            "name": thread_name,
+            "assigned_memory": memory_thread_id,
+            "memory_name": memory_name
+        }
+    else:
+        # If no thread is specified, assign the memory to the entire channel
+        logging.info(f"Assigning memory to channel: {channel_obj.name}")
+        channel_data['assigned_memory'] = memory_thread_id
+        channel_data['memory_name'] = memory_name
+        # Update the memory_threads with the channel-wide memory
+        category_data['memory_threads'][memory_name] = memory_thread_id
+
+    # Save the updated JSON data
+    save_thread_data(category_threads)
+    logging.info("Thread data saved successfully.")
+
+    if thread_id:
+        return f"Memory '{memory_name}' assigned to thread '{thread_obj.name}' in channel '{channel_obj.name}' with thread ID '{memory_thread_id}'."
+    else:
+        return f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'."
 
 
 async def get_channels_in_category(category, guild):
@@ -295,7 +367,6 @@ async def get_channels_in_category(category, guild):
         app_commands.Choice(name=channel.name, value=str(channel.id))
         for channel in guild.text_channels if channel.category == category
     ]
-
 
 async def get_memory_options(category_id, session, predefined_threads):
     if category_id not in category_threads:
@@ -308,24 +379,6 @@ async def get_memory_options(category_id, session, predefined_threads):
         app_commands.Choice(name=thread_name, value=thread_name)
         for thread_name in category_threads[category_id].keys()
     ] + [app_commands.Choice(name="CREATE NEW MEMORY", value="CREATE NEW MEMORY")]
-
-
-async def handle_thread_creation(channel, thread_name, category_id, memory_name=None):
-    # Example logic for creating a thread
-    if thread_name:
-        existing_threads = [t for t in channel.threads if t.name == thread_name]
-        if existing_threads:
-            return None, f"A thread with the name '{thread_name}' already exists."
-        
-        thread = await channel.create_thread(name=thread_name)
-        if memory_name:
-            # Additional memory handling logic here
-            pass
-        
-        return thread, None
-    else:
-        return None, "Error: You must provide a name for the new thread."
-
 
 async def get_assigned_memory(category_id):
     """Fetch the assigned memory for a specific category."""
