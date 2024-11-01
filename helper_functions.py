@@ -206,6 +206,7 @@ async def handle_thread_creation(interaction, channel, thread_name, category_id,
     else:
         return None, "Error: You must provide a name for the new thread."
 
+
 # Path to store thread data
 thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
 category_threads = {}
@@ -361,7 +362,6 @@ async def assign_memory(
     else:
         return f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'."
 
-
 async def get_channels_in_category(category, guild):
     return [
         app_commands.Choice(name=channel.name, value=str(channel.id))
@@ -381,27 +381,17 @@ async def get_memory_options(category_id, session, predefined_threads):
     ] + [app_commands.Choice(name="CREATE NEW MEMORY", value="CREATE NEW MEMORY")]
 
 async def get_assigned_memory(category_id):
-    """Fetch the assigned memory for a specific category."""
-    # Load the current thread data from JSON
-    category_threads = load_thread_data()
+    """Get the assigned memory for the category."""
+    category_data = category_threads.get(category_id)
+    if category_data:
+        # Check if "out-of-game" memory exists
+        out_of_game_memory_id = category_data['memory_threads'].get("out-of-game")
+        if out_of_game_memory_id:
+            return out_of_game_memory_id
+    
+    logging.info(f"No assigned memory found for category {category_id}.")
+    return None
 
-    # Ensure category_id is a string for consistent JSON handling
-    category_id_str = str(category_id)
-
-    # Check if the category exists in the loaded data
-    if category_id_str in category_threads:
-        # Retrieve the assigned memory for the category
-        assigned_memory = category_threads[category_id_str].get('assigned_memory', None)
-        
-        if assigned_memory is not None:
-            logging.info(f"Assigned memory for category {category_id_str}: {assigned_memory}")
-            return assigned_memory
-        else:
-            logging.info(f"No assigned memory found for category {category_id_str}.")
-            return None
-    else:
-        logging.error(f"Category {category_id_str} does not exist in the thread data.")
-        return None
 
 async def initialize_threads(guild):
     """Initialize threads for each category and create OpenAI threads if necessary."""
