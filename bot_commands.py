@@ -104,7 +104,7 @@ def setup_commands(tree, get_assistant_response):
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to summarize.",
-        query="Additional requests or context for the summary."
+        query="Additional requests or context for the recap."
     )
     async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None):
         await interaction.response.defer()  # Defer the response while processing
@@ -176,7 +176,7 @@ def setup_commands(tree, get_assistant_response):
 
 
         # Step 7: Confirm that the feedback was processed
-        await interaction.followup.send(f"Feedback has been processed and a summary has been posted in {feedback_channel.mention}.")
+        await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
 
 
 
@@ -187,13 +187,13 @@ def setup_commands(tree, get_assistant_response):
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to send (comma-separated if multiple).",
-        summarize_options="Options for summarization: yes, no, only summary.",
+        summarize_options="Options for summarization: yes, no, only recap.",
         query="Additional requests or context for the messages."
     )
     @app_commands.choices(summarize_options=[
         app_commands.Choice(name="Yes", value="yes"),
         app_commands.Choice(name="No", value="no"),
-        app_commands.Choice(name="Only Summary", value="only summary")
+        app_commands.Choice(name="Only Recap", value="only summary")
     ])
     async def send(
         interaction: discord.Interaction,
@@ -248,7 +248,7 @@ def setup_commands(tree, get_assistant_response):
                 summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
-                await interaction.followup.send(f"Messages and summary sent successfully to {'subchannel' if subchannel else 'channel'} <#{target_channel_obj.id}>.")
+                await interaction.followup.send(f"Messages and recap sent successfully to {'subchannel' if subchannel else 'channel'} <#{target_channel_obj.id}>.")
 
             elif summarize_options == "no":
                 if messages_sent:
@@ -258,7 +258,7 @@ def setup_commands(tree, get_assistant_response):
                 summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
                 if summary:
                     await send_response_in_chunks(target, summary)
-                await interaction.followup.send(f"Summary sent successfully to {'subchannel' if subchannel else 'channel'} <#{target_channel_obj.id}>.")
+                await interaction.followup.send(f"Recap sent successfully to {'subchannel' if subchannel else 'channel'} <#{target_channel_obj.id}>.")
 
         else:
             await interaction.followup.send(f"Cannot send messages to {target_channel_obj.name}. Must be in the same category.")
