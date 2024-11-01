@@ -432,3 +432,58 @@ def get_category_id(interaction):
     """Retrieve the category ID of the channel where the interaction occurred."""
     channel = interaction.channel
     return channel.category.id if channel.category else None
+
+
+# Define reusable autocomplete functions
+async def thread_autocomplete(interaction: discord.Interaction, current: str):
+    channel_id = int(interaction.data['options'][0]['value'])  # Access channel ID from interaction data
+    channel_obj = interaction.guild.get_channel(channel_id)
+
+    if not channel_obj:
+        return []
+
+    # Fetch active and archived threads
+    active_threads = channel_obj.threads
+    archived_threads = []
+    async for thread in channel_obj.archived_threads():
+        archived_threads.append(thread)
+
+    all_threads = active_threads + archived_threads
+
+    # Filter threads by current input
+    matching_threads = [
+        discord.app_commands.Choice(name=thread.name, value=str(thread.id))
+        for thread in all_threads if current.lower() in thread.name.lower()
+    ]
+
+    return matching_threads[:25]  # Limit to 25 suggestions
+
+
+async def channel_autocomplete(interaction: discord.Interaction, current: str):
+    # Assuming get_channels_in_category is a function you've defined for fetching channels in a category
+    return await get_channels_in_category(interaction.channel.category, interaction.guild)
+
+
+async def memory_autocomplete(interaction: discord.Interaction, current: str):
+    category_id_str = str(interaction.channel.category.id)
+
+    # Load the memory_threads from JSON data
+    category_threads = load_thread_data()
+    if category_id_str not in category_threads:
+        return []
+
+    # Get all memory threads for the category
+    memory_threads = category_threads[category_id_str].get('memory_threads', {})
+
+    # Create list for matching memories, including "Create New Memory" option
+    matching_memories = [
+        discord.app_commands.Choice(name="CREATE A NEW MEMORY", value="CREATE NEW MEMORY")
+    ]
+
+    # Filter memory names by input
+    matching_memories += [
+        discord.app_commands.Choice(name=memory_name, value=memory_name)
+        for memory_name in memory_threads if current.lower() in memory_name.lower()
+    ]
+
+    return matching_memories[:25]  # Limit to 25 suggestions

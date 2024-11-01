@@ -194,7 +194,8 @@
             "testmemoryyyyyy": "thread_WpCaIW1zGjRcJKtvzksSctju",
             "newestmemoryname": "thread_05x4XVfdIQWl1HeXAjwexl2M",
             "newmemorytestdforthrewadisitwhreithastobe": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
-            "memoryforExtranewTest": "thread_ixXxaUrs600JsP2KSY6D13KA"
+            "memoryforExtranewTest": "thread_ixXxaUrs600JsP2KSY6D13KA",
+            "novthread": "thread_55ZIvxQF2knvFQnX7utW8Oro"
         },
         "channels": {
             "1298952693234274414": {
@@ -254,8 +255,8 @@
                     },
                     "1298988003452260378": {
                         "name": "telldmnewthreadstest",
-                        "assigned_memory": "thread_ixXxaUrs600JsP2KSY6D13KA",
-                        "memory_name": "memoryforExtranewTest"
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": "out-of-game"
                     }
                 }
             },
@@ -340,6 +341,33 @@
                         "memory_name": "newmemorytestdforthrewadisitwhreithastobe"
                     }
                 }
+            },
+            "1299003181275287636": {
+                "name": "test16",
+                "assigned_memory": "thread_55ZIvxQF2knvFQnX7utW8Oro",
+                "memory_name": "novthread",
+                "threads": {
+                    "1299003628262129758": {
+                        "name": "test166",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    },
+                    "1299004671167434812": {
+                        "name": "test16666",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    },
+                    "1299008926167207946": {
+                        "name": "test16test",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    },
+                    "1299010282634612840": {
+                        "name": "test16new",
+                        "assigned_memory": "thread_TzIBBBY25WB5oWAugqrTLJau",
+                        "memory_name": null
+                    }
+                }
             }
         },
         "gameplay": "thread_TzIBBBY25WB5oWAugqrTLJau",
@@ -348,6 +376,7 @@
         "testtjread5555": "thread_ejCqdP14hlbmAl0A8drNuUjg",
         "newestmemoryname": "thread_05x4XVfdIQWl1HeXAjwexl2M",
         "newmemorytestdforthrewadisitwhreithastobe": "thread_EvwnfdJsrVfrbbxm3T94zpeq",
-        "memoryforExtranewTest": "thread_ixXxaUrs600JsP2KSY6D13KA"
+        "memoryforExtranewTest": "thread_ixXxaUrs600JsP2KSY6D13KA",
+        "novthread": "thread_55ZIvxQF2knvFQnX7utW8Oro"
     }
 }

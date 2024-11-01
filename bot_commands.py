@@ -350,6 +350,8 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send(f"Cannot send messages to {target_channel.name}. Must be in the same category.")
 
+
+
     @tree.command(name="startnew", description="Create a new channel or new thread with options.")
     @app_commands.describe(
         channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
@@ -358,7 +360,8 @@ def setup_commands(tree, get_assistant_response):
         thread_name="Name for the new thread (only if newthread is True).",
         memory="Choose an existing OpenAI thread or create a new memory.",
         memory_name="Provide a name for the new OpenAI thread (only if 'Create new memory' is selected).",
-        always_on="Set the assistant always on or off."
+        always_on="Set the assistant always on or off.",
+        thread="Select an existing thread (only if newthread is True)."
     )
     @app_commands.choices(always_on=[
         app_commands.Choice(name="On", value="on"),
@@ -372,7 +375,8 @@ def setup_commands(tree, get_assistant_response):
         memory: str,
         memory_name: str = None,
         channel_name: str = None,
-        thread_name: str = None
+        thread_name: str = None,
+        thread: str = None
     ):
         await interaction.response.defer()
 
@@ -396,46 +400,87 @@ def setup_commands(tree, get_assistant_response):
             return
 
         # Handle thread creation if requested
+        thread_obj = None
         if newthread:
-            thread, error = await handle_thread_creation(target_channel, thread_name, interaction.channel.category.id, memory_name)
+            thread_obj, error = await handle_thread_creation(target_channel, thread_name, interaction.channel.category.id, memory_name)
             if error:
                 await interaction.followup.send(error)
                 return
-            if thread:
-                await interaction.followup.send(f"New thread created: {thread.mention}")
+            if thread_obj:
+                await interaction.followup.send(f"New thread created: {thread_obj.mention}")
 
-                # Prepare to save the thread data (assuming you need to save this info)
-                # Construct the data structure to save
-                new_thread_data = {
-                    'thread_id': str(thread.id),
-                    'thread_name': thread.name,
-                    'category_id': str(interaction.channel.category.id),
-                    'memory_name': memory_name,
-                    # Add any additional relevant information here
-                }
+        # Load existing category threads from JSON
+        category_id_str = str(category.id)
+        category_threads = load_thread_data()
 
-                # Save the new thread data
-                save_thread_data(new_thread_data)
+        if category_id_str not in category_threads:
+            category_threads[category_id_str] = {
+                "channels": {},
+                "memory_threads": {}
+            }
+
+        category_data = category_threads[category_id_str]
 
         # Handle memory assignment or creation
         async with aiohttp.ClientSession() as session:
-            memory_response = await create_or_assign_memory(session, memory, memory_name, category.id)
-            if memory_response:
-                await interaction.followup.send(memory_response)
+            if memory == "CREATE NEW MEMORY":
+                memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
+                category_data['memory_threads'][memory_name] = memory_thread_id
+            else:
+                memory_thread_id = category_data['memory_threads'].get(memory)
+                if memory_thread_id is None:
+                    await interaction.followup.send(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'.")
+                    return
 
-        # Set the always_on setting for the channel or thread
-        await set_always_on(target_channel, always_on.value)
+            # Update or create the channel entry in the JSON
 
-    # Channel and memory autocompletion
+                    # Update or create the channel entry in the JSON
+            channel_id_str = str(target_channel.id)
+            channel_data = category_data['channels'].get(channel_id_str)
+
+            if not channel_data:
+                # Create a new channel entry if it doesn't exist
+                channel_data = {
+                    "name": target_channel.name,
+                    "assigned_memory": memory_thread_id,
+                    "memory_name": memory_name,  # Ensure this is set correctly
+                    "threads": {}
+                }
+                category_data['channels'][channel_id_str] = channel_data
+            else:
+                # Update existing channel data
+                channel_data['assigned_memory'] = memory_thread_id
+                channel_data['memory_name'] = memory_name  # Ensure this is set correctly
+
+            # Update thread data if a new thread was created
+            if thread_obj:
+                thread_id_str = str(thread_obj.id)
+                channel_data['threads'][thread_id_str] = {
+                    "name": thread_name,
+                    "assigned_memory": memory_thread_id,
+                    "memory_name": memory_name  # Ensure this is set correctly
+                }
+
+            # Save the updated JSON data
+            save_thread_data(category_threads)
+
+            # Set the always_on setting for the channel or thread
+            await set_always_on(target_channel, always_on.value)
+
+        await interaction.followup.send(f"{'Thread' if newthread else 'Channel'} '{channel_name or target_channel.name}' created and assigned memory '{memory_name or memory}'.")
+
+    # Use imported autocomplete functions
     @startnew.autocomplete('channel')
-    async def channel_autocomplete(interaction: discord.Interaction, current: str):
-        return await get_channels_in_category(interaction.channel.category, interaction.guild)
+    async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
 
     @startnew.autocomplete('memory')
-    async def memory_autocomplete(interaction: discord.Interaction, current: str):
-        async with aiohttp.ClientSession() as session:
-            return await get_memory_options(interaction.channel.category.id, session, ["gameplay", "out-of-game"])
+    async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await memory_autocomplete(interaction, current)
 
+    @startnew.autocomplete('thread')
+    async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
 
 
 
@@ -528,63 +573,14 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send(f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'.")
 
-# Autocomplete for 'thread' parameter
-    @assign_memory.autocomplete('thread')
-    async def thread_autocomplete(interaction: discord.Interaction, current: str):
-        # Access the channel ID directly from the interaction data
-        channel_id = int(interaction.data['options'][0]['value'])  # Get the channel ID
-        channel_obj = interaction.guild.get_channel(channel_id)
-
-        if not channel_obj:
-            return []
-
-        # Fetch active threads
-        active_threads = channel_obj.threads  # This is a list of active threads
-
-        # Fetch archived threads
-        archived_threads = []
-        async for thread in channel_obj.archived_threads():  # Iterate over the async generator
-            archived_threads.append(thread)
-
-        all_threads = active_threads + archived_threads
-
-        # Filter threads by current input
-        matching_threads = [
-            discord.app_commands.Choice(name=thread.name, value=str(thread.id))  # Ensure value is a string
-            for thread in all_threads if current.lower() in thread.name.lower()
-        ]
-
-        return matching_threads[:25]  # Limit to 25 suggestions
-
-
-    # Autocomplete for 'channel' parameter
     @assign_memory.autocomplete('channel')
-    async def channel_autocomplete(interaction: discord.Interaction, current: str):
-        return await get_channels_in_category(interaction.channel.category, interaction.guild)
+    async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
 
-    # Autocomplete for 'memory' parameter to get all threads from memory_threads
     @assign_memory.autocomplete('memory')
-    async def memory_autocomplete(interaction: discord.Interaction, current: str):
-        category_id_str = str(interaction.channel.category.id)
+    async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await memory_autocomplete(interaction, current)
 
-        # Load the memory_threads from the JSON
-        category_threads = load_thread_data()  # Load your JSON data
-        if category_id_str not in category_threads:
-            return []
-
-        # Get all memory threads from the category
-        memory_threads = category_threads[category_id_str].get('memory_threads', {})
-
-        # Create a list for matching memories, including the "Create New Memory" option
-        matching_memories = [
-            discord.app_commands.Choice(name="Create New Memory", value="CREATE NEW MEMORY")
-        ]
-
-        # Filter memory thread names by user input
-        matching_memories += [
-            discord.app_commands.Choice(name=memory_name, value=memory_name)
-            for memory_name in memory_threads if current.lower() in memory_name.lower()
-        ]
-
-        return matching_memories[:25]  # Limit to 25 suggestions
- 
+    @assign_memory.autocomplete('thread')
+    async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
