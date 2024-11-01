@@ -164,7 +164,7 @@ def setup_commands(tree, get_assistant_response):
         conversation_history = "\n".join(reversed(messages))  # Reversed so that it reads from oldest to newest
 
         # Step 5: Send the conversation to the assistant for summarization, focusing on the last message
-        prompt = (f"Summarize the following feedback messages regarding the AIDM’s performance. "
+        prompt = (f"Make a recap the following feedback messages regarding the AIDM’s performance. "
                 f"Here is the entire message history from the #telldm channel:\n\n{conversation_history}"
                 f"Pay special attention to the **last feedback message**, which is:\n\n{last_message}\n\n"
                 f"Summarize this last message briefly and confirm you understood the feedback. "

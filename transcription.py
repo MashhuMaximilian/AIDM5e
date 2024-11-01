@@ -187,7 +187,7 @@ class VoiceRecorder:
 
                     # Summarize the first chunk with a specific prompt
                     first_prompt = (
-                        "Summarize the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
+                        "Make a recap the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
                         "It may be a lot of random conversation here. Summarize the events of this D&D session in detail, "
                         "assuming the players might forget everything by next week. Include all important story elements, "
                         "player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail "
@@ -207,7 +207,7 @@ class VoiceRecorder:
                     # Summarize subsequent chunks with a different prompt
                     for chunk in chunks[1:]:
                         continue_prompt = (
-                            "Please summarize the following text in the same detailed manner as before. "
+                            "Please make a recap the following text in the same detailed manner as before. "
                             "This is part of our D&D gameplay session, which may include random conversations. "
                             "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
                             "Include character names, major decisions, challenges faced, and any unresolved plot points. "
