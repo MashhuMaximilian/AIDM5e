@@ -12,6 +12,9 @@ from helper_functions import create_openai_thread
 from pathlib import Path
 from helper_functions import *
 import json
+from threading import Lock
+
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -118,19 +121,78 @@ async def on_guild_channel_create(channel):
     if isinstance(channel, discord.CategoryChannel):
         await handle_new_category(channel)
 
+save_lock = Lock()  # Lock to ensure single access to JSON save function
+
+@client.event
+async def on_thread_delete(thread):
+    if thread.parent is None:
+        logging.warning(f"Thread deletion detected for thread ID: {thread.id}, but parent channel is None.")
+        return
+
+    logging.info(f"Thread deletion detected for thread ID: {thread.id}, parent channel ID: {thread.parent.id}")
+
+    parent_channel_id = str(thread.parent.id)
+    parent_category_id = str(thread.parent.category_id) if thread.parent.category_id else None
+
+    # Log only the first 100 characters of the current category_threads structure
+    logging.info(f"Current category_threads structure: {json.dumps(category_threads)[:100]}")
+
+    # Check if the parent category exists
+    if parent_category_id in category_threads:
+        # Check if the parent channel exists
+        if parent_channel_id in category_threads[parent_category_id].get('channels', {}):
+            # Access the threads in that specific channel
+            threads = category_threads[parent_category_id]['channels'][parent_channel_id].get('threads', {})
+
+            # Check if the thread ID exists in the threads dictionary
+            if str(thread.id) in threads:
+                logging.info(f"Deleting Thread with ID: {thread.id}")
+                del threads[str(thread.id)]  # Delete the specific thread entry
+
+                # Save the updated category_threads structure
+                with save_lock:
+                    save_thread_data(category_threads)
+                logging.info(f"Thread {thread.id} removed from JSON and saved.")
+            else:
+                logging.warning(f"Thread {thread.id} not found in channel {parent_channel_id} under category {parent_category_id}.")
+        else:
+            logging.warning(f"Parent channel {parent_channel_id} not found in category {parent_category_id}.")
+    else:
+        logging.warning(f"Parent category {parent_category_id} not found in category_threads.")
+
+
 @client.event
 async def on_guild_channel_delete(channel):
+    logging.info(f"Channel deletion detected for channel ID: {channel.id}, Type: {type(channel).__name__}")
+
     if isinstance(channel, discord.CategoryChannel):
         category_id = str(channel.id).strip()
-        logging.info(f"Channel deleted: {category_id}")
+        logging.info(f"Detected CategoryChannel deletion with ID: {category_id}")
 
         if category_id in category_threads:
-            logging.info(f"Category {category_id} found. Removing from thread data.")
+            logging.info(f"Deleted a CategoryChannel with ID: {category_id}")
             del category_threads[category_id]
-            save_thread_data(category_threads)
-            logging.info(f"Thread data updated. Category {category_id} removed.")
-        else:
-            logging.warning(f"Deleted category {category_id} not found in thread data.")
+
+            with save_lock:
+                save_thread_data(category_threads)
+            logging.info(f"Category {category_id} removed from JSON and saved.")
+
+    elif isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+        category_id = str(channel.category_id).strip() if channel.category_id else None
+        channel_id = str(channel.id).strip()
+
+        logging.info(f"Detected TextChannel/VoiceChannel deletion with ID: {channel_id}, in category: {category_id}")
+
+        if category_id and category_id in category_threads:
+            if channel_id in category_threads[category_id].get('channels', {}):
+                logging.info(f"Deleted a TextChannel/VoiceChannel with ID: {channel_id}")
+                del category_threads[category_id]['channels'][channel_id]
+
+                with save_lock:
+                    save_thread_data(category_threads)
+                logging.info(f"Channel {channel_id} removed from JSON and saved.")
+
+    logging.info(f"Finished processing deletion for channel ID: {channel.id}")
 
 # Automatically join and leave voice channels
 @client.event

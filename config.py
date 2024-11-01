@@ -22,6 +22,14 @@ intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
+intents.guilds = True
+intents.guild_messages = True
+intents.guild_scheduled_events = True  # If using events
+intents.voice_states = True  # If your bot interacts with voice channels
+
+
+
+
 
 # Headers for OpenAI API requests
 HEADERS = {

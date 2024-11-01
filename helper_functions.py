@@ -516,7 +516,6 @@ async def channel_autocomplete(interaction: discord.Interaction, current: str):
     # Assuming get_channels_in_category is a function you've defined for fetching channels in a category
     return await get_channels_in_category(interaction.channel.category, interaction.guild)
 
-
 async def memory_autocomplete(interaction: discord.Interaction, current: str):
     category_id_str = str(interaction.channel.category.id)
 
