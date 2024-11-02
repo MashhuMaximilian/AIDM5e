@@ -9,13 +9,9 @@ import logging
 from pathlib import Path
 import os
 
-
 # Dictionary to store thread IDs for the #telldm channel
 category_threads = {}
 category_conversations = {}
-
-
-
 
 async def create_openai_thread(session, user_message, category_id, memory_name):
     """Create a new OpenAI thread and store its ID for the category."""
@@ -40,19 +36,6 @@ async def create_openai_thread(session, user_message, category_id, memory_name):
     
     return thread_id
 
-async def send_to_telldm(interaction, response, category_id, memory_name):
-    # Ensure you have a session created for API calls
-    async with aiohttp.ClientSession() as session:
-        # Get the thread ID by creating a new OpenAI thread with the specified memory
-        thread_id = await create_openai_thread(session, response, category_id, memory_name)
-
-        # Now send the message to the telldm channel
-        telldm_channel = discord.utils.get(interaction.guild.channels, name='telldm')  # Find the #telldm channel
-        if telldm_channel:
-            await telldm_channel.send(f"New thread created with ID: {thread_id}")  # You can customize this message
-        else:
-            logging.error("Channel #telldm not found.")
-
 async def fetch_discord_threads(channel):
     """Fetches all available threads in a given channel and populates from the JSON file."""
     discord_threads = []
@@ -67,7 +50,6 @@ async def fetch_discord_threads(channel):
     
     return discord_threads
 
-# Function to summarize the conversation
 async def summarize_conversation(interaction, conversation_history, options, query):
     from assistant_interactions import get_assistant_response  # Local import to avoid circular dependency
     if options['type'] == 'messages':
@@ -205,10 +187,8 @@ async def handle_thread_creation(interaction, channel, thread_name, category_id,
     else:
         return None, "Error: You must provide a name for the new thread."
 
-
 # Path to store thread data
 thread_data_path = Path(__file__).parent.resolve() / 'threads.json'
-category_threads = {}
 
 
 def save_thread_data(new_data):
@@ -388,16 +368,33 @@ async def get_default_memory(category_id):
     logging.info(f"No default memory found for category {category_id}.")
     return None
 
-async def get_assigned_memory(channel_id, category_id):
-    """Retrieve the assigned memory for a specific channel in a category."""
-    category_data = category_threads.get(category_id)
-    if category_data:
-        # Ensure the channel_id is treated as a string
-        channel_data = category_data['channels'].get(str(channel_id))  # Convert channel_id to string if not already
-        if channel_data:
-            return channel_data.get('assigned_memory')
+async def get_assigned_memory(channel_id, category_id, thread_id=None):
+    """Retrieve the assigned memory for a specific channel or thread in a category."""
+    logging.info(f"Fetching assigned memory for channel_id: {channel_id}, thread_id: {thread_id}, category_id: {category_id}")
 
-    logging.info(f"No assigned memory found for channel {channel_id} in category {category_id}.")
+    category_threads = load_thread_data()  # Load your JSON data
+    category_id_str = str(category_id)
+
+    if category_id_str not in category_threads:
+        logging.info(f"No data found for category '{category_id_str}'.")
+        return None
+
+    channel_data = category_threads[category_id_str]['channels'].get(str(channel_id))
+    if channel_data:
+        assigned_memory = channel_data.get('assigned_memory')
+
+        if thread_id:
+            thread_data = channel_data['threads'].get(str(thread_id))
+            if thread_data:
+                assigned_memory = thread_data.get('assigned_memory') or assigned_memory
+
+        if assigned_memory:
+            # Remove leading/trailing whitespace, quotes, and stray periods
+            assigned_memory = assigned_memory.strip().strip("'\". ")
+            logging.info(f"Assigned Memory found: {assigned_memory}")
+            return assigned_memory if assigned_memory else None
+
+    logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
 
 
@@ -476,31 +473,38 @@ def get_category_id(interaction):
     channel = interaction.channel
     return channel.category.id if channel.category else None
 
-
-# Define reusable autocomplete functions
 async def thread_autocomplete(interaction: discord.Interaction, current: str):
-    channel_id = int(interaction.data['options'][0]['value'])  # Access channel ID from interaction data
-    channel_obj = interaction.guild.get_channel(channel_id)
+    # Ensure the options are available and correct
+    for option in interaction.data['options']:
+        if option['name'] == 'channel':  # Check if 'channel' is provided
+            try:
+                channel_id = int(option['value'])  # Convert channel ID to integer
+                channel_obj = interaction.guild.get_channel(channel_id)
 
-    if not channel_obj:
-        return []
+                if not channel_obj:
+                    return []
 
-    # Fetch active and archived threads
-    active_threads = channel_obj.threads
-    archived_threads = []
-    async for thread in channel_obj.archived_threads():
-        archived_threads.append(thread)
+                # Fetch active and archived threads
+                active_threads = channel_obj.threads
+                archived_threads = []
+                async for thread in channel_obj.archived_threads():
+                    archived_threads.append(thread)
 
-    all_threads = active_threads + archived_threads
+                all_threads = active_threads + archived_threads
 
-    # Filter threads by current input
-    matching_threads = [
-        discord.app_commands.Choice(name=thread.name, value=str(thread.id))
-        for thread in all_threads if current.lower() in thread.name.lower()
-    ]
+                # Filter threads by current input
+                matching_threads = [
+                    discord.app_commands.Choice(name=thread.name, value=str(thread.id))
+                    for thread in all_threads if current.lower() in thread.name.lower()
+                ]
 
-    return matching_threads[:25]  # Limit to 25 suggestions
+                return matching_threads[:50]  # Limit to 50 suggestions
 
+            except ValueError:
+                print(f"Invalid channel ID: {option['value']}")
+                return []  # Return empty list if there's an error
+
+    return []  # Return empty if no 'channel' option was found
 
 async def channel_autocomplete(interaction: discord.Interaction, current: str):
     # Assuming get_channels_in_category is a function you've defined for fetching channels in a category
@@ -528,4 +532,4 @@ async def memory_autocomplete(interaction: discord.Interaction, current: str):
         for memory_name in memory_threads if current.lower() in memory_name.lower()
     ]
 
-    return matching_memories[:25]  # Limit to 25 suggestions
+    return matching_memories[:50]  # Limit to 50 suggestions

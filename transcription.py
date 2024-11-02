@@ -7,7 +7,8 @@ import logging
 from config import WHISPER_API_URL, WHISPER_API_KEY
 from assistant_interactions import get_assistant_response
 from pathlib import Path
-from message_handlers import send_response_in_chunks
+from shared_functions import send_response_in_chunks
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -24,7 +25,7 @@ class VoiceRecorder:
 
 
 
-    async def capture_audio(self, voice_client, duration=250):
+    async def capture_audio(self, voice_client, duration=500):
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 

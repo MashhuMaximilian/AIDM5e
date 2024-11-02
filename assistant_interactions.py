@@ -6,6 +6,7 @@ from datetime import datetime
 from config import HEADERS, ASSISTANT_ID, category_threads, category_conversations, client
 import asyncio
 from helper_functions import get_assigned_memory
+from shared_functions import send_response_in_chunks
 
 
 async def send_user_message(session, thread_id, user_message):
@@ -63,69 +64,40 @@ def extract_assistant_response(messages_data):
             break
     return assistant_response
 
-async def get_assistant_response(user_message, channel_id, category_id=None):
+async def get_assistant_response(user_message, channel_id, category_id=None, thread_id=None, assigned_memory=None):
     """Main function to interact with the assistant and return the response."""
     try:
         async with aiohttp.ClientSession() as session:
-            current_time = datetime.now()
             channel = client.get_channel(channel_id)
 
-            # Log the channel ID for debugging purposes
-            logging.info(f"Attempting to fetch channel with ID: {channel_id}")
-            
             if channel is None:
                 error_message = f"Error: Channel with ID {channel_id} not found."
                 logging.error(error_message)
-                return error_message  # Return an error message without sending to Discord
+                return error_message
 
-            # Determine category ID
-            if category_id is None and channel.category_id:
-                category_id = str(channel.category_id)  # Ensure category_id is a string
-
-            # Retrieve the assigned memory for the channel
-            assigned_memory = await get_assigned_memory(channel_id, category_id)
-
-            # Check if assigned memory was found
-            if assigned_memory is None:
-                error_message = f"No assigned memory found for channel {channel_id} in category {category_id}."
+            if not assigned_memory or assigned_memory.startswith("'") or assigned_memory.endswith("'") or assigned_memory.endswith("."):
+                error_message = "Assigned memory ID is invalid or empty."
                 logging.error(error_message)
                 return error_message
 
-            # Log the assigned memory for debugging
-            logging.info(f"Using assigned memory '{assigned_memory}' for channel {channel_id} in category {category_id}.")
+            # Strip unwanted characters again before sending to assistant
+            assigned_memory = assigned_memory.strip("'\". ")
 
-            # Log the user message being sent
-            logging.info(f"Sending user message to assistant: {user_message[:100]}")
+            # Start typing indicator while processing
+            async with channel.typing():
+                await send_user_message(session, assigned_memory, user_message)
+                logging.info(f"Message sent to assistant in memory '{assigned_memory}'.")
 
-            # Add the user's message to the conversation history
-            conversation_key = category_id if category_id else channel_id
-            if conversation_key not in category_conversations:
-                category_conversations[conversation_key] = []
-            category_conversations[conversation_key].append({"role": "user", "content": user_message, "timestamp": current_time})
+                run_data = await start_run(session, assigned_memory)
+                run_id = run_data['id']
+                await wait_for_run_completion(session, assigned_memory, run_id)
 
-            # Send user message to the assistant
-            await send_user_message(session, assigned_memory, user_message)  # Use assigned_memory instead of thread_id
+                messages_data = await fetch_assistant_response(session, assigned_memory)
+                assistant_response = extract_assistant_response(messages_data)
 
-            # Log that the message was sent
-            logging.info(f"Message sent to assistant in memory '{assigned_memory}'.")
-
-            # Start a run and wait for it to complete
-            run_data = await start_run(session, assigned_memory)
-            run_id = run_data['id']
-            await wait_for_run_completion(session, assigned_memory, run_id)
-
-            # Fetch and extract the assistant's response
-            messages_data = await fetch_assistant_response(session, assigned_memory)
-            assistant_response = extract_assistant_response(messages_data)
-
-            # Log the assistant's response
-            logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
-
-            # Append the assistant's response to the conversation history
-            category_conversations[conversation_key].append({"role": "assistant", "content": assistant_response, "timestamp": datetime.now()})
-
-            return assistant_response
+                logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
+                return assistant_response
 
     except Exception as e:
-        logging.error(f"Error during the assistant interaction: {str(e)}")  # Log the error
+        logging.error(f"Error during the assistant interaction: {str(e)}")
         return f"Error during the assistant interaction: {str(e)}"

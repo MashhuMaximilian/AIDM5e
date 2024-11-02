@@ -7,6 +7,7 @@ from shared_functions import always_on_channels
 import PyPDF2
 import io
 from docx import Document
+from shared_functions import send_response_in_chunks
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -138,9 +139,3 @@ async def send_assistant_response(gpt_request_content, channel):
         response = await get_assistant_response(gpt_request_content, channel.id)
         await send_response_in_chunks(channel, response)
 
-async def send_response_in_chunks(channel, response):
-    if len(response) > 2000:
-        for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-            await channel.send(chunk)
-    else:
-        await channel.send(response)
