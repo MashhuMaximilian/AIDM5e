@@ -5,32 +5,8 @@ import logging
 from datetime import datetime
 from config import HEADERS, ASSISTANT_ID, category_threads, category_conversations, client
 import asyncio
+from helper_functions import get_assigned_memory
 
-async def create_or_get_thread(session, user_message, channel_id, category_id):
-    """Create a new thread or get the existing one for the conversation."""
-    
-    # Check if a thread already exists for the category
-    if category_id in category_threads:
-        thread_id = category_threads[category_id]
-        logging.info(f"Reusing existing thread for category {category_id}: {thread_id}")
-    else:
-        logging.info(f"Creating new thread for category {category_id}")
-        
-        async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
-            "messages": [{"role": "user", "content": user_message}]
-        }) as thread_response:
-            if thread_response.status != 200:
-                raise Exception(f"Error creating thread: {await thread_response.text()}")
-            thread_data = await thread_response.json()
-            thread_id = thread_data['id']
-            category_threads[category_id] = thread_id  # Store thread ID for the category
-            logging.info(f"New thread created for category {category_id} with thread ID: {thread_id}")
-    
-    # Optionally store the conversation history in case you want to keep track
-    if category_id not in category_conversations:
-        category_conversations[category_id] = []
-    
-    return thread_id
 
 async def send_user_message(session, thread_id, user_message):
     """Send user message to the assistant."""
@@ -87,7 +63,7 @@ def extract_assistant_response(messages_data):
             break
     return assistant_response
 
-async def get_assistant_response(user_message, channel_id, memory_name, category_id=None):
+async def get_assistant_response(user_message, channel_id, category_id=None):
     """Main function to interact with the assistant and return the response."""
     try:
         async with aiohttp.ClientSession() as session:
@@ -104,10 +80,19 @@ async def get_assistant_response(user_message, channel_id, memory_name, category
 
             # Determine category ID
             if category_id is None and channel.category_id:
-                category_id = channel.category_id
+                category_id = str(channel.category_id)  # Ensure category_id is a string
 
-            # Create or get a thread for the conversation, using the memory_name
-            thread_id = await create_or_get_thread(session, user_message, channel_id, memory_name, category_id)
+            # Retrieve the assigned memory for the channel
+            assigned_memory = await get_assigned_memory(channel_id, category_id)
+
+            # Check if assigned memory was found
+            if assigned_memory is None:
+                error_message = f"No assigned memory found for channel {channel_id} in category {category_id}."
+                logging.error(error_message)
+                return error_message
+
+            # Log the assigned memory for debugging
+            logging.info(f"Using assigned memory '{assigned_memory}' for channel {channel_id} in category {category_id}.")
 
             # Log the user message being sent
             logging.info(f"Sending user message to assistant: {user_message[:100]}")
@@ -119,16 +104,22 @@ async def get_assistant_response(user_message, channel_id, memory_name, category
             category_conversations[conversation_key].append({"role": "user", "content": user_message, "timestamp": current_time})
 
             # Send user message to the assistant
-            await send_user_message(session, thread_id, user_message)
+            await send_user_message(session, assigned_memory, user_message)  # Use assigned_memory instead of thread_id
+
+            # Log that the message was sent
+            logging.info(f"Message sent to assistant in memory '{assigned_memory}'.")
 
             # Start a run and wait for it to complete
-            run_data = await start_run(session, thread_id)
+            run_data = await start_run(session, assigned_memory)
             run_id = run_data['id']
-            await wait_for_run_completion(session, thread_id, run_id)
+            await wait_for_run_completion(session, assigned_memory, run_id)
 
             # Fetch and extract the assistant's response
-            messages_data = await fetch_assistant_response(session, thread_id)
+            messages_data = await fetch_assistant_response(session, assigned_memory)
             assistant_response = extract_assistant_response(messages_data)
+
+            # Log the assistant's response
+            logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
 
             # Append the assistant's response to the conversation history
             category_conversations[conversation_key].append({"role": "assistant", "content": assistant_response, "timestamp": datetime.now()})

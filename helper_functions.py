@@ -2,9 +2,7 @@
 
 import discord
 from discord import app_commands
-from message_handlers import send_response_in_chunks
 import json
-from assistant_interactions import create_or_get_thread, get_assistant_response
 from config import HEADERS, client
 import aiohttp
 import logging
@@ -71,6 +69,7 @@ async def fetch_discord_threads(channel):
 
 # Function to summarize the conversation
 async def summarize_conversation(interaction, conversation_history, options, query):
+    from assistant_interactions import get_assistant_response  # Local import to avoid circular dependency
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)
     elif options['type'] == 'from':
@@ -380,16 +379,25 @@ async def get_memory_options(category_id, session, predefined_threads):
         for thread_name in category_threads[category_id].keys()
     ] + [app_commands.Choice(name="CREATE NEW MEMORY", value="CREATE NEW MEMORY")]
 
-async def get_assigned_memory(category_id):
-    """Get the assigned memory for the category."""
+async def get_default_memory(category_id):
+    """Retrieve the default or 'out-of-game' memory for a category."""
     category_data = category_threads.get(category_id)
     if category_data:
-        # Check if "out-of-game" memory exists
-        out_of_game_memory_id = category_data['memory_threads'].get("out-of-game")
-        if out_of_game_memory_id:
-            return out_of_game_memory_id
-    
-    logging.info(f"No assigned memory found for category {category_id}.")
+        return category_data['memory_threads'].get("out-of-game")
+
+    logging.info(f"No default memory found for category {category_id}.")
+    return None
+
+async def get_assigned_memory(channel_id, category_id):
+    """Retrieve the assigned memory for a specific channel in a category."""
+    category_data = category_threads.get(category_id)
+    if category_data:
+        # Ensure the channel_id is treated as a string
+        channel_data = category_data['channels'].get(str(channel_id))  # Convert channel_id to string if not already
+        if channel_data:
+            return channel_data.get('assigned_memory')
+
+    logging.info(f"No assigned memory found for channel {channel_id} in category {category_id}.")
     return None
 
 
@@ -462,14 +470,6 @@ async def initialize_threads(guild):
 
     # Save the updated thread data
     save_thread_data(existing_data)
-
-
-def get_default_memory(category_id):
-    """Fetch the default memory (thread) for a given category."""
-    global category_threads
-    if category_id in category_threads and "gameplay" in category_threads[category_id]:
-        return category_threads[category_id]["gameplay"]
-    return None  # Return None if no default memory is found
 
 def get_category_id(interaction):
     """Retrieve the category ID of the channel where the interaction occurred."""

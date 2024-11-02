@@ -129,7 +129,7 @@ async def on_guild_channel_create(channel):
 
         if category_id and category_id in category_threads:
             # Get the assigned memory for the category
-            assigned_memory = await get_assigned_memory(category_id)
+            assigned_memory = await get_default_memory(category_id)
 
             # Initialize memory_name
             memory_name = None
@@ -167,7 +167,7 @@ async def on_thread_create(thread):
 
     if parent_category_id in category_threads:
         # Get the assigned memory for the parent category
-        assigned_memory = await get_assigned_memory(parent_category_id)
+        assigned_memory = await get_default_memory(parent_category_id)
 
         # Retrieve the corresponding memory name if exists
         memory_name = None

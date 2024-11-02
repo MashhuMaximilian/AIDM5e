@@ -4,7 +4,7 @@ import discord
 from discord import app_commands
 from shared_functions import set_always_on
 from message_handlers import send_response_in_chunks
-from assistant_interactions import create_or_get_thread, get_assistant_response
+from assistant_interactions import get_assistant_response
 from config import HEADERS
 from helper_functions import *
 import logging
