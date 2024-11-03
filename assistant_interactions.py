@@ -5,8 +5,8 @@ import logging
 from datetime import datetime
 from config import HEADERS, ASSISTANT_ID, category_threads, category_conversations, client
 import asyncio
-from helper_functions import get_assigned_memory
 from shared_functions import send_response_in_chunks
+
 
 
 async def send_user_message(session, thread_id, user_message):
@@ -96,7 +96,9 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
                 assistant_response = extract_assistant_response(messages_data)
 
                 logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
-                return assistant_response
+                # Send the response in chunks if necessary
+                await send_response_in_chunks(channel, assistant_response)
+                # return assistant_response
 
     except Exception as e:
         logging.error(f"Error during the assistant interaction: {str(e)}")

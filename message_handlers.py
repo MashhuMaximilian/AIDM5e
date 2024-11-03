@@ -1,13 +1,12 @@
-
 import aiohttp
 import logging
 from config import client
 from assistant_interactions import get_assistant_response
+from helper_functions import get_assigned_memory
 from shared_functions import always_on_channels
 import PyPDF2
 import io
 from docx import Document
-from shared_functions import send_response_in_chunks
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,30 +21,49 @@ async def on_message(message):
 
     user_message = message.content.strip() if message.content else "No message provided."
     channel_name = message.channel.name
+    channel_id = message.channel.id
+    category_id = message.channel.category.id if message.channel.category else None
+    thread_id = message.thread.id if hasattr(message, 'thread') and message.thread else None
 
     # Check if the channel is in the always_on_channels
-    if message.channel.id in always_on_channels and always_on_channels[message.channel.id]:
-        # If the channel is always on, respond to every message
-        await send_assistant_response(user_message, message.channel)
+    if channel_id in always_on_channels and always_on_channels[channel_id]:
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        if assigned_memory:
+            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
+            await message.channel.send(response)
+        else:
+            logging.error("Assigned memory ID is invalid or empty.")
         return  # Exit after responding
 
     # Automatically respond to messages in the #telldm channel
     if channel_name == "telldm":
-        await send_assistant_response(user_message, message.channel)
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        if assigned_memory:
+            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
+            if response:  # Check if response is not empty
+                await message.channel.send(response)
+            else:
+                logging.error("Received an empty response from the assistant.")
+        else:
+            logging.error("Assigned memory ID is invalid or empty.")
         return  # Exit after responding
 
-    # Check for attachments in other channels
+    # Check for attachments
     if message.attachments:
         for attachment in message.attachments:
             logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
-            await handle_attachments(attachment, user_message, message.channel)
+            await handle_attachments(attachment, user_message, channel_id, category_id, thread_id)
 
-    # Respond to mentions in other channels
+    # Respond to mentions
     if client.user in message.mentions:
         cleaned_message = message.content.replace(f'<@{client.user.id}>', '').strip()
-        await send_assistant_response(cleaned_message, message.channel)
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+        if assigned_memory:
+            await get_assistant_response(cleaned_message, channel_id, category_id, thread_id, assigned_memory)
+        else:
+            logging.error("Assigned memory ID is invalid or empty.")
 
-async def handle_attachments(attachment, user_message, channel):
+async def handle_attachments(attachment, user_message, channel_id, category_id, thread_id):
     """Handle image, PDF, and text file attachments from the message."""
     logging.info(f"Processing attachment: {attachment.filename}")
     file_url = attachment.url
@@ -55,7 +73,6 @@ async def handle_attachments(attachment, user_message, channel):
             if resp.status == 200:
                 logging.info(f"Successfully retrieved attachment: {attachment.filename}")
                 content_type = attachment.content_type  # Get content type to differentiate files
-                logging.info(f"Attachment content type: {content_type}")  # Log the content type
 
                 if "image" in content_type:
                     # Process image files
@@ -64,30 +81,32 @@ async def handle_attachments(attachment, user_message, channel):
                         {"type": "text", "text": user_message},
                         {"type": "image_url", "image_url": {"url": file_url, "detail": "high"}},
                     ]
-                    await send_assistant_response(gpt_request_content, channel)
+                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+                    if assigned_memory:
+                        await get_assistant_response(gpt_request_content, channel_id, category_id, thread_id, assigned_memory)
+                    else:
+                        logging.error("Assigned memory ID is invalid or empty.")
 
                 elif "pdf" in content_type:
                     # Process PDF files
                     pdf_data = await resp.read()
                     text = extract_text_from_pdf(pdf_data)
                     combined_message = f"{user_message}\n\nExtracted text from PDF:\n{text}"
-                    gpt_request_content = [
-                        {"type": "text", "text": combined_message}
-                    ]
-                    await send_assistant_response(gpt_request_content, channel)
+                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+                    if assigned_memory:
+                        await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    else:
+                        logging.error("Assigned memory ID is invalid or empty.")
 
-                # Update the condition to handle text files with different content types
-                elif "text/plain" in content_type:  # Check if "text/plain" is part of content type
-                    file_data = await resp.read()  # Read the file data
-                    file_content = file_data.decode("utf-8")  # Decode bytes to string
-                    combined_message = f"{user_message}\n\nExtracted text:\n{file_content}"
-                    gpt_request_content = [
-                        {"type": "text", "text": combined_message}
-                    ]
-                    await send_assistant_response(gpt_request_content, channel)
-
-                else:
-                    logging.error(f"Unsupported file type: {content_type}")
+                elif content_type in ["text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
+                    # Process .txt, .docx, and .doc files
+                    extracted_text = await extract_text_from_file(file_url, content_type)
+                    combined_message = f"{user_message}\n\nExtracted text:\n{extracted_text}"
+                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+                    if assigned_memory:
+                        await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    else:
+                        logging.error("Assigned memory ID is invalid or empty.")
 
             else:
                 logging.error(f"Failed to retrieve attachment: {attachment.filename}, Status: {resp.status}")
@@ -103,26 +122,20 @@ def extract_text_from_pdf(pdf_data):
 
 async def extract_text_from_file(file_url, content_type):
     """Extract text based on file type."""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                if content_type == "text/plain" or file_url.endswith('.txt'):
-                    return await resp.text()  # Directly return the text for .txt files
+    async with aiohttp.ClientSession() as session:
+        async with session.get(file_url) as resp:
+            file_data = await resp.read()
+            
+            if "text/plain" in content_type:
+                return file_data.decode('utf-8')  # Directly return the text for .txt files
 
-                elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
-                    # For .docx files
-                    docx_data = await resp.read()
-                    return extract_text_from_docx(docx_data)
+            elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
+                return extract_text_from_docx(file_data)
 
-                elif "application/msword" in content_type:
-                    # For .doc files (you can implement extraction logic here as needed)
-                    raise NotImplementedError("Extraction from .doc files is not implemented.")
-                
-                else:
-                    raise ValueError("Unsupported file format.")
-    except Exception as e:
-        logging.error(f"Error extracting text from file: {e}")
-
+            elif "application/msword" in content_type:
+                raise NotImplementedError("Extraction from .doc files is not implemented.")
+            else:
+                raise ValueError("Unsupported file format.")
 
 def extract_text_from_docx(docx_data):
     """Extract text from a DOCX file."""
@@ -133,9 +146,10 @@ def extract_text_from_docx(docx_data):
             text += para.text + "\n"
     return text
 
-async def send_assistant_response(gpt_request_content, channel):
-    async with channel.typing():
-        logging.info("Assistant is typing...")
-        response = await get_assistant_response(gpt_request_content, channel.id)
-        await send_response_in_chunks(channel, response)
-
+async def send_response_in_chunks(channel, response):
+    """Send response in chunks if it exceeds Discord's message length limit."""
+    if len(response) > 2000:
+        for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+            await channel.send(chunk)
+    else:
+        await channel.send(response)

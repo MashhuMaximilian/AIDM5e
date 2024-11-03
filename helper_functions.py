@@ -374,6 +374,7 @@ async def get_assigned_memory(channel_id, category_id, thread_id=None):
 
     category_threads = load_thread_data()  # Load your JSON data
     category_id_str = str(category_id)
+    
 
     if category_id_str not in category_threads:
         logging.info(f"No data found for category '{category_id_str}'.")
@@ -396,7 +397,6 @@ async def get_assigned_memory(channel_id, category_id, thread_id=None):
 
     logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
-
 
 async def initialize_threads(guild):
     """Initialize threads for each category and create OpenAI threads if necessary."""
