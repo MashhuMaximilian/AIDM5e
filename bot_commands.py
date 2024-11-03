@@ -19,7 +19,7 @@ def setup_commands(tree, get_assistant_response):
         query_type=[
             app_commands.Choice(name="Spell", value="spell"),
             app_commands.Choice(name="CheckStatus", value="checkstatus"),
-            app_commands.Choice(name="Item", value="item"),
+            app_commands.Choice(name="Homebrew Item", value="hbw_item"),
             app_commands.Choice(name="NPC", value="npc"),
             app_commands.Choice(name="Inventory", value="inventory"),
             app_commands.Choice(name="RollCheck", value="rollcheck")
@@ -41,9 +41,9 @@ def setup_commands(tree, get_assistant_response):
         elif query_type.value == "checkstatus":
             prompt = f"I would like to know the current status of a character, including HP, spell slots, conditions, and any other relevant information. {query}"
         
-        elif query_type.value == "item":
-            prompt = f"I have a question about an item. Besides your answer, include the item’s full description, properties, and usage, as detailed in the Player’s Handbook or Dungeon Master’s Guide. Also, provide a link to where someone can find more information about the item on these websites: http://dnd5e.wikidot.com/, https://www.dndbeyond.com/, https://roll20.net/compendium/dnd5e, or https://www.aidedd.org/dnd. {query}"
-        
+        elif query_type.value == "hbw_item":
+            prompt = f"I have a question about a homebrew item. Provide the item's full description, properties, and usage as it was detailed by the creator of the item or as it appears in this campaign. Make sure to mention who the item belongs to and any relevant background information. {query}"
+
         elif query_type.value == "npc":
             prompt = f"I have a question about an NPC. Provide all known information about this NPC, including their background, motivations, recent interactions with the party. {query}"
         
@@ -53,18 +53,38 @@ def setup_commands(tree, get_assistant_response):
         elif query_type.value == "rollcheck":
             prompt = f"I want to test the feasibility of an action or a skill check before deciding to do it in the game. Please provide guidance on what I would need to roll, including the appropriate skill and any potential outcomes or modifiers to consider. {query}"
 
-        # Get response from the assistant
-        response = await get_assistant_response(prompt, interaction.channel.id)
+            # Determine the target channel and thread
+        channel_id = int(channel) if channel else interaction.channel.id
+        category_id = interaction.channel.category.id if interaction.channel.category else None
+
+        # Retrieve memory based on provided parameters
+        if thread:
+            assigned_memory = await get_assigned_memory(channel, category_id, thread)
+        elif channel:
+            assigned_memory = await get_assigned_memory(channel, category_id)
+        else:
+            assigned_memory = await get_assigned_memory(interaction.channel.id, category_id)
+
+        # Check if memory was fetched
+        if assigned_memory is None:
+            logging.info("No assigned memory found for the given parameters.")
+            await interaction.followup.send("No memory found for the specified parameters.")
+            return
+
+        # Log that we’re using the fetched memory from the correct channel
+        logging.info(f"Using assigned memory '{assigned_memory}' for specified channel '{channel}'.")
+
+        # Get response from the assistant using the prompt and assigned memory
+        response = await get_assistant_response(prompt, interaction.channel.id, category_id, thread, assigned_memory=assigned_memory)
 
         # Determine where to send the response
-        if thread:
-            await send_response(interaction, response, thread_id=thread)
-        elif channel:
-            await send_response(interaction, response, channel_id=channel)
-        else:
-            # Default to the #telldm channel in the same category
-            default_channel = discord.utils.get(interaction.channel.category.text_channels, name='telldm')
-            await send_response(interaction, response, channel_id=default_channel)
+        if not channel and not thread:
+            # If no channel or thread is specified, use #telldm as default
+            target_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=interaction.channel.category)
+            channel_id = target_channel.id if target_channel else None
+
+        # Send the response
+        await send_response(interaction, response, channel_id=channel_id, thread_id=int(thread) if thread else None)
 
     # Autocomplete for channels
     @tellme.autocomplete('channel')
@@ -84,6 +104,7 @@ def setup_commands(tree, get_assistant_response):
             app_commands.Choice(name="Game Mechanics", value="game_mechanics"),
             app_commands.Choice(name="Monsters & Creatures", value="monsters_creatures"),
             app_commands.Choice(name="World Lore & History", value="world_lore_history"),
+            app_commands.Choice(name="Item", value="item"),
             app_commands.Choice(name="Conditions & Effects", value="conditions_effects"),
             app_commands.Choice(name="Rules Clarifications", value="rules_clarifications"),
             app_commands.Choice(name="Race or Class", value="race_class")
@@ -113,6 +134,9 @@ def setup_commands(tree, get_assistant_response):
         elif query_type.value == "rules_clarifications":
             prompt = f"This is a query about specific rule clarifications. Please provide a clear and detailed explanation based on official sources, and include any applicable errata or optional rules. Reference the PHB, DMG, or other official sourcebooks or links from https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
         
+        elif query_type.value == "item":
+            prompt = f"I have a question about an item. Besides your answer, include the item’s full description, properties, and usage, as detailed in the Player’s Handbook or Dungeon Master’s Guide. Also, provide a link to where someone can find more information about the item on these websites: http://dnd5e.wikidot.com/, https://www.dndbeyond.com/, https://roll20.net/compendium/dnd5e, or https://www.aidedd.org/dnd. {query}"
+
         elif query_type.value == "race_class":
             prompt = f"This is a question about a D&D race, class, or subclass, including official content or homebrew. Please provide details on abilities, traits, key features, and how to optimize gameplay. Include lore, background, and roleplaying suggestions for the race or class. If possible, compare it with similar races or classes. Provide references to the source material and links to reliable websites like https://forgottenrealms.fandom.com/wiki, https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
             
@@ -244,7 +268,6 @@ def setup_commands(tree, get_assistant_response):
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
 
 
-
     @tree.command(name="send", description="Send specified messages to another channel.")
     @app_commands.describe(
         target_channel="Channel(s) to send messages to (select from the same category).",
@@ -356,7 +379,6 @@ def setup_commands(tree, get_assistant_response):
         interaction: discord.Interaction,
         channel: str,
         always_on: app_commands.Choice[str],
-        newthread: bool,
         memory: str,
         memory_name: str = None,
         channel_name: str = None,
@@ -369,7 +391,7 @@ def setup_commands(tree, get_assistant_response):
         if channel == "NEW CHANNEL" and not channel_name:
             await interaction.followup.send("Error: You must provide a name for the new channel.")
             return
-        if newthread and not thread_name:
+        if thread == "NEW THREAD" and not thread_name:
             await interaction.followup.send("Error: You must provide a name for the new thread.")
             return
         if memory == "CREATE NEW MEMORY" and not memory_name:
@@ -387,23 +409,33 @@ def setup_commands(tree, get_assistant_response):
 
         logging.info(f"Target channel ID: {target_channel.id}, Name: {target_channel.name}")
 
-        # Handle thread creation if requested
+        # Handle thread creation if "NEW THREAD" is selected
         thread_obj = None
-        if newthread:
+        if thread == "NEW THREAD":
             thread_obj, error = await handle_thread_creation(interaction, target_channel, thread_name, category.id, memory_name)
             if error:
                 await interaction.followup.send(error)
                 return
+        elif thread:  # Fetch existing thread if provided
+            thread_obj = await interaction.guild.fetch_channel(int(thread))
 
         # Use the target channel's ID for memory assignment
         channel_id = target_channel.id  
         logging.info(f"Assigning memory to Channel ID: {channel_id}, Memory: {memory_name or memory}")
 
         # Use assign_memory to assign memory
-        memory_assignment_result = await assign_memory(interaction, memory_name or memory, channel_id=channel_id, thread_id=str(thread_obj.id) if thread_obj else None)
+        memory_assignment_result = await assign_memory(
+            interaction,
+            memory_name or memory,
+            channel_id=channel_id,
+            thread_id=str(thread_obj.id) if thread_obj else None
+        )
+        assigned_memory_name = memory_name or memory
+        assigned_memory_id = memory_assignment_result.split()[-1].strip("'.")
 
-        if "Error" in memory_assignment_result:
-            await interaction.followup.send(memory_assignment_result)
+
+        if "Error" in assigned_memory_id:
+            await interaction.followup.send(assigned_memory_id)
             return
 
         # Update the JSON data with assigned_memory and memory_name
@@ -419,32 +451,30 @@ def setup_commands(tree, get_assistant_response):
         })
 
         # Store the assigned memory ID in the channel entry
-        channel_data['assigned_memory'] = memory_assignment_result.split()[-1]  # Get the memory ID from the result
-        channel_data['memory_name'] = memory_name or memory  # Ensure memory_name is set
+        channel_data['assigned_memory'] = assigned_memory_id # Get the memory ID from the result
+        channel_data['memory_name'] = assigned_memory_name  # Ensure memory_name is set
 
         if thread_obj:
             # Add or update the thread in the JSON with the correct assigned memory
             channel_data['threads'][str(thread_obj.id)] = {
                 "name": thread_obj.name,
-                "assigned_memory": memory_assignment_result.split()[-1],  # Correctly assign memory ID here
-                "memory_name": memory_name or memory  # Ensure memory_name is set
+                "assigned_memory": assigned_memory_id,  # Correctly assign memory ID here
+                "memory_name": assigned_memory_name  # Ensure memory_name is set
             }
 
         # Save the updated JSON data
         save_thread_data(category_threads)
-        
+
         # Prepare success message
-        success_message = f"{'Thread' if newthread else 'Channel'} '<#{channel_name or target_channel.name}>' created and assigned memory '{memory_name or memory}'."
-        if newthread:
-            success_message += f" Memory assigned to thread '<#{thread_obj.name}>' with ID '{memory_assignment_result.split()[-1]}'."
+        if thread == "NEW THREAD":
+            success_message = f"Thread '<#{thread_obj.id}>' created and assigned memory '{assigned_memory_name}'."
         else:
-            success_message += f" Memory assigned to channel '<#{target_channel.name}>' with ID '{memory_assignment_result.split()[-1]}'."
-        
+            success_message = f"Memory '{assigned_memory_name}' assigned to {'thread' if thread_obj else 'channel'} <#{thread_obj.id if thread_obj else target_channel.id}>."
+
         await interaction.followup.send(success_message)
 
         # Set the always_on setting for the channel or thread
         await set_always_on(target_channel, always_on.value)
-
 
     @startnew.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
@@ -469,6 +499,8 @@ def setup_commands(tree, get_assistant_response):
     @startnew.autocomplete('memory')
     async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
         return await memory_autocomplete(interaction, current)
+
+
     @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
     async def assign_memory_command(
         interaction: discord.Interaction,
@@ -499,13 +531,20 @@ def setup_commands(tree, get_assistant_response):
                 memory_name=memory_name  # Ensure memory_name is passed
             )
 
-            # Fetch the channel object
+            # Fetch the channel and thread objects
             target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
+            target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
 
-            if target_channel:
-                await interaction.followup.send(f"Memory '{memory_name}' created and assigned successfully to {target_channel.mention}.")
+            if target_thread:
+                await interaction.followup.send(
+                    f"Memory '{memory_name}' created and assigned successfully to thread {target_thread.mention} in channel {target_channel.mention}."
+                )
+            elif target_channel:
+                await interaction.followup.send(
+                    f"Memory '{memory_name}' created and assigned successfully to channel {target_channel.mention}."
+                )
             else:
-                await interaction.followup.send(f"Memory '{memory_name}' created but the channel was not found.")
+                await interaction.followup.send(f"Memory '{memory_name}' created but the specified channel or thread was not found.")
 
             return
 
@@ -518,18 +557,21 @@ def setup_commands(tree, get_assistant_response):
             memory_name=memory_name  # Pass the memory_name
         )
 
-        # Fetch the channel object and thread if provided
+        # Fetch the channel and thread objects again for the non-creation case
         target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
-        target_thread = None
-        if thread:
-            target_thread = await interaction.guild.fetch_channel(int(thread))
+        target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
 
         if target_thread:
-            await interaction.followup.send(f"Memory '{memory}' assigned successfully to thread {target_thread.mention}.")
+            await interaction.followup.send(
+                f"Memory '{memory}' assigned successfully to thread {target_thread.mention} in channel {target_channel.mention}."
+            )
         elif target_channel:
-            await interaction.followup.send(f"Memory '{memory}' assigned successfully to channel {target_channel.mention}.")
+            await interaction.followup.send(
+                f"Memory '{memory}' assigned successfully to channel {target_channel.mention}."
+            )
         else:
             await interaction.followup.send(f"Memory '{memory}' assigned, but the specified channel or thread was not found.")
+
 
     @assign_memory_command.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):

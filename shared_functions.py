@@ -51,7 +51,7 @@ async def send_response(interaction: discord.Interaction, response: str, channel
             # Send response in the thread
             await send_response_in_chunks(target_thread, response)
             # Notify where the answer was sent with a channel mention
-            await interaction.followup.send(f"Your answer has been sent in the thread: <#{target_thread.name}> in channel: <#{target_channel.id}>.")
+            await interaction.followup.send(f"Your answer has been sent in the thread: <#{target_thread.id}>  in channel: <#{target_channel.id}>.")
         else:
             # Send response in the main channel if no thread ID is given
             await send_response_in_chunks(target_channel, response)
