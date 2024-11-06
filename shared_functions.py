@@ -75,6 +75,25 @@ async def set_always_on(channel_or_thread, always_on_value):
     else:
         logging.error(f"Category {category_id} not found in thread data.")
 
+# Function to check if a channel or thread has always_on set to true
+async def check_always_on(channel_id, category_id, thread_id):
+    # Load the data for the category
+    category_threads = load_thread_data()
+
+    # Check if the channel exists in the category
+    channel_data = category_threads.get(str(category_id), {}).get('channels', {}).get(str(channel_id))
+    if channel_data and channel_data.get('always_on'):
+        return True  # Always on for the channel
+
+    # Check if the thread exists and has always_on set to true
+    if thread_id:
+        thread_data = channel_data.get('threads', {}).get(str(thread_id))
+        if thread_data and thread_data.get('always_on'):
+            return True  # Always on for the thread
+
+    return False  # Default to False if neither is set to true
+
+
 async def send_response_in_chunks(channel, response):
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:

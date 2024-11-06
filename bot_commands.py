@@ -486,6 +486,7 @@ def setup_commands(tree, get_assistant_response):
 
         await interaction.followup.send(success_message)
 
+
     @startnew.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
             # Call the existing channel autocomplete function

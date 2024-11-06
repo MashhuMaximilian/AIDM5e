@@ -245,3 +245,4 @@ async def memory_autocomplete(interaction: discord.Interaction, current: str):
     ]
 
     return matching_memories[:50]  # Limit to 50 suggestions
+

@@ -3,13 +3,14 @@ import logging
 from config import client
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
-from shared_functions import always_on_channels
+from shared_functions import check_always_on 
 import PyPDF2
 import io
 from docx import Document
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
 
 @client.event
 async def on_message(message):
@@ -25,12 +26,18 @@ async def on_message(message):
     category_id = message.channel.category.id if message.channel.category else None
     thread_id = message.thread.id if hasattr(message, 'thread') and message.thread else None
 
-    # Check if the channel is in the always_on_channels
-    if channel_id in always_on_channels and always_on_channels[channel_id]:
+    # Check if the channel has always_on set to true
+    channel_always_on = await check_always_on(channel_id, category_id, thread_id)
+    
+    # If always_on is True for the channel or thread, respond to the message instead of mentions
+    if channel_always_on:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            await message.channel.send(response)
+            if response:  # Check if response is not empty
+                await message.channel.send(response)
+            else:
+                logging.error("Received an empty response from the assistant.")
         else:
             logging.error("Assigned memory ID is invalid or empty.")
         return  # Exit after responding
