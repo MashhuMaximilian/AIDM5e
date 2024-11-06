@@ -7,6 +7,7 @@ from assistant_interactions import get_assistant_response
 from config import HEADERS
 from helper_functions import *
 import logging
+from memory_management import get_assigned_memory
 
     # Set up logging (you can configure this as needed)
 logging.basicConfig(level=logging.INFO)

@@ -3,17 +3,17 @@
 import logging
 import bot_commands
 from pathlib import Path
-from config import *
+from config import client, tree, DISCORD_BOT_TOKEN
 from assistant_interactions import get_assistant_response
 import transcription  
 import discord
 import aiohttp
-from helper_functions import create_openai_thread
 from pathlib import Path
-from helper_functions import *
+from utils import save_thread_data, load_thread_data
 import json
 from threading import Lock
 import message_handlers
+from memory_management import get_default_memory, initialize_threads, set_default_memory, create_openai_thread
 
 
 

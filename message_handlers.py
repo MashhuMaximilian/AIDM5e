@@ -2,7 +2,7 @@ import aiohttp
 import logging
 from config import client
 from assistant_interactions import get_assistant_response
-from helper_functions import get_assigned_memory
+from memory_management import get_assigned_memory
 from shared_functions import always_on_channels
 import PyPDF2
 import io
