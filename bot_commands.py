@@ -372,14 +372,14 @@ def setup_commands(tree, get_assistant_response):
         always_on="Set the assistant always on or off."
     )
     @app_commands.choices(always_on=[
-        app_commands.Choice(name="On", value="on"),
-        app_commands.Choice(name="Off", value="off")
+        app_commands.Choice(name="ON", value="true"),   # String choice
+        app_commands.Choice(name="OFF", value="false")   # String choice
     ])
 
     async def startnew(
         interaction: discord.Interaction,
         channel: str,
-        always_on: app_commands.Choice[str],
+        always_on: app_commands.Choice[str],  # Keep it as string
         memory: str,
         memory_name: str = None,
         channel_name: str = None,
@@ -387,6 +387,9 @@ def setup_commands(tree, get_assistant_response):
         thread: str = None
     ):
         await interaction.response.defer()
+
+        # Convert string choice to boolean
+        always_on_value = always_on.value == "true"
 
         # Validate parameters
         if channel == "NEW CHANNEL" and not channel_name:
@@ -434,7 +437,6 @@ def setup_commands(tree, get_assistant_response):
         assigned_memory_name = memory_name or memory
         assigned_memory_id = memory_assignment_result.split()[-1].strip("'.")
 
-
         if "Error" in assigned_memory_id:
             await interaction.followup.send(assigned_memory_id)
             return
@@ -448,12 +450,14 @@ def setup_commands(tree, get_assistant_response):
             "name": target_channel.name,
             "assigned_memory": None,  # Set initially to None, will be updated
             "memory_name": None,      # Set initially to None, will be updated
+            "always_on": False, 
             "threads": {}
         })
 
         # Store the assigned memory ID in the channel entry
-        channel_data['assigned_memory'] = assigned_memory_id # Get the memory ID from the result
+        channel_data['assigned_memory'] = assigned_memory_id  # Get the memory ID from the result
         channel_data['memory_name'] = assigned_memory_name  # Ensure memory_name is set
+        channel_data['always_on'] = always_on_value  # Use converted boolean value
 
         if thread_obj:
             # Add or update the thread in the JSON with the correct assigned memory
@@ -465,6 +469,14 @@ def setup_commands(tree, get_assistant_response):
 
         # Save the updated JSON data
         save_thread_data(category_threads)
+        
+                # Set the always_on setting for the channel or thread
+        if thread_obj:  
+            await set_always_on(thread_obj, always_on_value)  # Apply always_on to the new thread
+            logging.info(f"Thread {thread_obj.id} set to always on: {always_on_value}.")
+        else:  
+            await set_always_on(target_channel, always_on_value)  # Apply always_on to the channel
+            logging.info(f"Channel {target_channel.id} set to always on: {always_on_value}.")
 
         # Prepare success message
         if thread == "NEW THREAD":
@@ -474,41 +486,49 @@ def setup_commands(tree, get_assistant_response):
 
         await interaction.followup.send(success_message)
 
-        # Set the always_on setting for the channel or thread
-        await set_always_on(target_channel, always_on.value)
-
     @startnew.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
-        # Call the existing channel autocomplete function
-        choices = await channel_autocomplete(interaction, current)
+            # Call the existing channel autocomplete function
+            choices = await channel_autocomplete(interaction, current)
 
-        # Add the option to create a new channel
-        choices.append(discord.app_commands.Choice(name="CREATE A NEW CHANNEL", value="NEW CHANNEL"))
+            # Add the option to create a new channel
+            choices.append(discord.app_commands.Choice(name="CREATE A NEW CHANNEL", value="NEW CHANNEL"))
 
-        return choices[:50]  # Limit to 50 suggestions
+            return choices[:50]  # Limit to 50 suggestions
 
     @startnew.autocomplete('thread')
     async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
-        # Call the existing thread autocomplete function
-        choices = await thread_autocomplete(interaction, current)
+            # Call the existing thread autocomplete function
+            choices = await thread_autocomplete(interaction, current)
 
-        # Add the option to create a new thread
-        choices.append(discord.app_commands.Choice(name="CREATE A NEW THREAD", value="NEW THREAD"))
+            # Add the option to create a new thread
+            choices.append(discord.app_commands.Choice(name="CREATE A NEW THREAD", value="NEW THREAD"))
 
-        return choices[:50]  # Limit to 50 suggestions
+            return choices[:50]  # Limit to 50 suggestions
 
     @startnew.autocomplete('memory')
     async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
-        return await memory_autocomplete(interaction, current)
+            return await memory_autocomplete(interaction, current)
+
+
+        
+
 
 
     @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
+    @app_commands.describe(always_on="Set the assistant always on or off.")
+    @app_commands.choices(always_on=[
+        app_commands.Choice(name="On", value="on"),
+        app_commands.Choice(name="Off", value="off")
+    ])
+    
     async def assign_memory_command(
         interaction: discord.Interaction,
         channel: str,
         memory: str,
         thread: str = None,
         memory_name: str = None,
+        always_on: app_commands.Choice[str] = None  # Optional
     ):
         await interaction.response.defer()
 
@@ -526,16 +546,24 @@ def setup_commands(tree, get_assistant_response):
             # Now proceed to assign the newly created memory to the channel or thread
             memory_assignment_result = await assign_memory(
                 interaction,
-                memory_name,  # Use the memory_name we just created
+                memory_name,
                 channel_id=channel,
                 thread_id=thread,
-                memory_name=memory_name  # Ensure memory_name is passed
+                memory_name=memory_name
             )
 
-            # Fetch the channel and thread objects
+            # Fetch channel and thread objects
             target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
             target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
 
+            # Apply always_on setting if specified
+            if always_on:
+                if target_thread:
+                    await set_always_on(target_thread, always_on.value == "on")
+                elif target_channel:
+                    await set_always_on(target_channel, always_on.value == "on")
+
+            # Send response
             if target_thread:
                 await interaction.followup.send(
                     f"Memory '{memory_name}' created and assigned successfully to thread {target_thread.mention} in channel {target_channel.mention}."
@@ -546,7 +574,6 @@ def setup_commands(tree, get_assistant_response):
                 )
             else:
                 await interaction.followup.send(f"Memory '{memory_name}' created but the specified channel or thread was not found.")
-
             return
 
         # If not creating a new memory, just proceed to assign it
@@ -555,13 +582,21 @@ def setup_commands(tree, get_assistant_response):
             memory,
             channel_id=channel,
             thread_id=thread,
-            memory_name=memory_name  # Pass the memory_name
+            memory_name=memory_name
         )
 
-        # Fetch the channel and thread objects again for the non-creation case
+        # Fetch the channel and thread objects for the non-creation case
         target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
         target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
 
+        # Apply always_on setting if specified
+        if always_on:
+            if target_thread:
+                await set_always_on(target_thread, always_on.value == "on")
+            elif target_channel:
+                await set_always_on(target_channel, always_on.value == "on")
+
+        # Send response
         if target_thread:
             await interaction.followup.send(
                 f"Memory '{memory}' assigned successfully to thread {target_thread.mention} in channel {target_channel.mention}."
@@ -573,7 +608,6 @@ def setup_commands(tree, get_assistant_response):
         else:
             await interaction.followup.send(f"Memory '{memory}' assigned, but the specified channel or thread was not found.")
 
-
     @assign_memory_command.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
         return await channel_autocomplete(interaction, current)
@@ -583,6 +617,53 @@ def setup_commands(tree, get_assistant_response):
         return await memory_autocomplete(interaction, current)
 
     @assign_memory_command.autocomplete('thread')
+    async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
+    
+
+
+    @tree.command(name="set_always_on", description="Set the assistant to always be on or off for a channel or thread.")
+    @app_commands.describe(always_on="Set the assistant always on or off.")
+    @app_commands.choices(always_on=[
+        app_commands.Choice(name="On", value="on"),
+        app_commands.Choice(name="Off", value="off")
+    ])
+    async def set_always_on_command(
+        interaction: discord.Interaction,
+        channel: str,
+        thread: str = None,
+        always_on: app_commands.Choice[str] = None  # Optional; defaults to "off" if not specified
+    ):
+        await interaction.response.defer()
+
+        # Explicitly parse always_on as True (on) or False (off)
+        always_on_value = always_on and always_on.value == "on"
+
+        # Fetch channel and thread objects
+        target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
+        target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
+
+        if target_thread:
+            await set_always_on(target_thread, always_on_value)
+            await interaction.followup.send(
+                f"Assistant 'always on' set to {'on' if always_on_value else 'off'} for thread {target_thread.mention}."
+            )
+        elif target_channel:
+            await set_always_on(target_channel, always_on_value)
+            await interaction.followup.send(
+                f"Assistant 'always on' set to {'on' if always_on_value else 'off'} for channel {target_channel.mention}."
+            )
+        else:
+            await interaction.followup.send("Error: Invalid channel or thread specified.")
+
+        # Log the action
+        logging.info(f"{'Thread' if target_thread else 'Channel'} {target_thread.id if target_thread else target_channel.id} 'always on' set to: {always_on_value}")
+
+    @set_always_on_command.autocomplete('channel')
+    async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @set_always_on_command.autocomplete('thread')
     async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
     

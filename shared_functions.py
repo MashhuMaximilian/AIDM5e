@@ -1,23 +1,79 @@
 import logging
 import discord
 from helper_functions import get_category_id
+from utils import load_thread_data, save_thread_data
 
 
 always_on_channels = {}
 
 async def set_always_on(channel_or_thread, always_on_value):
-    if always_on_value == "on":
-        always_on_channels[channel_or_thread.id] = True  # Add to the dictionary
-        await channel_or_thread.send("AI assistant is now always listening to all messages.")
-        logging.info(f"Channel {channel_or_thread.id} set to always on. Current always_on_channels: {always_on_channels}")
+    existing_data = load_thread_data()
+    if existing_data is None:
+        existing_data = {}
+
+    category_id = str(channel_or_thread.category.id)
+    channel_id = str(channel_or_thread.id)
+
+    # Check if it's a channel or thread
+    if category_id in existing_data:
+        if channel_id in existing_data[category_id]["channels"]:
+            # It's a channel
+            always_on = always_on_value is True  # Ensure only True/False values are considered
+            existing_data[category_id]["channels"][channel_id]["always_on"] = always_on
+            
+            # Update runtime dictionary
+            always_on_channels[channel_or_thread.id] = always_on
+            if not always_on:
+                always_on_channels.pop(channel_or_thread.id, None)
+
+            # Log the state before saving
+            logging.info(f"Setting channel {channel_id} always on: {always_on}")
+            
+            # Save changes to JSON
+            save_thread_data(existing_data)
+
+            # Send confirmation message
+            status_message = "now always listening to all messages." if always_on else "now only responding when mentioned."
+            await channel_or_thread.send(f"AI assistant is {status_message}")
+            logging.info(f"Channel {channel_or_thread.id} set to always on: {always_on}. Current always_on_channels: {always_on_channels}")
+
+        elif str(channel_or_thread.parent.id) in existing_data[category_id]["channels"]:
+            # It's a thread
+            parent_channel_id = str(channel_or_thread.parent.id)
+            always_on = always_on_value is True
+
+            if parent_channel_id in existing_data[category_id]["channels"]:
+                # Check if the thread already exists
+                if str(channel_or_thread.id) in existing_data[category_id]["channels"][parent_channel_id]["threads"]:
+                    # Update only the always_on property
+                    existing_data[category_id]["channels"][parent_channel_id]["threads"][str(channel_or_thread.id)]["always_on"] = always_on
+                else:
+                    # If the thread does not exist, create it with the always_on value
+                    existing_data[category_id]["channels"][parent_channel_id]["threads"][str(channel_or_thread.id)] = {
+                        "always_on": always_on  # Add the always_on attribute for the thread
+                    }
+
+                # Update runtime dictionary
+                always_on_channels[channel_or_thread.id] = always_on
+                if not always_on:
+                    always_on_channels.pop(channel_or_thread.id, None)
+
+                # Log the state before saving
+                logging.info(f"Setting thread {channel_or_thread.id} always on: {always_on}")
+                
+                # Save changes to JSON
+                save_thread_data(existing_data)
+
+                # Send confirmation message
+                status_message = "now always listening to all messages." if always_on else "now only responding when mentioned."
+                await channel_or_thread.send(f"AI assistant is {status_message}")
+                logging.info(f"Thread {channel_or_thread.id} set to always on: {always_on}. Current always_on_channels: {always_on_channels}")
+            else:
+                logging.error(f"Parent channel {parent_channel_id} not found in thread data.")
+        else:
+            logging.error(f"Channel/Thread {channel_or_thread.id} not found in thread data.")
     else:
-        if channel_or_thread.id in always_on_channels:
-            del always_on_channels[channel_or_thread.id]  # Remove from the dictionary
-            await channel_or_thread.send("AI assistant is now only responding when mentioned.")
-            logging.info(f"Channel {channel_or_thread.id} set to respond only to mentions. Current always_on_channels: {always_on_channels}")
-
-
-
+        logging.error(f"Category {category_id} not found in thread data.")
 
 async def send_response_in_chunks(channel, response):
     if len(response) > 2000:
