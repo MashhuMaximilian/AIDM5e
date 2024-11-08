@@ -123,5 +123,10 @@ async def send_response(interaction, response, channel_id=None, thread_id=None, 
 
     await send_response_in_chunks(target_channel, response)
 
-    location_msg = f"Response sent to <#{target_channel.id}>."
-    await interaction.followup.send(location_msg)
+    if target_channel != interaction.channel:
+        location_msg = f"Response sent to <#{target_channel.id}>."
+        await interaction.followup.send(location_msg)
+    else:
+        # Do nothing if the target channel is the same as the interaction channel
+        await interaction.followup.send("See Below.")
+

@@ -184,45 +184,6 @@ async def get_assigned_memory(channel_id, category_id, thread_id=None):
     logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
 
-async def get_default_memory(category_id):
-    """Retrieve the default or 'out-of-game' memory for a category."""
-    category_data = category_threads.get(category_id)
-    if category_data:
-        return category_data['memory_threads'].get("out-of-game")
-
-    logging.info(f"No default memory found for category {category_id}.")
-    return None
-
-async def get_assigned_memory(channel_id, category_id, thread_id=None):
-    """Retrieve the assigned memory for a specific channel or thread in a category."""
-    logging.info(f"Fetching assigned memory for channel_id: {channel_id}, thread_id: {thread_id}, category_id: {category_id}")
-
-    category_threads = load_thread_data()  # Load your JSON data
-    category_id_str = str(category_id)
-    
-
-    if category_id_str not in category_threads:
-        logging.info(f"No data found for category '{category_id_str}'.")
-        return None
-
-    channel_data = category_threads[category_id_str]['channels'].get(str(channel_id))
-    if channel_data:
-        assigned_memory = channel_data.get('assigned_memory')
-
-        if thread_id:
-            thread_data = channel_data['threads'].get(str(thread_id))
-            if thread_data:
-                assigned_memory = thread_data.get('assigned_memory') or assigned_memory
-
-        if assigned_memory:
-            # Remove leading/trailing whitespace, quotes, and stray periods
-            assigned_memory = assigned_memory.strip().strip("'\". ")
-            logging.info(f"Assigned Memory found: {assigned_memory}")
-            return assigned_memory if assigned_memory else None
-
-    logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
-    return None
-
 async def initialize_threads(guild):
     """Initialize threads for each category and create OpenAI threads if necessary."""
     # Load existing thread data

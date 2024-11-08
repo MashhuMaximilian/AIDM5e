@@ -5,7 +5,7 @@ from discord import app_commands
 from shared_functions import *
 from helper_functions import *
 import logging
-from memory_management import create_memory
+from memory_management import create_memory, get_assigned_memory
 
     # Set up logging (you can configure this as needed)
 logging.basicConfig(level=logging.INFO)
@@ -76,16 +76,23 @@ def setup_commands(tree, get_assistant_response):
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to summarize.",
-        query="Additional requests or context for the recap."
+        query="Additional requests or context for the recap.",
+        last_n="Summarize the last 'n' messages (optional)."
     )
-    async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None):
+    async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None, last_n: int = None, channel: str = None, thread: str = None):
         await interaction.response.defer()  # Defer the response while processing
 
-        # Fetch the channel
-        channel = interaction.channel
+        # Fetch the channel and thread if specified
+        channel_id = int(channel) if channel else interaction.channel.id
+        thread_id = int(thread) if thread else None
+        category_id = get_category_id(interaction)
+
         
+        # Fetch the assigned memory for the provided channel and thread
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
+
         # Fetch conversation history based on provided parameters
-        conversation_history, options_or_error = await fetch_conversation_history(channel, start, end, message_ids)
+        conversation_history, options_or_error = await fetch_conversation_history(interaction.channel, start, end, message_ids, last_n)
 
         # Check if the response is an error message
         if isinstance(options_or_error, str):
@@ -94,14 +101,24 @@ def setup_commands(tree, get_assistant_response):
 
         options = options_or_error  # Assign the options for summarization
 
-        # Summarize the conversation
-        response = await summarize_conversation(interaction, conversation_history, options, query)
+        # Summarize the conversation, passing assigned_memory to the summarization function
+        response = await summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory)
 
         # Send the summarized response in chunks
         if response:  # Ensure response is not empty
-            await send_response_in_chunks(interaction.channel, response)
+            await send_response(interaction, response, channel_id=channel_id, thread_id=thread_id)
         else:
             await interaction.followup.send("No content to summarize.")  # Optional: handle empty response
+
+            # Autocomplete functions for channel and thread parameters
+            @summarize.autocomplete('channel')  # Note that the parameter name is 'channel', not 'channel_id'
+            async def target_channel_autocomplete(interaction: discord.Interaction, current: str):
+                return await channel_autocomplete(interaction, current)
+
+            @summarize.autocomplete('thread')  # Note that the parameter name is 'thread', not 'thread_id'
+            async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
+                return await thread_autocomplete(interaction, current)
+
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
     async def feedback(interaction: discord.Interaction, suggestions: str):

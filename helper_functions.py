@@ -24,8 +24,7 @@ async def fetch_discord_threads(channel):
     
     return discord_threads
 
-async def summarize_conversation(interaction, conversation_history, options, query):
-    # from assistant_interactions import get_assistant_response  # Local import to avoid circular dependency
+async def summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory):
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)
     elif options['type'] == 'from':
@@ -34,6 +33,10 @@ async def summarize_conversation(interaction, conversation_history, options, que
     elif options['type'] == 'between':
         start_index, end_index = options['start_index'], options['end_index']
         history = "\n".join(conversation_history[start_index:end_index])
+    elif options['type'] == 'last_n':
+        # For 'last_n' messages, use the provided 'n' value
+        start_index = -options['last_n']
+        history = "\n".join(conversation_history[start_index:])
     else:
         logging.error("Invalid options for summarization.")
         return "Invalid options for summarization."
@@ -42,11 +45,13 @@ async def summarize_conversation(interaction, conversation_history, options, que
               f"Here is the conversation history:\n\n{history}"
               f"Here are other requests I want about the summary:\n\n{query}"
               )
-    
-    response = await get_assistant_response(prompt, interaction.channel.id)
+
+    # Call get_assistant_response with channel_id, thread_id, and assigned_memory
+    response = await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
     return response
 
-async def fetch_conversation_history(channel, start=None, end=None, message_ids=None):
+
+async def fetch_conversation_history(channel, start=None, end=None, message_ids=None, last_n=None):
     # Initialize an empty list to store the conversation history
     conversation_history = []
 
@@ -105,8 +110,25 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
 
         return conversation_history, {'type': 'from', 'start_index': 0}
 
+    # Handle 'last_n' option
+    if last_n is not None:
+        try:
+            last_n = int(last_n)
+        except ValueError:
+            return None, "Invalid value for 'last_n'. It must be an integer."
+
+        async for message in channel.history(limit=last_n):
+            conversation_history.append(f"{message.author.name}: {message.content}")
+
+        if not conversation_history:
+            return None, "No messages found for the last 'n' messages."
+
+        return conversation_history, {'type': 'last_n', 'last_n': last_n}
+
+
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
+
 
 async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
