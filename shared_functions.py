@@ -1,6 +1,6 @@
 import logging
 import discord
-from helper_functions import get_category_id
+from config import client
 from utils import load_thread_data, save_thread_data
 
 
@@ -93,41 +93,64 @@ async def check_always_on(channel_id, category_id, thread_id):
 
     return False  # Default to False if neither is set to true
 
-
 async def send_response_in_chunks(channel, response):
+    if response is None:
+        logging.error("Received None as response.")
+        return  # Early return if response is None
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
             await channel.send(chunk)
     else:
         await channel.send(response)
 
-async def send_response(interaction: discord.Interaction, response: str, channel_id: int = None, thread_id: int = None):
-    """Send a response to a specified channel or thread. Defaults to #telldm if none provided."""
-    logging.info(f"Channel ID: {channel_id}, Thread ID: {thread_id}")
-
-    # Get the category ID from the interaction
-    category_id = get_category_id(interaction)
-
-    if channel_id is None:  # No channel provided, use #telldm
-        target_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=interaction.channel.category)
+async def send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name=None):
+    # Initialize target and backup channels
+    target_channel = None
+    backup_channel = None
+    
+    # Check for a specific channel
+    if channel_id:
+        target_channel = client.get_channel(channel_id)
+        if not target_channel:
+            logging.error(f"Channel with ID {channel_id} not found.")
+            await interaction.followup.send(f"Error: Channel with ID {channel_id} not found.")
+            return
     else:
-        target_channel = interaction.guild.get_channel(channel_id)
+        # No specific channel provided, find the backup channel in the same category
+        category = interaction.channel.category
+        if category:
+            for ch in category.text_channels:
+                if ch.name == backup_channel_name:
+                    backup_channel = ch
+                    break
+        target_channel = backup_channel or interaction.channel  # Use backup or default to interaction's channel
 
-    if target_channel:
-        # Attempt to fetch the thread by ID just before sending the response
-        if thread_id:
-            target_thread = discord.utils.get(target_channel.threads, id=thread_id)
-            if not target_thread:
-                await interaction.followup.send(f"Thread with ID {thread_id} not found in channel <#{target_channel.name}>.")
-                return
-            # Send response in the thread
-            await send_response_in_chunks(target_thread, response)
-            # Notify where the answer was sent with a channel mention
-            await interaction.followup.send(f"Your answer has been sent in the thread: <#{target_thread.id}>  in channel: <#{target_channel.id}>.")
+    # Set target channel to a thread if a thread ID is specified
+    if thread_id:
+        thread = client.get_channel(thread_id)
+        if thread is None:
+            logging.error(f"Thread with ID {thread_id} not found.")
+            await interaction.followup.send(f"Error: Thread with ID {thread_id} not found.")
+            return
+        target_channel = thread  # Directly use the thread as the target
+    
+    # Log an error and return if no target channel found
+    if not target_channel:
+        logging.error("Target channel could not be determined.")
+        await interaction.followup.send("Error: Could not determine target channel.")
+        return
+    
+    # Send response, handling length constraints
+    if response:
+        if len(response) > 2000:
+            for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+                await target_channel.send(chunk)
         else:
-            # Send response in the main channel if no thread ID is given
-            await send_response_in_chunks(target_channel, response)
-            # Notify where the answer was sent with a channel mention
-            await interaction.followup.send(f"Your answer has been sent in channel: <#{target_channel.id}>.")
+            await target_channel.send(response)
     else:
-        await interaction.followup.send(f"Channel with ID {channel_id} not found.")
+        logging.error("Received None as response.")
+        return
+
+    # Send follow-up to inform the original channel about the response location
+    location_msg = f"Response sent to <#{target_channel.id}>."
+    await interaction.followup.send(location_msg)

@@ -80,7 +80,6 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
                 logging.error(error_message)
                 return error_message
 
-            # Strip unwanted characters again before sending to assistant
             assigned_memory = assigned_memory.strip("'\". ")
 
             # Start typing indicator while processing
@@ -95,10 +94,13 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
                 messages_data = await fetch_assistant_response(session, assigned_memory)
                 assistant_response = extract_assistant_response(messages_data)
 
+                if not assistant_response:
+                    logging.error("No valid response received from the assistant.")
+                    return "No valid response received from the assistant."
+
                 logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
-                # Send the response in chunks if necessary
                 await send_response_in_chunks(channel, assistant_response)
-                # return assistant_response
+                return assistant_response
 
     except Exception as e:
         logging.error(f"Error during the assistant interaction: {str(e)}")

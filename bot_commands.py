@@ -3,17 +3,16 @@
 import discord
 from discord import app_commands
 from shared_functions import *
-from assistant_interactions import get_assistant_response
-from config import HEADERS
 from helper_functions import *
 import logging
-from memory_management import get_assigned_memory
+from memory_management import create_memory
 
     # Set up logging (you can configure this as needed)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def setup_commands(tree, get_assistant_response):
+
 
     @tree.command(name="tellme", description="Info about spells, items, NPCs, character status, inventory, or roll checks.")
     @app_commands.choices(
@@ -26,66 +25,9 @@ def setup_commands(tree, get_assistant_response):
             app_commands.Choice(name="RollCheck", value="rollcheck")
         ]
     )
-    async def tellme(interaction: discord.Interaction, 
-                    query_type: app_commands.Choice[str], 
-                    query: str, 
-                    channel: str = None, 
-                    thread: str = None
-                    ):
-        await interaction.response.defer()  # Defer response while we process
-
-        # Construct the prompt based on query type
-        prompt = ""
-        if query_type.value == "spell":
-            prompt = f"I have a question about the spell. Besides your answer, be sure to also send the description of the spell mentioned, that you can find in the Player's Handbook, with its parameters: casting time, level, components, description, range, duration, attack/save, damage/effect, and a link to where somebody could find that spell on one of these websites: http://dnd5e.wikidot.com/, https://www.dndbeyond.com/, https://roll20.net/compendium/dnd5e, or https://www.aidedd.org/dnd. {query}"
-        
-        elif query_type.value == "checkstatus":
-            prompt = f"I would like to know the current status of a character, including HP, spell slots, conditions, and any other relevant information. {query}"
-        
-        elif query_type.value == "hbw_item":
-            prompt = f"I have a question about a homebrew item. Provide the item's full description, properties, and usage as it was detailed by the creator of the item or as it appears in this campaign. Make sure to mention who the item belongs to and any relevant background information. {query}"
-
-        elif query_type.value == "npc":
-            prompt = f"I have a question about an NPC. Provide all known information about this NPC, including their background, motivations, recent interactions with the party. {query}"
-        
-        elif query_type.value == "inventory":
-            prompt = f"I have a question about the inventory of a character. Please provide a detailed list of items currently in the specified character’s inventory, including any magical properties or special features. If asking about a specific item, confirm its presence and provide details. {query}"
-        
-        elif query_type.value == "rollcheck":
-            prompt = f"I want to test the feasibility of an action or a skill check before deciding to do it in the game. Please provide guidance on what I would need to roll, including the appropriate skill and any potential outcomes or modifiers to consider. {query}"
-
-            # Determine the target channel and thread
-        channel_id = int(channel) if channel else interaction.channel.id
-        category_id = interaction.channel.category.id if interaction.channel.category else None
-
-        # Retrieve memory based on provided parameters
-        if thread:
-            assigned_memory = await get_assigned_memory(channel, category_id, thread)
-        elif channel:
-            assigned_memory = await get_assigned_memory(channel, category_id)
-        else:
-            assigned_memory = await get_assigned_memory(interaction.channel.id, category_id)
-
-        # Check if memory was fetched
-        if assigned_memory is None:
-            logging.info("No assigned memory found for the given parameters.")
-            await interaction.followup.send("No memory found for the specified parameters.")
-            return
-
-        # Log that we’re using the fetched memory from the correct channel
-        logging.info(f"Using assigned memory '{assigned_memory}' for specified channel '{channel}'.")
-
-        # Get response from the assistant using the prompt and assigned memory
-        response = await get_assistant_response(prompt, interaction.channel.id, category_id, thread, assigned_memory=assigned_memory)
-
-        # Determine where to send the response
-        if not channel and not thread:
-            # If no channel or thread is specified, use #telldm as default
-            target_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=interaction.channel.category)
-            channel_id = target_channel.id if target_channel else None
-
-        # Send the response
-        await send_response(interaction, response, channel_id=channel_id, thread_id=int(thread) if thread else None)
+   
+    async def tellme(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, channel: str = None, thread: str = None):
+        await process_query_command(interaction, query_type, query, backup_channel_name="telldm", channel=channel, thread=thread)
 
     # Autocomplete for channels
     @tellme.autocomplete('channel')
@@ -99,7 +41,9 @@ def setup_commands(tree, get_assistant_response):
     async def tellme_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
 
-    @tree.command(name="askdm", description="Inquire about rules, lore, monsters, and more.")
+
+    # Main logic for the askdm command (same for tellme command)
+    @tree.command(name="askdm", description="Inquire about rules, lore, monsters, and more.") 
     @app_commands.choices(
         query_type=[
             app_commands.Choice(name="Game Mechanics", value="game_mechanics"),
@@ -111,82 +55,20 @@ def setup_commands(tree, get_assistant_response):
             app_commands.Choice(name="Race or Class", value="race_class")
         ]
     )
-    async def askdm(interaction: discord.Interaction, 
-                    query_type: app_commands.Choice[str], 
-                    query: str, 
-                    channel: str = None, 
-                    thread: str = None):
-        await interaction.response.defer()  # Defer response while we process
+    async def askdm(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, channel: str = None, thread: str = None):
+        await process_query_command(interaction, query_type, query, backup_channel_name="telldm", channel=channel, thread=thread)
 
-        # Construct the prompt based on query type
-        prompt = ""
-        if query_type.value == "game_mechanics":
-            prompt = f"This is a query about game mechanics and gameplay elements based on official sources like the Player’s Handbook (PHB) or Dungeon Master’s Guide (DMG). Please provide a detailed explanation with rules, examples, and references to relevant sources as well as links from https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Here is the question: {query}"
-
-        elif query_type.value == "monsters_creatures":
-            prompt = f"This is a question about monsters or creatures, including those from the Monster Manual or homebrew. Please include their abilities, weaknesses, lore, and strategies for handling them in combat. Provide references to the source and links to reliable websites like a link to where somebody could find that spell on one of these websites: http://dnd5e.wikidot.com/, https://www.dndbeyond.com/, https://roll20.net/compendium/dnd5e, https://forgottenrealms.fandom.com/wiki, or https://www.aidedd.org/dnd. Question: {query}"
-
-        elif query_type.value == "world_lore_history":
-            prompt = f"This is an inquiry about the lore, history, and cosmology of the game world. Provide a detailed explanation with relevant background information, official sources, and any notable events or characters. Include links to 3 reliable links to relevant websites. Question: {query}"
-
-        elif query_type.value == "conditions_effects":
-            prompt = f"This is a question about conditions and their effects, such as stunned, poisoned, grappled, etc. Please explain their rules, implications in combat and exploration, and provide any interactions with spells or abilities. Reference official sources like the PHB or DMG or links from https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
-
-        elif query_type.value == "rules_clarifications":
-            prompt = f"This is a query about specific rule clarifications. Please provide a clear and detailed explanation based on official sources, and include any applicable errata or optional rules. Reference the PHB, DMG, or other official sourcebooks or links from https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
-        
-        elif query_type.value == "item":
-            prompt = f"I have a question about an item. Besides your answer, include the item’s full description, properties, and usage, as detailed in the Player’s Handbook or Dungeon Master’s Guide. Also, provide a link to where someone can find more information about the item on these websites: http://dnd5e.wikidot.com/, https://www.dndbeyond.com/, https://roll20.net/compendium/dnd5e, or https://www.aidedd.org/dnd. {query}"
-
-        elif query_type.value == "race_class":
-            prompt = f"This is a question about a D&D race, class, or subclass, including official content or homebrew. Please provide details on abilities, traits, key features, and how to optimize gameplay. Include lore, background, and roleplaying suggestions for the race or class. If possible, compare it with similar races or classes. Provide references to the source material and links to reliable websites like https://forgottenrealms.fandom.com/wiki, https://www.dndbeyond.com/, https://rpgbot.net/dnd5, or https://roll20.net/. Question: {query}"
-            
-        channel_id = int(channel) if channel else interaction.channel.id  # Use interaction channel if no channel specified
-       # Retrieve the category ID from the interaction
-        category_id = interaction.channel.category.id if interaction.channel.category else None
-
-        # Fetch memory based on the provided parameters
-        if thread:  # If a thread is provided
-            assigned_memory = await get_assigned_memory(channel, category_id, thread)
-        elif channel:  # If only a channel is provided
-            assigned_memory = await get_assigned_memory(channel, category_id)
-        else:  # Default to the current channel
-            assigned_memory = await get_assigned_memory(interaction.channel.id, category_id)
-
-        # Check if memory was fetched
-        if assigned_memory is None:
-            logging.info("No assigned memory found for the given parameters.")
-            await interaction.followup.send("No memory found for the specified parameters.")
-            return
-
-        # Log that we’re using the fetched memory from the correct channel
-        logging.info(f"Using assigned memory '{assigned_memory}' for specified channel '{channel}'.")
-
-        # Pass the assigned memory directly to get_assistant_response
-        response = await get_assistant_response(prompt, interaction.channel.id, category_id, thread, assigned_memory=assigned_memory)
-
-    # Log the thread ID being sent
-        logging.info(f"Sending response to thread ID: {thread}")
-         # Determine where to send the response
-        if not channel and not thread:
-            # If no channel or thread is specified, use #telldm
-            target_channel = discord.utils.get(interaction.guild.channels, name='telldm', category=interaction.channel.category)
-            channel_id = target_channel.id if target_channel else None
-
-        # Call send_response to send the assistant's response
-        await send_response(interaction, response, channel_id=channel_id, thread_id=int(thread) if thread else None)
-            
-    # Autocomplete for channels in askdm
+    # Autocomplete for channels
     @askdm.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
-        # Call the existing channel autocomplete function
         choices = await channel_autocomplete(interaction, current)
         return choices[:25]  # Limit to 25 suggestions
 
-    # Autocomplete for threads in askdm
+    # Autocomplete for threads
     @askdm.autocomplete('thread')
     async def askdm_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
+
 
 
     @tree.command(name="summarize", description="Summarize messages based on different options.")
