@@ -111,12 +111,12 @@ def setup_commands(tree, get_assistant_response):
             await interaction.followup.send("No content to summarize.")  # Optional: handle empty response
 
             # Autocomplete functions for channel and thread parameters
-            @summarize.autocomplete('channel')  # Note that the parameter name is 'channel', not 'channel_id'
-            async def target_channel_autocomplete(interaction: discord.Interaction, current: str):
+    @summarize.autocomplete('channel')  # Note that the parameter name is 'channel', not 'channel_id'
+    async def target_channel_autocomplete(interaction: discord.Interaction, current: str):
                 return await channel_autocomplete(interaction, current)
 
-            @summarize.autocomplete('thread')  # Note that the parameter name is 'thread', not 'thread_id'
-            async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
+    @summarize.autocomplete('thread')  # Note that the parameter name is 'thread', not 'thread_id'
+    async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
                 return await thread_autocomplete(interaction, current)
 
 
@@ -124,20 +124,20 @@ def setup_commands(tree, get_assistant_response):
     async def feedback(interaction: discord.Interaction, suggestions: str):
         await interaction.response.defer()  # Defer the response while processing the feedback
 
-        # Step 1: Check if 'telldm' channel exists in the same category
+        # Step 1: Check if 'feedback' channel exists in the same category
         feedback_channel = discord.utils.get(interaction.channel.category.channels, name="feedback")
 
         # If the channel doesn't exist, create it
         if feedback_channel is None:
             guild = interaction.guild
             feedback_channel = await guild.create_text_channel(name="feedback", category=interaction.channel.category)
-            await interaction.followup.send(f"The #telldm channel was not found, so I created it in the same category.")
+            await interaction.followup.send(f"The #feedback channel was not found, so I created it in the same category.")
 
-        # Step 2: Send the feedback message to #telldm
+        # Step 2: Send the feedback message to #feedback
         feedback_message = await feedback_channel.send(f"Feedback from {interaction.user.name}: {suggestions}")
         await interaction.followup.send(f"Your feedback has been sent to {feedback_channel.mention}.")
 
-        # Step 3: Fetch all messages from the #telldm channel
+        # Step 3: Fetch all messages from the #feedback channel
         messages = []
         async for message in feedback_channel.history(limit=300):
             messages.append(f"{message.author.name}: {message.content}")
@@ -152,17 +152,22 @@ def setup_commands(tree, get_assistant_response):
         # Create a conversation history from all the messages
         conversation_history = "\n".join(reversed(messages))  # Reversed so that it reads from oldest to newest
 
-        # Step 5: Send the conversation to the assistant for summarization, focusing on the last message
-        prompt = (f"Make a recap the following feedback messages regarding the AIDM’s performance. "
-                f"Here is the entire message history from the #telldm channel:\n\n{conversation_history}"
+        # Step 5: Get the assigned memory for the feedback channel
+        category_id = get_category_id(interaction)
+        assigned_memory = await get_assigned_memory(interaction.channel.id, category_id, thread_id=None)
+
+        # Step 6: Send the conversation to the assistant for summarization, focusing on the last message
+        prompt = (f"Make a recap of the following feedback messages regarding the AIDM’s performance. "
+                f"Here is the entire message history from the #feedback channel:\n\n{conversation_history}"
                 f"Pay special attention to the **last feedback message**, which is:\n\n{last_message}\n\n"
-                f"Summarize this last message briefly and confirm you understood the feedback. "
-                f"Also mention that you have reviewed all feedback messages for better implementation. ")
+                f"1)Summarize this last message briefly and confirm you understood the feedback. "
+                f"2)Also mention that you have reviewed all feedback messages for better implementation. ")
 
-        response = await get_assistant_response(prompt, interaction.channel.id)
+        # Update the assistant response call with the correct memory
+        response = await get_assistant_response(prompt, interaction.channel.id, thread_id=None, assigned_memory=assigned_memory)
 
-        await send_response_in_chunks(response)
 
+        await send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name="feedback")
 
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
