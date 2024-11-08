@@ -172,98 +172,71 @@ def setup_commands(tree, get_assistant_response):
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
 
-
-    @tree.command(name="send", description="Send specified messages to another channel.")
+    @tree.command(name="send", description="Send specified messages to another channel or thread.")
     @app_commands.describe(
-        target_channel="Channel(s) to send messages to (select from the same category).",
-        thread="Select a thread in the target channel (optional).",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to send (comma-separated if multiple).",
-        summarize_options="Options for summarization: yes, no, only recap.",
-        query="Additional requests or context for the messages."
+        last_n="Send the last 'n' messages (optional)."
     )
-    @app_commands.choices(summarize_options=[
-        app_commands.Choice(name="Yes", value="yes"),
-        app_commands.Choice(name="No", value="no"),
-        app_commands.Choice(name="Only Recap", value="only summary")
-    ])
     async def send(
-        interaction: discord.Interaction,
-        target_channel: str, 
-        thread: str = None, 
-        start: str = None,
-        end: str = None,
-        message_ids: str = None,
-        summarize_options: str = "no",
-        query: str = None  # New query parameter
+        interaction: discord.Interaction, 
+        start: str = None, 
+        end: str = None, 
+        message_ids: str = None, 
+        last_n: int = None, 
+        channel: str = None, 
+        thread: str = None
     ):
         await interaction.response.defer()  # Defer the response while processing
 
-        # Fetch the current channel
-        channel = interaction.channel
+        # Fetch the channel and thread if specified
+        channel_id = int(channel) if channel else interaction.channel.id
+        thread_id = int(thread) if thread else None
 
-        # Fetch conversation history based on provided parameters
-        conversation_history, options_or_error = await fetch_conversation_history(channel, start, end, message_ids)
+        # Fetch conversation history based on the provided parameters
+        conversation_history, options_or_error = await fetch_conversation_history(interaction.channel, start, end, message_ids, last_n)
 
-        # Check if the response is an error message
+        # Handle errors if conversation history is empty or invalid
         if isinstance(options_or_error, str):
             await interaction.followup.send(options_or_error)  # Send error message
             return
 
-        # Check if the selected target_channel is in the same category
-        target_channel_obj = interaction.guild.get_channel(int(target_channel))  # Convert to channel ID
-        if target_channel_obj.category == channel.category:
-            # Fetch threads for the selected target_channel
-            discord_threads = await fetch_discord_threads(target_channel_obj)
+        # Assign the fetched options (for message selection)
+        options = options_or_error
 
-            # If there are threads, send them as options to the user
-            if discord_threads:
-                thread_names = ", ".join(thread.name for thread in discord_threads)
-            else:
-                await interaction.followup.send(f"No threads available in {target_channel_obj.name}.")
+        # Fetch the target channel object
+        target_channel_obj = interaction.guild.get_channel(channel_id)
 
-            # Use the target thread if specified, otherwise use the target channel directly
-            target = interaction.guild.get_thread(int(thread)) if thread else target_channel_obj
-
-            # Flag to track if messages were sent
-            messages_sent = False
-
-            # Handle summarization based on the summarize_options
-            if summarize_options == "yes" or summarize_options == "no":
-                # Send messages first
-                for message in conversation_history:
-                    await send_response_in_chunks(target, message)
-                    messages_sent = True
-
-            # Handle summary
-            if summarize_options == "yes":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
-                if summary:
-                    await send_response_in_chunks(target, summary)
-                await interaction.followup.send(f"Messages and recap sent successfully to {'thread' if thread else 'channel'} <#{target_channel_obj.id}>.")
-
-            elif summarize_options == "no":
-                if messages_sent:
-                    await interaction.followup.send(f"Messages sent successfully to {'thread' if thread else 'channel'} <#{target_channel_obj.id}>.")
-
-            elif summarize_options == "only summary":
-                summary = await summarize_conversation(interaction, conversation_history, options_or_error, query)  # Pass query to summary
-                if summary:
-                    await send_response_in_chunks(target, summary)
-                await interaction.followup.send(f"Recap sent successfully to {'thread' if thread else 'channel'} <#{target_channel_obj.id}>.")
-
-        else:
+        # Check if the target channel is in the same category
+        if target_channel_obj.category_id != interaction.channel.category_id:
             await interaction.followup.send(f"Cannot send messages to {target_channel_obj.name}. Must be in the same category.")
+            return
 
-    @send.autocomplete('target_channel')
+        # If a thread is specified, fetch the thread
+        target = target_channel_obj
+        if thread:
+            target = await interaction.guild.fetch_channel(thread_id)  # Fetch the thread object
+
+        # Send all messages in the conversation history to the target (either thread or channel)
+        for message in conversation_history:
+            await send_response_in_chunks(target, message)
+
+        # Notify the user about the success after all messages are sent
+        await interaction.followup.send(f"Messages sent successfully to {'thread' if thread else 'channel'} <#{target.id}>.")
+
+    # Autocomplete for the target_channel field
+    @send.autocomplete('channel')
     async def target_channel_autocomplete(interaction: discord.Interaction, current: str):
-        return await channel_autocomplete(interaction, current)
+        # Use the existing channel autocomplete function
+        choices = await channel_autocomplete(interaction, current)
+        return choices[:25]  # Limit to 25 suggestions
 
+    # Autocomplete for the thread field
     @send.autocomplete('thread')
     async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
+        # Use the thread autocomplete function
         return await thread_autocomplete(interaction, current)
-    
 
 
     @tree.command(name="startnew", description="Create a new channel or new thread with options.")
