@@ -25,7 +25,7 @@ async def fetch_discord_threads(channel):
     return discord_threads
 
 async def summarize_conversation(interaction, conversation_history, options, query):
-    from assistant_interactions import get_assistant_response  # Local import to avoid circular dependency
+    # from assistant_interactions import get_assistant_response  # Local import to avoid circular dependency
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)
     elif options['type'] == 'from':
