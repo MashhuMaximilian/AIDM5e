@@ -1,10 +1,10 @@
 import logging
 import aiohttp
 import discord
+from discord import app_commands
 from config import HEADERS
 from utils import load_thread_data, save_thread_data, category_threads
-
-
+from shared_functions import apply_always_on
 
 
 async def create_openai_thread(session, user_message, category_id, memory_name):
@@ -247,4 +247,54 @@ async def initialize_threads(guild):
     # Save the updated thread data, including channels
     save_thread_data(existing_data)
 
+async def handle_memory_assignment(
+    interaction: discord.Interaction,
+    memory: str,
+    channel_id: str,
+    thread_id: str,
+    memory_name: str = None,
+    always_on: app_commands.Choice[str] = None
+):
+    # If creating a new memory
+    if memory == "CREATE NEW MEMORY":
+        if not memory_name:
+            await interaction.followup.send("Error: You must provide a name for the new memory.")
+            return None, None  # No memory assignment to return
 
+        # Create the new memory and assign it
+        memory_thread_id = await create_memory(interaction, memory_name, str(interaction.channel.category.id))
+        memory_assignment_result = await assign_memory(
+            interaction,
+            memory_name,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            memory_name=memory_name
+        )
+
+    # If just assigning an existing memory
+    else:
+        memory_assignment_result = await assign_memory(
+            interaction,
+            memory,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            memory_name=memory_name
+        )
+
+    # Get the target channel and thread
+    target_channel, target_thread = await get_channel_and_thread(interaction, channel_id, thread_id)
+
+    # Apply 'always_on' if specified
+    if always_on:
+        await apply_always_on(target_channel, target_thread, always_on.value)
+
+    return target_channel, target_thread
+
+async def get_channel_and_thread(interaction: discord.Interaction, channel_id: str, thread_id: str = None):
+        target_channel = interaction.guild.get_channel(int(channel_id)) if channel_id.isdigit() else None
+        target_thread = None
+
+        if thread_id:
+            target_thread = interaction.guild.get_channel(int(thread_id)) if thread_id.isdigit() else None
+
+        return target_channel, target_thread

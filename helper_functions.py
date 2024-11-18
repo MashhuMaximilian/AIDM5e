@@ -50,7 +50,6 @@ async def summarize_conversation(interaction, conversation_history, options, que
     response = await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
     return response
 
-
 async def fetch_conversation_history(channel, start=None, end=None, message_ids=None, last_n=None):
     # Initialize an empty list to store the conversation history
     conversation_history = []
@@ -129,16 +128,23 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
     # Error if no valid options provided
     return None, "You must provide at least one of the options."
 
-
 async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
+        if not channel_name:
+            await interaction.followup.send("Error: You must provide a name for the new channel.")
+            return None
         # Create new channel
         new_channel = await guild.create_text_channel(name=channel_name, category=category)
         logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")
         return new_channel
     else:
-        # Retrieve existing channel
-        target_channel = guild.get_channel(int(channel))  # Ensure channel ID is converted to int
+        # Retrieve existing channel by ID
+        try:
+            target_channel = guild.get_channel(int(channel))  # Ensure channel ID is converted to int
+        except ValueError:
+            await interaction.followup.send("Error: Invalid channel ID.")
+            return None
+
         if target_channel is None:
             await interaction.followup.send("Error: Channel not found.")
             return None
@@ -323,3 +329,6 @@ async def process_query_command(interaction: discord.Interaction, query_type: ap
 
     # Send the response to the specified channel, thread, or backup channel
     await send_response(interaction, response, channel_id=channel_id, thread_id=thread_id, backup_channel_name=backup_channel_name)
+
+    # Helper function to fetch the target channel and thread (if provided)
+

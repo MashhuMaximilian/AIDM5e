@@ -130,3 +130,16 @@ async def send_response(interaction, response, channel_id=None, thread_id=None, 
         # Do nothing if the target channel is the same as the interaction channel
         await interaction.followup.send("See Below.")
 
+
+async def apply_always_on(target_channel, target_thread, always_on_value: str):
+    if always_on_value == "on":
+        if target_thread:
+            await set_always_on(target_thread, True)
+        elif target_channel:
+            await set_always_on(target_channel, True)
+    else:
+        if target_thread:
+            await set_always_on(target_thread, False)
+        elif target_channel:
+            await set_always_on(target_channel, False)
+
