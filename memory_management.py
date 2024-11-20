@@ -298,3 +298,38 @@ async def get_channel_and_thread(interaction: discord.Interaction, channel_id: s
             target_thread = interaction.guild.get_channel(int(thread_id)) if thread_id.isdigit() else None
 
         return target_channel, target_thread
+
+
+
+def delete_memory(memory_name_or_id: str) -> str:
+    try:
+        # Load the current memory data
+        category_threads = load_thread_data()  # Load JSON
+
+        # Flag to track deletion
+        deleted = False
+
+        # Iterate through categories to find the memory
+        for category_id, category_data in category_threads.items():
+            for channel_id, channel_data in category_data.get('channels', {}).items():
+                if channel_data.get('memory_name') == memory_name_or_id or channel_data.get('assigned_memory') == memory_name_or_id:
+                    # Remove the memory from the channel
+                    channel_data['assigned_memory'] = None
+                    channel_data['memory_name'] = None
+                    deleted = True
+
+                # Check and remove the memory from threads
+                for thread_id, thread_data in channel_data.get('threads', {}).items():
+                    if thread_data.get('memory_name') == memory_name_or_id or thread_data.get('assigned_memory') == memory_name_or_id:
+                        thread_data['assigned_memory'] = None
+                        thread_data['memory_name'] = None
+                        deleted = True
+
+        if deleted:
+            save_thread_data(category_threads)  # Save updated data
+            return f"Memory '{memory_name_or_id}' deleted successfully."
+        else:
+            return f"Error: Memory '{memory_name_or_id}' not found in any category, channel, or thread."
+    except Exception as e:
+        logging.error(f"Error deleting memory '{memory_name_or_id}': {e}")
+        return f"An error occurred while deleting memory '{memory_name_or_id}': {e}"

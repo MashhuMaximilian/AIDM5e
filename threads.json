@@ -479,13 +479,13 @@
             },
             "1304735674628444182": {
                 "name": "test62",
-                "assigned_memory": "thread_0u5B3dE1VChmw1h4EoXOn5lT",
-                "memory_name": "testneweest",
+                "assigned_memory": null,
+                "memory_name": null,
                 "threads": {
                     "1304735675933003796": {
                         "name": "test62.2",
-                        "assigned_memory": "thread_o77f8psly7rjXywNPRbfWDyE",
-                        "memory_name": "testneweest",
+                        "assigned_memory": null,
+                        "memory_name": null,
                         "always_on": false
                     }
                 }
@@ -520,19 +520,19 @@
             },
             "1308011487855644692": {
                 "name": "test67",
-                "assigned_memory": "thread_0u5B3dE1VChmw1h4EoXOn5lT",
-                "memory_name": "testneweest",
+                "assigned_memory": null,
+                "memory_name": null,
                 "threads": {
                     "1308016694903570502": {
                         "name": "test67.1",
-                        "assigned_memory": "thread_o77f8psly7rjXywNPRbfWDyE",
-                        "memory_name": "testneweest",
+                        "assigned_memory": null,
+                        "memory_name": null,
                         "always_on": false
                     },
                     "1308018098355572739": {
                         "name": "test67.2",
-                        "assigned_memory": "thread_o77f8psly7rjXywNPRbfWDyE",
-                        "memory_name": "testneweest",
+                        "assigned_memory": null,
+                        "memory_name": null,
                         "always_on": false
                     }
                 },
@@ -612,8 +612,8 @@
                     },
                     "1308750606097186848": {
                         "name": "testsdasa68.983y42",
-                        "assigned_memory": "thread_Q9llquqXgiaR8APs8M0RuM1H",
-                        "memory_name": "testnesdasfev342wmem"
+                        "assigned_memory": null,
+                        "memory_name": null
                     }
                 }
             }

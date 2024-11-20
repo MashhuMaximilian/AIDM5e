@@ -5,7 +5,7 @@ from discord import app_commands
 from shared_functions import *
 from helper_functions import *
 import logging
-from memory_management import create_memory, get_assigned_memory, handle_memory_assignment
+from memory_management import create_memory, get_assigned_memory, handle_memory_assignment, delete_memory, set_default_memory
 from shared_functions import apply_always_on
 
     # Set up logging (you can configure this as needed)
@@ -431,3 +431,43 @@ def setup_commands(tree, get_assistant_response):
     async def thread_autocomplete_wrapper(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
     
+
+
+
+
+    @tree.command(name="delete_memory", description="Deletes a memory from the JSON data.")
+    async def delete_memory_command(interaction: discord.Interaction, memory: str):
+        await interaction.response.defer()
+
+        # Call the reusable function to delete the memory
+        result = delete_memory(memory)
+
+        # After deleting the memory, set the default memory for the category
+        if result == "Memory deleted successfully":  # Ensure memory was successfully deleted
+            category_id = str(interaction.channel.category.id)  # Get the category ID
+            await set_default_memory(category_id)  # Set the default memory for the category
+
+            # Assign the new default memory to the channel or thread
+            default_memory_id = category_threads[category_id]["gameplay"]
+            channel_id = interaction.channel.id  # Channel ID
+            thread_id = interaction.thread.id if interaction.thread else None  # Thread ID, if any
+
+            # Now, assign the default memory to the channel or thread
+            memory_assignment_result = await assign_memory(
+                interaction,
+                default_memory_id,
+                channel_id=channel_id,
+                thread_id=thread_id
+            )
+
+            # Respond with the result of memory assignment
+            await interaction.followup.send(memory_assignment_result)
+
+        else:
+            # In case memory deletion failed
+            await interaction.followup.send(result)
+
+    # Add autocomplete functionality for the memory argument
+    @delete_memory_command.autocomplete('memory')
+    async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
+        return await memory_autocomplete(interaction, current)
