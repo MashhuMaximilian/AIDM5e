@@ -5,7 +5,7 @@ from discord import app_commands
 from shared_functions import *
 from helper_functions import *
 import logging
-from memory_management import create_memory, get_assigned_memory, handle_memory_assignment, delete_memory, set_default_memory
+from memory_management import create_memory, get_assigned_memory, handle_memory_assignment, delete_memory, set_default_memory,initialize_threads
 from shared_functions import apply_always_on
 
     # Set up logging (you can configure this as needed)
@@ -432,9 +432,6 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
     
 
-
-
-
     @tree.command(name="delete_memory", description="Deletes a memory from the JSON data.")
     async def delete_memory_command(interaction: discord.Interaction, memory: str):
         await interaction.response.defer()
@@ -471,3 +468,22 @@ def setup_commands(tree, get_assistant_response):
     @delete_memory_command.autocomplete('memory')
     async def memory_autocomplete_wrapper(interaction: discord.Interaction, current: str):
         return await memory_autocomplete(interaction, current)
+
+
+    @tree.command(name="invite", description="Initialize threads and channels for this category.")
+    async def invite_command(interaction: discord.Interaction):
+        """Initialize threads and channels for the category where the command is invoked."""
+        category = interaction.channel.category  # Get the category of the current channel
+        
+        if not category:
+            await interaction.response.send_message("This command must be used in a category channel.")
+            return
+        
+        # Acknowledge the interaction immediately
+        await interaction.response.defer()  # Defer response to avoid timeout
+
+        # Initialize threads for the category
+        await initialize_threads(category)
+        
+        # Send the final message after the interaction is acknowledged
+        await interaction.followup.send(f"Threads and channels have been initialized for the category: {category.name}")

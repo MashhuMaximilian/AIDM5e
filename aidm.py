@@ -13,7 +13,8 @@ from utils import save_thread_data, load_thread_data
 import json
 from threading import Lock
 import message_handlers
-from memory_management import get_default_memory, initialize_threads, set_default_memory, create_openai_thread
+from memory_management import get_default_memory, set_default_memory, create_openai_thread
+from helper_functions import handle_channel_creation
 
 
 
@@ -89,11 +90,6 @@ async def on_ready():
     except Exception as e:
         logging.error(f"Error syncing commands: {e}")
 
-    # Loop through existing guilds
-    for guild in client.guilds:
-        # Initialize threads for each guild
-        await initialize_threads(guild)
-
     # Load existing thread data
     global category_threads
     category_threads = load_thread_data()
@@ -118,43 +114,20 @@ async def on_ready():
 
     logging.info("Bot is ready and all categories have been processed.")
 
+# Triggered when a new channel is created in the guild
 @client.event
 async def on_guild_channel_create(channel):
     logging.info(f"New channel created with ID: {channel.id}, Type: {type(channel).__name__}")
-
     if isinstance(channel, discord.CategoryChannel):
         await handle_new_category(channel)
-
     elif isinstance(channel, discord.TextChannel) or isinstance(channel, discord.VoiceChannel):
         category_id = str(channel.category_id).strip() if channel.category_id else None
         channel_id = str(channel.id).strip()
 
+        # Make sure this part is working
         if category_id and category_id in category_threads:
-            # Get the assigned memory for the category
-            assigned_memory = await get_default_memory(category_id)
-
-            # Initialize memory_name
-            memory_name = None
-            if assigned_memory:
-                # Assuming assigned_memory is the memory ID
-                memory_name = next((name for name, mem_id in category_threads[category_id]['memory_threads'].items() if mem_id == assigned_memory), None)
-
-            # Initialize the channels dictionary if it doesn't exist
-            if 'channels' not in category_threads[category_id]:
-                category_threads[category_id]['channels'] = {}
-
-            # Add the new channel to the category_threads structure
-            category_threads[category_id]['channels'][channel_id] = {
-                'name': channel.name,
-                'assigned_memory': assigned_memory,  # Assign the fetched memory ID
-                'memory_name': memory_name,          # Assign the fetched memory name
-                'threads': {}                        # Initialize an empty dict for threads
-            }
-
-            # Save the updated category_threads structure
-            with save_lock:
-                save_thread_data(category_threads)
-            logging.info(f"New channel {channel_id} added to category {category_id} with assigned memory and name, and saved.")
+            logging.info(f"Handling new channel creation: {channel_id}")
+            await handle_channel_creation("NEW CHANNEL", channel.name, channel.guild, channel.category, None)
 
 @client.event
 async def on_thread_create(thread):

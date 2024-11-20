@@ -184,68 +184,61 @@ async def get_assigned_memory(channel_id, category_id, thread_id=None):
     logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
 
-async def initialize_threads(guild):
-    """Initialize threads for each category and create OpenAI threads if necessary."""
+async def initialize_threads(category):
+    """Initialize threads and channels for a specific category."""
+    category_id = str(category.id)
+    category_name = category.name
+
     # Load existing thread data
-    existing_data = load_thread_data() or {}  # Ensure existing_data is an empty dict if None
+    existing_data = load_thread_data() or {}
 
-    async with aiohttp.ClientSession() as session:  # Ensure session is created here
-        for category in guild.categories:
-            category_id = str(category.id)
-            category_name = category.name   
+    # Create a session for API requests
+    async with aiohttp.ClientSession() as session:
+        # Create category structure if it doesn't exist
+        if category_id not in existing_data:
+            # Initialize category with default values
+            existing_data[category_id] = {
+                "name": category_name,
+                "default_memory": "gameplay",
+                "memory_threads": {
+                    "gameplay": None,
+                    "out-of-game": None
+                },
+                "channels": {}
+            }
 
-            # Create category structure if it doesn't exist
-            if category_id not in existing_data:
-                # Initialize category with proper structure
-                existing_data[category_id] = {
-                    "name": category_name,
-                    "default_memory": "gameplay",
-                    "memory_threads": {
-                        "gameplay": None,
-                        "out-of-game": None
-                    },
-                    "channels": {}
+            # Create OpenAI threads for gameplay and out-of-game if missing
+            existing_data[category_id]["memory_threads"]["gameplay"] = await create_openai_thread(session, f"Gameplay memory for {category_name}", category_id, "gameplay")
+            existing_data[category_id]["memory_threads"]["out-of-game"] = await create_openai_thread(session, f"Out-of-game memory for {category_name}", category_id, "out-of-game")
+
+        # Create required channels if they don't exist
+        required_channels = ['gameplay', 'telldm', 'session-summary', 'feedback']
+        for channel_name in required_channels:
+            if channel_name not in existing_data[category_id]["channels"]:
+                # Create channel in Discord if it doesn't exist
+                new_channel = await category.guild.create_text_channel(name=channel_name, category=category)
+                logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")
+                
+                # Add new channel to existing data
+                existing_data[category_id]["channels"][channel_name] = {
+                    "name": channel_name,
+                    "assigned_memory": existing_data[category_id]["memory_threads"]["gameplay"] if channel_name != "telldm" else existing_data[category_id]["memory_threads"]["out-of-game"],
+                    "memory_name": "gameplay" if channel_name != "telldm" else "out-of-game",
+                    "always_on": False if channel_name != "telldm" else True,  # Set "telldm" to always_on = True
+                    "threads": {}
                 }
 
-                # Create OpenAI threads for gameplay and out-of-game
-                existing_data[category_id]["memory_threads"]["gameplay"] = await create_openai_thread(session, f"Gameplay memory for {category_name}", category_id, "gameplay")
-                existing_data[category_id]["memory_threads"]["out-of-game"] = await create_openai_thread(session, f"Out-of-game memory for {category_name}", category_id, "out-of-game")
+        # Initialize thread data (as needed)
+        for channel_id, channel_data in existing_data[category_id]["channels"].items():
+            if channel_data["memory_name"] == "gameplay" and channel_id != "telldm":
+                channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["gameplay"]
+            elif channel_id == "telldm":
+                channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["out-of-game"]
+                channel_data["always_on"] = True  # Telldm always_on = True
 
-            # Update or initialize channels
-            for channel in category.text_channels:
-                channel_id = str(channel.id)
-                channel_name = channel.name
-                
-                # Create channel structure if it doesn't exist
-                if channel_id not in existing_data[category_id]["channels"]:
-                    # Determine if the channel is #telldm
-                    is_telldm = channel_name.lower() == "telldm"
-                    
-                    # Initialize channel with proper structure, including always_on
-                    existing_data[category_id]["channels"][channel_id] = {
-                        'name': channel_name,
-                        'assigned_memory': existing_data[category_id]["memory_threads"]["gameplay"],  # Default to gameplay
-                        'memory_name': "gameplay" if not is_telldm else "out-of-game",  # Set based on whether it's #telldm
-                        'always_on': True if is_telldm else False,  # Set True for #telldm
-                        'threads': {}
-                    }
-
-                # Access the threads property directly and populate the channel's threads
-                threads = channel.threads  # Assuming `channel.threads` returns an iterable of thread objects
-                for thread in threads:
-                    # Use .get() to safely access the always_on value
-                    always_on = existing_data[category_id]["channels"][channel_id].get('always_on', False)  # Default to False if not found
-                    
-                    # Add each thread under the respective channel
-                    existing_data[category_id]["channels"][channel_id]['threads'][str(thread.id)] = {
-                        'name': thread.name,
-                        'assigned_memory': existing_data[category_id]["memory_threads"]["gameplay"],  # Change this to the actual memory ID
-                        'memory_name': existing_data[category_id]["channels"][channel_id]['memory_name'],  # Use channel memory name
-                        'always_on': always_on  # Use inherited always_on value
-                    }
-
-    # Save the updated thread data, including channels
-    save_thread_data(existing_data)
+        # Save the updated thread data
+        save_thread_data(existing_data)
+        logging.info(f"Threads and channels initialized for category {category_name}.")
 
 async def handle_memory_assignment(
     interaction: discord.Interaction,
@@ -298,8 +291,6 @@ async def get_channel_and_thread(interaction: discord.Interaction, channel_id: s
             target_thread = interaction.guild.get_channel(int(thread_id)) if thread_id.isdigit() else None
 
         return target_channel, target_thread
-
-
 
 def delete_memory(memory_name_or_id: str) -> str:
     try:
