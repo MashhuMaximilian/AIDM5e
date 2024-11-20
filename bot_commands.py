@@ -284,7 +284,6 @@ def setup_commands(tree, get_assistant_response):
         logging.info(f"Target channel ID: {target_channel.id}, Name: {target_channel.name}")
 
         # Handle thread creation if "NEW THREAD" is selected
-        thread_obj = None
         if thread == "NEW THREAD":
             thread_obj, error = await handle_thread_creation(interaction, target_channel, thread_name, category.id, memory_name)
             if error:
@@ -292,64 +291,24 @@ def setup_commands(tree, get_assistant_response):
                 return
         elif thread:  # Fetch existing thread if provided
             thread_obj = await interaction.guild.fetch_channel(int(thread))
+        else:
+            thread_obj = None
 
-        # Use the target channel's ID for memory assignment
-        channel_id = target_channel.id  
-        logging.info(f"Assigning memory to Channel ID: {channel_id}, Memory: {memory_name or memory}")
-
-        # Use assign_memory to assign memory
-        memory_assignment_result = await assign_memory(
-            interaction,
-            memory_name or memory,
-            channel_id=channel_id,
-            thread_id=str(thread_obj.id) if thread_obj else None
+        # Use handle_memory_assignment for memory assignment
+        target_channel, target_thread = await handle_memory_assignment(
+            interaction, 
+            memory, 
+            str(target_channel.id), 
+            str(thread_obj.id) if thread_obj else None, 
+            memory_name, 
+            always_on
         )
-        assigned_memory_name = memory_name or memory
-        assigned_memory_id = memory_assignment_result.split()[-1].strip("'.")
-
-
-        if "Error" in assigned_memory_id:
-            await interaction.followup.send(assigned_memory_id)
-            return
-
-        # Update the JSON data with assigned_memory and memory_name
-        category_id_str = str(interaction.channel.category.id)
-        category_threads = load_thread_data()  # Load your JSON data
-
-        # Update the channel entry in the JSON
-        channel_data = category_threads[category_id_str]['channels'].setdefault(str(target_channel.id), {
-            "name": target_channel.name,
-            "assigned_memory": None,  # Set initially to None, will be updated
-            "memory_name": None,      # Set initially to None, will be updated
-            "threads": {}
-        })
-
-        # Store the assigned memory ID in the channel entry
-        channel_data['assigned_memory'] = assigned_memory_id # Get the memory ID from the result
-        channel_data['memory_name'] = assigned_memory_name  # Ensure memory_name is set
-
-        if thread_obj:
-            # Add or update the thread in the JSON with the correct assigned memory
-            channel_data['threads'][str(thread_obj.id)] = {
-                "name": thread_obj.name,
-                "assigned_memory": assigned_memory_id,  # Correctly assign memory ID here
-                "memory_name": assigned_memory_name  # Ensure memory_name is set
-            }
-
-        # Save the updated JSON data
-        save_thread_data(category_threads)
-        
-        # Set the always_on setting for the channel or thread
-        if thread_obj:  
-            await set_always_on(thread_obj, always_on.value)
-        else:  
-            await set_always_on(target_channel, always_on.value)
 
         # Prepare success message
-        if thread == "NEW THREAD":
-            success_message = f"Thread '<#{thread_obj.id}>' created and assigned memory '{assigned_memory_name}'."
+        if target_thread:
+            success_message = f"Thread '<#{target_thread.id}>' created and assigned memory '{memory_name or memory}'."
         else:
-            success_message = f"Memory '{assigned_memory_name}' assigned to {'thread' if thread_obj else 'channel'} <#{thread_obj.id if thread_obj else target_channel.id}>."
+            success_message = f"Memory '{memory_name or memory}' assigned to channel '<#{target_channel.id}>'."
 
         await interaction.followup.send(success_message)
 
