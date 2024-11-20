@@ -11,64 +11,74 @@ from docx import Document
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-
 @client.event
 async def on_message(message):
-    logging.info(f"Received message from {message.author}")
-
     # Ignore messages from the bot itself
     if message.author == client.user:
         return
+    logging.info(f"Received message from {message.author}")
 
-    user_message = message.content.strip() if message.content else "No message provided."
+    # Format user_message as "author said: message"
+    user_message = f"{message.author.display_name} said: {message.content.strip()}" if message.content else "No message provided."
+    
+    # Log the first 100 characters of the user message
+    logging.info(f"User message (first 100 characters): {user_message[:100]}")
+    
     channel_name = message.channel.name
     channel_id = message.channel.id
     category_id = message.channel.category.id if message.channel.category else None
     thread_id = message.thread.id if hasattr(message, 'thread') and message.thread else None
 
+    # Flag to check if the assistant response has been sent
+    response_sent = False
+
     # Check if the channel has always_on set to true
     channel_always_on = await check_always_on(channel_id, category_id, thread_id)
-    
-    # If always_on is True for the channel or thread, respond to the message instead of mentions
+
+    # If always_on is True for the channel or thread, respond to the message
     if channel_always_on:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
             if response:  # Check if response is not empty
                 await message.channel.send(response)
+                response_sent = True
             else:
                 logging.error("Received an empty response from the assistant.")
         else:
             logging.error("Assigned memory ID is invalid or empty.")
-        return  # Exit after responding
 
-    # Automatically respond to messages in the #telldm channel
-    if channel_name == "telldm":
+    # Automatically respond to messages in the #telldm channel, only if response hasn't been sent
+    if channel_name == "telldm" and not response_sent:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
             if response:  # Check if response is not empty
                 await message.channel.send(response)
+                response_sent = True
             else:
                 logging.error("Received an empty response from the assistant.")
         else:
             logging.error("Assigned memory ID is invalid or empty.")
-        return  # Exit after responding
+
+    # Respond to mentions (this block will only trigger if the message mentions the bot)
+    if client.user in message.mentions and not response_sent:
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        if assigned_memory:
+            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
+            if response:  # Check if response is not empty
+                await message.channel.send(response)
+                response_sent = True
+            else:
+                logging.error("Received an empty response from the assistant.")
+        else:
+            logging.error("Assigned memory ID is invalid or empty.")
 
     # Check for attachments
-    if message.attachments:
+    if message.attachments and not response_sent:
         for attachment in message.attachments:
             logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
             await handle_attachments(attachment, user_message, channel_id, category_id, thread_id)
-
-    # Respond to mentions
-    if client.user in message.mentions:
-        cleaned_message = message.content.replace(f'<@{client.user.id}>', '').strip()
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            await get_assistant_response(cleaned_message, channel_id, category_id, thread_id, assigned_memory)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
 
 async def handle_attachments(attachment, user_message, channel_id, category_id, thread_id):
     """Handle image, PDF, and text file attachments from the message."""

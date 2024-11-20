@@ -100,7 +100,7 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
 
                 logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
                 await send_response_in_chunks(channel, assistant_response)
-                return assistant_response
+                # return assistant_response
 
     except Exception as e:
         logging.error(f"Error during the assistant interaction: {str(e)}")

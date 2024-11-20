@@ -81,6 +81,7 @@ async def handle_new_category(channel):
 @client.event
 async def on_ready():
     logging.info(f'Bot has logged in as {client.user}')
+    await client.change_presence(status=discord.Status.online, activity=discord.Game("Bot is ready"))
 
     client.session = aiohttp.ClientSession()
     
@@ -94,23 +95,23 @@ async def on_ready():
     global category_threads
     category_threads = load_thread_data()
 
-    data_changed = False
+    # data_changed = False
 
-    # Loop through existing categories and set default memory
-    for category_id, threads in category_threads.items():
-        logging.info("Processing existing category %s...", category_id)
+    # # Loop through existing categories and set default memory
+    # for category_id, threads in category_threads.items():
+    #     logging.info("Processing existing category %s...", category_id)
         
-        # Check and create threads if they don't exist
-        new_threads = await create_threads_for_category(category_id)
-        threads.update(new_threads)
+    #     # Check and create threads if they don't exist
+    #     new_threads = await create_threads_for_category(category_id)
+    #     threads.update(new_threads)
 
-        # Set default memory for the category
-        await set_default_memory(category_id)
+    #     # Set default memory for the category
+    #     await set_default_memory(category_id)
 
-        data_changed = True
+    #     data_changed = True
 
-    if data_changed:
-        save_thread_data(category_threads)
+    # if data_changed:
+    #     save_thread_data(category_threads)
 
     logging.info("Bot is ready and all categories have been processed.")
 
