@@ -368,6 +368,7 @@ def setup_commands(tree, get_assistant_response):
         elif target_channel:
             await interaction.followup.send(
                 f"Memory '{memory}' assigned successfully to channel {target_channel.mention}."
+                
             )
         else:
             await interaction.followup.send(f"Memory '{memory}' assigned, but the specified channel or thread was not found.")

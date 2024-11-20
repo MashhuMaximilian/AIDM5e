@@ -160,29 +160,39 @@ async def get_assigned_memory(channel_id, category_id, thread_id=None):
 
     category_threads = load_thread_data()  # Load your JSON data
     category_id_str = str(category_id)
-    
 
+    # Check if category data exists
     if category_id_str not in category_threads:
         logging.info(f"No data found for category '{category_id_str}'.")
         return None
 
-    channel_data = category_threads[category_id_str]['channels'].get(str(channel_id))
-    if channel_data:
-        assigned_memory = channel_data.get('assigned_memory')
+    # Search through all channels in the category
+    for ch_id, channel_data in category_threads[category_id_str]['channels'].items():
+        # If we are given a thread_id, check if it's in this channel's threads
+        if thread_id and str(thread_id) in channel_data['threads']:
+            logging.info(f"Thread '{thread_id}' found in channel '{ch_id}'")
+            thread_data = channel_data['threads'][str(thread_id)]
+            assigned_memory = thread_data.get('assigned_memory')
+            if assigned_memory:
+                # If found in thread, return its memory ID
+                assigned_memory = assigned_memory.strip().strip("'\". ")
+                logging.info(f"Assigned Memory found for thread: {assigned_memory}")
+                return assigned_memory
+            else:
+                logging.info(f"No assigned memory found for thread '{thread_id}' in channel '{ch_id}'")
+                return None
 
-        if thread_id:
-            thread_data = channel_data['threads'].get(str(thread_id))
-            if thread_data:
-                assigned_memory = thread_data.get('assigned_memory') or assigned_memory
-
-        if assigned_memory:
-            # Remove leading/trailing whitespace, quotes, and stray periods
-            assigned_memory = assigned_memory.strip().strip("'\". ")
-            logging.info(f"Assigned Memory found: {assigned_memory}")
-            return assigned_memory if assigned_memory else None
+        # If no thread_id is given, return the assigned_memory for the entire channel
+        if not thread_id:
+            assigned_memory = channel_data.get('assigned_memory')
+            if assigned_memory:
+                assigned_memory = assigned_memory.strip().strip("'\". ")
+                logging.info(f"Assigned Memory found for channel '{ch_id}': {assigned_memory}")
+                return assigned_memory
 
     logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
+
 
 async def initialize_threads(category):
     """Initialize threads and channels for a specific category."""
@@ -244,7 +254,6 @@ async def initialize_threads(category):
         # Save the updated thread data
         save_thread_data(existing_data)
         logging.info(f"Threads and channels initialized for category {category_name}.")
-
 
 async def handle_memory_assignment(
     interaction: discord.Interaction,

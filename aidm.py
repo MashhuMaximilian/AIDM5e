@@ -38,45 +38,45 @@ category_threads = {}
 def get_all_categories():
     return [category.id for category in client.guilds[0].categories]  # Adjust if your bot is in multiple guilds
 
-async def create_threads_for_category(category_id):
-    user_message = "Starting a new thread for this category"  # Placeholder message for OpenAI threads
+# async def create_threads_for_category(category_id):
+#     user_message = "Starting a new thread for this category"  # Placeholder message for OpenAI threads
     
-    # Ensure category exists in the global data
-    if str(category_id) not in category_threads:
-        category_threads[str(category_id)] = {}
+#     # Ensure category exists in the global data
+#     if str(category_id) not in category_threads:
+#         category_threads[str(category_id)] = {}
 
-    threads = category_threads[str(category_id)]
+#     threads = category_threads[str(category_id)]
 
-    # Check if 'gameplay' thread exists, if not create it
-    if 'gameplay' not in threads:
-        threads['gameplay'] = await create_openai_thread(client.session, user_message, category_id, 'gameplay')
-        logging.info(f"New 'gameplay' thread created with ID: {threads['gameplay']} for category {category_id}")
+#     # Check if 'gameplay' thread exists, if not create it
+#     if 'gameplay' not in threads:
+#         threads['gameplay'] = await create_openai_thread(client.session, user_message, category_id, 'gameplay')
+#         logging.info(f"New 'gameplay' thread created with ID: {threads['gameplay']} for category {category_id}")
     
-    # Check if 'out-of-game' thread exists, if not create it
-    if 'out-of-game' not in threads:
-        threads['out-of-game'] = await create_openai_thread(client.session, user_message, category_id, 'out-of-game')
-        logging.info(f"New 'out-of-game' thread created with ID: {threads['out-of-game']} for category {category_id}")
+#     # Check if 'out-of-game' thread exists, if not create it
+#     if 'out-of-game' not in threads:
+#         threads['out-of-game'] = await create_openai_thread(client.session, user_message, category_id, 'out-of-game')
+#         logging.info(f"New 'out-of-game' thread created with ID: {threads['out-of-game']} for category {category_id}")
 
-    return threads
+#     return threads
 
-async def handle_new_category(channel):
-    # Load existing thread data before checking for a new category
-    global category_threads
-    existing_data = load_thread_data()
+# async def handle_new_category(channel):
+#     # Load existing thread data before checking for a new category
+#     global category_threads
+#     existing_data = load_thread_data()
 
-    # Merge existing data into the global category_threads
-    if existing_data:
-        category_threads.update(existing_data)
+#     # Merge existing data into the global category_threads
+#     if existing_data:
+#         category_threads.update(existing_data)
 
-    if str(channel.id) not in category_threads:
-        logging.info(f'New category created: {channel.id}. Adding to thread data.')
+#     if str(channel.id) not in category_threads:
+#         logging.info(f'New category created: {channel.id}. Adding to thread data.')
         
-        # Create threads for the new category
-        category_threads[str(channel.id)] = await create_threads_for_category(channel.id)
+#         # Create threads for the new category
+#         category_threads[str(channel.id)] = await create_threads_for_category(channel.id)
 
-        # Save the updated data
-        save_thread_data(category_threads)
-        logging.info(f'Thread data updated for new category {channel.id}.')
+#         # Save the updated data
+#         save_thread_data(category_threads)
+#         logging.info(f'Thread data updated for new category {channel.id}.')
 
 @client.event
 async def on_ready():
@@ -116,60 +116,60 @@ async def on_ready():
     logging.info("Bot is ready and all categories have been processed.")
 
 # Triggered when a new channel is created in the guild
-@client.event
-async def on_guild_channel_create(channel):
-    logging.info(f"New channel created with ID: {channel.id}, Type: {type(channel).__name__}")
-    if isinstance(channel, discord.CategoryChannel):
-        await handle_new_category(channel)
-    elif isinstance(channel, discord.TextChannel) or isinstance(channel, discord.VoiceChannel):
-        category_id = str(channel.category_id).strip() if channel.category_id else None
-        channel_id = str(channel.id).strip()
+# @client.event
+# async def on_guild_channel_create(channel):
+#     logging.info(f"New channel created with ID: {channel.id}, Type: {type(channel).__name__}")
+#     if isinstance(channel, discord.CategoryChannel):
+#         await handle_new_category(channel)
+#     elif isinstance(channel, discord.TextChannel) or isinstance(channel, discord.VoiceChannel):
+#         category_id = str(channel.category_id).strip() if channel.category_id else None
+#         channel_id = str(channel.id).strip()
 
-        # Make sure this part is working
-        if category_id and category_id in category_threads:
-            logging.info(f"Handling new channel creation: {channel_id}")
-            await handle_channel_creation("NEW CHANNEL", channel.name, channel.guild, channel.category, None)
+#         # Make sure this part is working
+#         if category_id and category_id in category_threads:
+#             logging.info(f"Handling new channel creation: {channel_id}")
+#             await handle_channel_creation("NEW CHANNEL", channel.name, channel.guild, channel.category, None)
 
-@client.event
-async def on_thread_create(thread):
-    logging.info(f"New thread created with ID: {thread.id}, parent channel ID: {thread.parent.id}")
+# @client.event
+# async def on_thread_create(thread):
+#     logging.info(f"New thread created with ID: {thread.id}, parent channel ID: {thread.parent.id}")
 
-    if thread.parent is None:
-        logging.warning(f"Thread creation detected, but parent channel is None.")
-        return
+#     if thread.parent is None:
+#         logging.warning(f"Thread creation detected, but parent channel is None.")
+#         return
 
-    parent_channel_id = str(thread.parent.id)
-    parent_category_id = str(thread.parent.category_id) if thread.parent.category_id else None
+#     parent_channel_id = str(thread.parent.id)
+#     parent_category_id = str(thread.parent.category_id) if thread.parent.category_id else None
 
-    if parent_category_id in category_threads:
-        # Get the assigned memory for the parent category
-        assigned_memory = await get_default_memory(parent_category_id)
+#     if parent_category_id in category_threads:
+#         # Get the assigned memory for the parent category
+#         assigned_memory = await get_default_memory(parent_category_id)
 
-        # Retrieve the corresponding memory name if exists
-        memory_name = None
-        if assigned_memory:
-            memory_name = next((name for name, mem_id in category_threads[parent_category_id]['memory_threads'].items() if mem_id == assigned_memory), None)
+#         # Retrieve the corresponding memory name if exists
+#         memory_name = None
+#         if assigned_memory:
+#             memory_name = next((name for name, mem_id in category_threads[parent_category_id]['memory_threads'].items() if mem_id == assigned_memory), None)
 
-        # Check if the parent channel exists
-        if parent_channel_id in category_threads[parent_category_id].get('channels', {}):
-            # Get the channel's threads
-            threads = category_threads[parent_category_id]['channels'][parent_channel_id].get('threads', {})
+#         # Check if the parent channel exists
+#         if parent_channel_id in category_threads[parent_category_id].get('channels', {}):
+#             # Get the channel's threads
+#             threads = category_threads[parent_category_id]['channels'][parent_channel_id].get('threads', {})
 
-            # Add the new thread to the threads dictionary
-            threads[str(thread.id)] = {
-                'name': thread.name,
-                'assigned_memory': assigned_memory,  # Assign the fetched memory ID
-                'memory_name': memory_name            # Assign the fetched memory name
-            }
+#             # Add the new thread to the threads dictionary
+#             threads[str(thread.id)] = {
+#                 'name': thread.name,
+#                 'assigned_memory': assigned_memory,  # Assign the fetched memory ID
+#                 'memory_name': memory_name            # Assign the fetched memory name
+#             }
 
-            # Save the updated category_threads structure
-            with save_lock:
-                save_thread_data(category_threads)
-            logging.info(f"New thread {thread.id} added to channel {parent_channel_id} with assigned memory and name, and saved.")
-        else:
-            logging.warning(f"Parent channel {parent_channel_id} not found in category {parent_category_id}.")
-    else:
-        logging.warning(f"Parent category {parent_category_id} not found in category_threads.")
+#             # Save the updated category_threads structure
+#             with save_lock:
+#                 save_thread_data(category_threads)
+#             logging.info(f"New thread {thread.id} added to channel {parent_channel_id} with assigned memory and name, and saved.")
+#         else:
+#             logging.warning(f"Parent channel {parent_channel_id} not found in category {parent_category_id}.")
+#     else:
+#         logging.warning(f"Parent category {parent_category_id} not found in category_threads.")
 
 save_lock = Lock()  # Lock to ensure single access to JSON save function
 
