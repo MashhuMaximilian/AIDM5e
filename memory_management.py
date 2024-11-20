@@ -219,26 +219,32 @@ async def initialize_threads(category):
                 new_channel = await category.guild.create_text_channel(name=channel_name, category=category)
                 logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")
                 
-                # Add new channel to existing data
-                existing_data[category_id]["channels"][channel_name] = {
+                # Add new channel to existing data with the channel ID as the key
+                assigned_memory = existing_data[category_id]["memory_threads"]["gameplay"] if channel_name != "telldm" else existing_data[category_id]["memory_threads"]["out-of-game"]
+                memory_name = "gameplay" if channel_name != "telldm" else "out-of-game"
+                always_on = False if channel_name != "telldm" else True  # Set "telldm" to always_on = True
+
+                # Use channel ID instead of name in the structure
+                existing_data[category_id]["channels"][str(new_channel.id)] = {
                     "name": channel_name,
-                    "assigned_memory": existing_data[category_id]["memory_threads"]["gameplay"] if channel_name != "telldm" else existing_data[category_id]["memory_threads"]["out-of-game"],
-                    "memory_name": "gameplay" if channel_name != "telldm" else "out-of-game",
-                    "always_on": False if channel_name != "telldm" else True,  # Set "telldm" to always_on = True
+                    "assigned_memory": assigned_memory,
+                    "memory_name": memory_name,
+                    "always_on": always_on,
                     "threads": {}
                 }
 
         # Initialize thread data (as needed)
         for channel_id, channel_data in existing_data[category_id]["channels"].items():
-            if channel_data["memory_name"] == "gameplay" and channel_id != "telldm":
+            if channel_data["memory_name"] == "gameplay" and channel_data["name"] != "telldm":
                 channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["gameplay"]
-            elif channel_id == "telldm":
+            elif channel_data["name"] == "telldm":
                 channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["out-of-game"]
                 channel_data["always_on"] = True  # Telldm always_on = True
 
         # Save the updated thread data
         save_thread_data(existing_data)
         logging.info(f"Threads and channels initialized for category {category_name}.")
+
 
 async def handle_memory_assignment(
     interaction: discord.Interaction,
