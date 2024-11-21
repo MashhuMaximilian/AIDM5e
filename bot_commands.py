@@ -284,6 +284,7 @@ def setup_commands(tree, get_assistant_response):
         logging.info(f"Target channel ID: {target_channel.id}, Name: {target_channel.name}")
 
         # Handle thread creation if "NEW THREAD" is selected
+        thread_obj = None
         if thread == "NEW THREAD":
             thread_obj, error = await handle_thread_creation(interaction, target_channel, thread_name, category.id, memory_name)
             if error:
@@ -291,26 +292,47 @@ def setup_commands(tree, get_assistant_response):
                 return
         elif thread:  # Fetch existing thread if provided
             thread_obj = await interaction.guild.fetch_channel(int(thread))
-        else:
-            thread_obj = None
 
-        # Use handle_memory_assignment for memory assignment
-        target_channel, target_thread = await handle_memory_assignment(
-            interaction, 
-            memory, 
-            str(target_channel.id), 
-            str(thread_obj.id) if thread_obj else None, 
-            memory_name, 
+        # Assign memory to the channel
+        target_channel, _ = await handle_memory_assignment(
+            interaction,
+            memory,
+            str(target_channel.id),
+            None,  # No thread involved here
+            memory_name,
             always_on
         )
 
-        # Prepare success message
-        if target_thread:
-            success_message = f"Thread '<#{target_thread.id}>' created and assigned memory '{memory_name or memory}'."
-        else:
-            success_message = f"Memory '{memory_name or memory}' assigned to channel '<#{target_channel.id}>'."
+        # Assign memory to the thread if applicable
+        if thread_obj:
+            _, target_thread = await handle_memory_assignment(
+                interaction,
+                memory,
+                str(target_channel.id),
+                str(thread_obj.id),
+                memory_name,
+                always_on
+            )
 
-        await interaction.followup.send(success_message)
+        # Prepare follow-up messages based on the scenario
+        always_on_status = "ON" if always_on.value.lower() == "true" else "OFF"
+        followup_messages = []
+
+        # Channel follow-up
+        followup_messages.append(
+            f"Created channel '<#{target_channel.id}>' with assigned memory: '{memory_name or memory}' "
+            f"and Always_on set to: [{always_on_status}]."
+        )
+
+        # Thread follow-up
+        if thread_obj:
+            followup_messages.append(
+                f"Created thread '<#{thread_obj.id}>' in channel '<#{target_channel.id}>' with assigned memory: "
+                f"'{memory_name or memory}' and Always_on set to: [{always_on_status}]."
+            )
+
+        # Send the combined follow-up messages
+        await interaction.followup.send("\n".join(followup_messages))
 
     @startnew_command.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):

@@ -5,7 +5,8 @@
         "memory_threads": {
             "gameplay": "thread_MLWn69WqNXXC2yLGTmFeI6j4",
             "out-of-game": "thread_YDThXY7lK7VBz8WC0URiRGlX",
-            "test New Memory": "thread_9xeLomp6aD8NPyeHgUV65niS"
+            "test New Memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+            "newest Memory Now": "thread_4fvtxt4ZRIfXfc4cAGW4exwQ"
         },
         "channels": {
             "1308771101131800586": {
@@ -47,6 +48,58 @@
                 "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
                 "memory_name": "test New Memory",
                 "threads": {},
+                "always_on": false
+            },
+            "1308794772852441181": {
+                "name": "testnew",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1308794774177841223": {
+                        "name": "testnew2",
+                        "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+                        "memory_name": "test New Memory"
+                    }
+                },
+                "always_on": false
+            },
+            "1308796031760334920": {
+                "name": "testnew22",
+                "assigned_memory": null,
+                "memory_name": null,
+                "threads": {
+                    "1308796033043665016": {
+                        "name": "testnew22222",
+                        "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+                        "memory_name": "test New Memory"
+                    }
+                },
+                "always_on": false
+            },
+            "1309082964206026773": {
+                "name": "newestchannel",
+                "assigned_memory": "thread_4fvtxt4ZRIfXfc4cAGW4exwQ",
+                "memory_name": "newest Memory Now",
+                "threads": {
+                    "1309082965375975494": {
+                        "name": "newestthread",
+                        "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+                        "memory_name": "test New Memory"
+                    }
+                },
+                "always_on": false
+            },
+            "1309083916635869225": {
+                "name": "newestchannel222",
+                "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+                "memory_name": "test New Memory",
+                "threads": {
+                    "1309083917533446154": {
+                        "name": "newestthread222",
+                        "assigned_memory": "thread_9xeLomp6aD8NPyeHgUV65niS",
+                        "memory_name": "test New Memory"
+                    }
+                },
                 "always_on": false
             }
         }
