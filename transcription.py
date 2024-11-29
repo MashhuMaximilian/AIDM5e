@@ -6,6 +6,7 @@ import asyncio
 import logging
 from config import WHISPER_API_URL, WHISPER_API_KEY
 from assistant_interactions import get_assistant_response
+from memory_management import get_assigned_memory
 from pathlib import Path
 from shared_functions import send_response_in_chunks
 
@@ -25,7 +26,7 @@ class VoiceRecorder:
 
 
 
-    async def capture_audio(self, voice_client, duration=500):
+    async def capture_audio(self, voice_client, duration=600):
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
@@ -55,13 +56,22 @@ class VoiceRecorder:
                         logging.info("Disconnected from voice channel.")
                         break  # Exit the recording loop
 
-                audio_filename = audio_files_path / f'audio_recording_{int(asyncio.get_event_loop().time())}.wav'
+                audio_filename = audio_files_path / f'audio_recording_{int(asyncio.get_event_loop().time())}.mp3'
+                
                 try:
                     logging.info(f"Recording for {duration} seconds... Saving to {audio_filename}")
                     proc = subprocess.Popen(
-                        ['ffmpeg', '-f', 'avfoundation', '-i', ':0', '-t', str(duration), str(audio_filename)],
+                        ['ffmpeg', '-f', 'avfoundation', '-i', ':0', '-t', str(duration), '-acodec', 'libmp3lame', '-ar', '44100', '-ac', '2','-b:a', '128k', str(audio_filename)],
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE
                     )
+
+                    # Capture stderr (error messages)
+                    stderr = await asyncio.to_thread(proc.stderr.read)  # Notice no parentheses here
+                    ffmpeg_error = stderr.decode('utf-8')
+                    # logging.error(f"FFmpeg error: {ffmpeg_error}")
+
+
+
                     await asyncio.sleep(duration)
                     proc.terminate()
                     logging.info(f"Audio recording completed and saved as {audio_filename}")
@@ -171,12 +181,20 @@ class VoiceRecorder:
         category_id = channel.category.id if channel.category else None
 
         if category_id is not None:
+            # Retrieve the session-summary channel within the same category
             summary_channel = discord.utils.get(channel.guild.text_channels, name='session-summary', category__id=category_id)
             if summary_channel is None:
                 summary_channel = await channel.guild.create_text_channel('session-summary', category=channel.category)
                 logging.info("Created new 'session-summary' channel.")
 
             try:
+                # Fetch the assigned memory for the channel or thread
+                assigned_memory = await get_assigned_memory(summary_channel.id, category_id)
+                if assigned_memory is None:
+                    logging.error("No assigned memory found for this channel.")
+                    return
+
+                # Read transcript content
                 with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
                     transcript_content = transcript_file.read()
                     logging.info("Transcript content loaded for summarization.")
@@ -188,7 +206,7 @@ class VoiceRecorder:
 
                     # Summarize the first chunk with a specific prompt
                     first_prompt = (
-                        "Make a recap the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
+                        "Make a recap of the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
                         "It may be a lot of random conversation here. Summarize the events of this D&D session in detail, "
                         "assuming the players might forget everything by next week. Include all important story elements, "
                         "player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail "
@@ -199,7 +217,8 @@ class VoiceRecorder:
                         f"\n\n{chunks[0]}"
                     )
 
-                    initial_summary = await get_assistant_response(first_prompt, summary_channel.id)
+                    # Get the assistant's response for the first chunk
+                    initial_summary = await get_assistant_response(first_prompt, summary_channel.id, assigned_memory=assigned_memory)
                     if "Error" in initial_summary:
                         await summary_channel.send(initial_summary)  # Send the error to the channel
                     else:
@@ -208,7 +227,7 @@ class VoiceRecorder:
                     # Summarize subsequent chunks with a different prompt
                     for chunk in chunks[1:]:
                         continue_prompt = (
-                            "Please make a recap the following text in the same detailed manner as before. "
+                            "Please make a recap of the following text in the same detailed manner as before. "
                             "This is part of our D&D gameplay session, which may include random conversations. "
                             "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
                             "Include character names, major decisions, challenges faced, and any unresolved plot points. "
@@ -217,13 +236,13 @@ class VoiceRecorder:
                             f"{chunk}"
                         )
 
-                        continued_summary = await get_assistant_response(continue_prompt, summary_channel.id)
-                        
+                        # Get the assistant's response for the subsequent chunks
+                        continued_summary = await get_assistant_response(continue_prompt, summary_channel.id, assigned_memory=assigned_memory)
+
                         if "Error" in continued_summary:
                             await summary_channel.send(continued_summary)  # Send the error to the channel
                         else:
                             await send_response_in_chunks(summary_channel, continued_summary)
-
 
                 else:
                     logging.warning("Transcript is empty. No summary generated.")
