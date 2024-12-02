@@ -37,11 +37,8 @@
 We’re thrilled that you’re considering contributing to AIDM! Whether it’s fixing bugs, suggesting features, or enhancing documentation, your help is greatly appreciated. Here’s how you can get started:
 
 3.1. **Fork and Clone**  
-   First, fork the repository and clone it to your local machine:  
-   ```bash
-   git clone https://github.com/yourusername/aidm.git
-   cd aidm
-   ```
+   First, fork the repository and clone it to your local machine. 
+
 
 3.2. **Create a Branch**  
    Make a new branch for your changes:  
