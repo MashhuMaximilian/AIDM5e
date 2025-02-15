@@ -12,10 +12,11 @@ from pathlib import Path
 from utils import save_thread_data, load_thread_data
 import json
 from threading import Lock
-import message_handlers
+# import message_handlers
 from memory_management import get_default_memory, set_default_memory, create_openai_thread
 from helper_functions import handle_channel_creation
-
+# from pyannote.audio import Pipeline
+# from config import HUGGING_FACE_TOKEN
 
 
 
@@ -29,8 +30,10 @@ try:
 except FileNotFoundError:
     raise FileNotFoundError(f"Could not find the file: {file_path}")
 
-# Create a single instance of VoiceRecorder
+# # Create a single instance of VoiceRecorder
 recorder = transcription.VoiceRecorder()
+
+
 
 # Global variable for category threads
 category_threads = {}
@@ -114,6 +117,12 @@ async def on_ready():
     #     save_thread_data(category_threads)
 
     logging.info("Bot is ready and all categories have been processed.")
+
+# # Preload the pipeline once
+# diarization_pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=HUGGING_FACE_TOKEN)
+# # # Assign the pipeline to your VoiceRecorder instance
+# recorder.diarization_pipeline = diarization_pipeline
+# logging.info("Diarization pipeline loaded and assigned to recorder.")
 
 # Triggered when a new channel is created in the guild
 # @client.event

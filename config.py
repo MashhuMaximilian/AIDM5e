@@ -15,6 +15,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ASSISTANT_ID = os.getenv('ASSISTANT_ID')
 WHISPER_API_KEY = os.getenv('OPENAI_API_KEY')
 WHISPER_API_URL = "https://api.openai.com/v1/audio/transcriptions"
+HUGGING_FACE_TOKEN = os.getenv('HUGGING_FACE_TOKEN')
 
 
 # Set up Discord bot client

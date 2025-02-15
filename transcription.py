@@ -10,7 +10,6 @@ from memory_management import get_assigned_memory
 from pathlib import Path
 from shared_functions import send_response_in_chunks
 
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -24,9 +23,7 @@ class VoiceRecorder:
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
         self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
 
-
-
-    async def capture_audio(self, voice_client, duration=600):
+    async def capture_audio(self, voice_client, duration=10): #600 seconds
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
@@ -66,11 +63,9 @@ class VoiceRecorder:
                     )
 
                     # Capture stderr (error messages)
-                    stderr = await asyncio.to_thread(proc.stderr.read)  # Notice no parentheses here
+                    stderr = await asyncio.to_thread(proc.stderr.read)
                     ffmpeg_error = stderr.decode('utf-8')
                     # logging.error(f"FFmpeg error: {ffmpeg_error}")
-
-
 
                     await asyncio.sleep(duration)
                     proc.terminate()
@@ -104,7 +99,6 @@ class VoiceRecorder:
             await self.transcribe_audio_file(audio_file)  # Make sure this function handles transcription
 
         logging.info("Final transcription processing completed.")
-
 
     async def cleanup_files(self):
         """Cleanup transcript.txt and audio files."""
@@ -198,6 +192,7 @@ class VoiceRecorder:
                 with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
                     transcript_content = transcript_file.read()
                     logging.info("Transcript content loaded for summarization.")
+                    await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
 
                 if transcript_content:
                     characters_per_chunk = 14000
@@ -243,9 +238,12 @@ class VoiceRecorder:
                             await summary_channel.send(continued_summary)  # Send the error to the channel
                         else:
                             await send_response_in_chunks(summary_channel, continued_summary)
-
+                            # Send the full transcript file to the summary channel before cleanup
                 else:
                     logging.warning("Transcript is empty. No summary generated.")
+
+                
+                
 
             except Exception as e:
                 logging.error(f"Error reading transcript file or sending summary: {e}")
