@@ -23,7 +23,7 @@ class VoiceRecorder:
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
         self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
 
-    async def capture_audio(self, voice_client, duration=10): #600 seconds
+    async def capture_audio(self, voice_client, duration=600): #600 seconds
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
