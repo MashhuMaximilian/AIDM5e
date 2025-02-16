@@ -12,11 +12,10 @@ from pathlib import Path
 from utils import save_thread_data, load_thread_data
 import json
 from threading import Lock
-# import message_handlers
-# from memory_management import get_default_memory, set_default_memory, create_openai_thread
-# from helper_functions import handle_channel_creation
-# from pyannote.audio import Pipeline
-# from config import HUGGING_FACE_TOKEN
+import message_handlers
+from message_handlers import on_message
+from memory_management import get_default_memory, set_default_memory, create_openai_thread
+from helper_functions import handle_channel_creation
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s:%(message)s')
@@ -56,16 +55,10 @@ async def on_ready():
     # Load existing thread data
     global category_threads
     category_threads = load_thread_data()
-
+    client.event(on_message)
 
 
     logging.info("Bot is ready and all categories have been processed.")
-
-# Preload the pipeline once and assign the pipeline to your VoiceRecorder instance
-
-# diarization_pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=HUGGING_FACE_TOKEN)
-# recorder.diarization_pipeline = diarization_pipeline
-# logging.info("Diarization pipeline loaded and assigned to recorder.")
 
 
 save_lock = Lock()  # Lock to ensure single access to JSON save function
