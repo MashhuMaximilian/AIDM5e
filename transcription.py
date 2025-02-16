@@ -4,11 +4,13 @@ import os
 import aiohttp
 import asyncio
 import logging
+from discord import app_commands
 from config import WHISPER_API_URL, WHISPER_API_KEY
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
 from pathlib import Path
-from shared_functions import send_response_in_chunks
+from shared_functions import send_response_in_chunks, send_response
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -17,13 +19,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 audio_files_path = Path('audio_files')
 audio_files_path.mkdir(exist_ok=True)
 
+def get_category_id_voice(voice_channel):
+    """Retrieve the category ID of the given voice channel."""
+    if voice_channel and voice_channel.category:
+        return voice_channel.category.id
+    return None
+
 class VoiceRecorder:
     def __init__(self):
         self.voice_client = None
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
         self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
 
-    async def capture_audio(self, voice_client, duration=600): #600 seconds
+    async def capture_audio(self, voice_client, duration=5): #120 seconds or 5-10 for testing.
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
@@ -42,8 +50,10 @@ class VoiceRecorder:
                         if self.transcription_tasks:
                             await asyncio.gather(*self.transcription_tasks)
                         
+                        category_id = get_category_id_voice(self.voice_client.channel)
+                        logging.info(f"Retrieved category ID: {category_id}")
                         # Call the summarize function
-                        await self.summarize_transcript()
+                        await self.summarize_transcript(category_id)
 
                         # Proceed to clean up files after summarization
                         await self.cleanup_files()
@@ -161,89 +171,91 @@ class VoiceRecorder:
                 except Exception as e:
                     logging.error(f"Unexpected error during Whisper API request: {e}")
 
-    async def summarize_transcript(self):
-        """Summarize the contents of transcript.txt and send it to the session-summary channel."""
+
+    async def summarize_transcript(self, category_id):
         logging.info("Starting transcript summarization...")
 
-        # Ensure that self.voice_client is not None
+        # Ensure voice_client is connected and find the proper summary channel
         if not self.voice_client:
             logging.error("Voice client is not connected. Cannot summarize transcript.")
             return
 
-        # Get the current category ID for the voice channel
-        channel = self.voice_client.channel
-        category_id = channel.category.id if channel.category else None
+        guild = self.voice_client.guild
+        summary_channel = discord.utils.get(guild.text_channels, name='session-summary', category_id=category_id)
+        if not summary_channel:
+            logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
+            return
 
-        if category_id is not None:
-            # Retrieve the session-summary channel within the same category
-            summary_channel = discord.utils.get(channel.guild.text_channels, name='session-summary', category__id=category_id)
-            if summary_channel is None:
-                summary_channel = await channel.guild.create_text_channel('session-summary', category=channel.category)
-                logging.info("Created new 'session-summary' channel.")
+        # Fetch assigned memory (if needed for context)
+        assigned_memory = await get_assigned_memory(summary_channel.id, category_id)
+        if assigned_memory is None:
+            logging.error("No assigned memory found for this channel.")
+            return
 
-            try:
-                # Fetch the assigned memory for the channel or thread
-                assigned_memory = await get_assigned_memory(summary_channel.id, category_id)
-                if assigned_memory is None:
-                    logging.error("No assigned memory found for this channel.")
-                    return
+        # Read and attach the full transcript file
+        try:
+            with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
+                transcript_content = transcript_file.read()
+        except Exception as e:
+            logging.error(f"Error reading transcript file: {e}")
+            return
 
-                # Read transcript content
-                with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
-                    transcript_content = transcript_file.read()
-                    logging.info("Transcript content loaded for summarization.")
-                    await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
+        logging.info("Transcript content loaded for summarization.")
+        await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
 
-                if transcript_content:
-                    characters_per_chunk = 14000
-                    # Split transcript_content into chunks and summarize each
-                    chunks = [transcript_content[i:i + characters_per_chunk] for i in range(0, len(transcript_content), characters_per_chunk)]
+        if not transcript_content:
+            logging.warning("Transcript is empty. No summary generated.")
+            return
 
-                    # Summarize the first chunk with a specific prompt
-                    first_prompt = (
-                        "Make a recap of the following file. It should be our entire session of gameplay. Most likely, we will all use a single recording device. Each player will try to say their name before doing an action to make it easier to transcribe."
-                        "It may be a lot of random conversation here. Summarize the events of this D&D session in detail, "
-                        "assuming the players might forget everything by next week. Include all important story elements, "
-                        "player actions, combat encounters, NPC interactions, and notable dialogue. Focus on providing enough detail "
-                        "so the players can pick up where they left off without confusion. Mention character names, key decisions, "
-                        "challenges they faced, and unresolved plot points. If there were major revelations or twists, highlight them. "
-                        "End the summary by outlining what the players need to remember or focus on for the next session. "
-                        "I remind you, it may be a lot of random conversation here. There will probably be more batches of this summary."
-                        f"\n\n{chunks[0]}"
+        # Split the transcript into chunks
+        characters_per_chunk = 14000
+        chunks = [
+            transcript_content[i:i + characters_per_chunk]
+            for i in range(0, len(transcript_content), characters_per_chunk)
+        ]
+
+        # Create a queue and enqueue all chunks
+        chunk_queue = asyncio.Queue()
+        for chunk in chunks:
+            await chunk_queue.put(chunk)
+
+        # Define a worker coroutine that processes each chunk sequentially
+        async def process_chunks():
+            while not chunk_queue.empty():
+                chunk = await chunk_queue.get()
+
+                # Determine the appropriate prompt based on whether this is the first chunk or a subsequent one.
+                if chunk == chunks[0]:
+                    prompt = (
+                        "Make a comprehensive recap of the following file. It should be our entire session of gameplay. "
+                        "Players may have used a single recording device and spoken in a jumble, so please include all key story elements, "
+                        "player actions, combat encounters, NPC interactions, and notable dialogue. "
+                        "Provide enough detail so the session can be resumed without confusion. "
+                        "Highlight major decisions, challenges, and unresolved plot points. "
+                        "If there were significant revelations or twists, please note them. "
+                        "End by outlining what players should remember for the next session."
+                        f"\n\n{chunk}"
+                    )
+                else:
+                    prompt = (
+                        "Please make a comprehensive recap of the following text in the same detailed manner as before. "
+                        "This is a continuation of our D&D session transcript, which may include random conversations. "
+                        "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
+                        "Include character names, major decisions, challenges, and unresolved plot points. "
+                        "Highlight any significant revelations or twists. "
+                        "There will be more chunks to summarize."
+                        f"\n\n{chunk}"
                     )
 
-                    # Get the assistant's response for the first chunk
-                    initial_summary = await get_assistant_response(first_prompt, summary_channel.id, assigned_memory=assigned_memory)
-                    if "Error" in initial_summary:
-                        await summary_channel.send(initial_summary)  # Send the error to the channel
-                    else:
-                        await send_response_in_chunks(summary_channel, initial_summary)
-
-                    # Summarize subsequent chunks with a different prompt
-                    for chunk in chunks[1:]:
-                        continue_prompt = (
-                            "Please make a recap of the following text in the same detailed manner as before. "
-                            "This is part of our D&D gameplay session, which may include random conversations. "
-                            "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
-                            "Include character names, major decisions, challenges faced, and any unresolved plot points. "
-                            "Highlight any significant revelations or twists. There will be more chunks to summarize. "
-                            "Here is the next batch:\n\n"
-                            f"{chunk}"
-                        )
-
-                        # Get the assistant's response for the subsequent chunks
-                        continued_summary = await get_assistant_response(continue_prompt, summary_channel.id, assigned_memory=assigned_memory)
-
-                        if "Error" in continued_summary:
-                            await summary_channel.send(continued_summary)  # Send the error to the channel
-                        else:
-                            await send_response_in_chunks(summary_channel, continued_summary)
-                            # Send the full transcript file to the summary channel before cleanup
+                # Get the assistant's summary response
+                summary = await get_assistant_response(prompt, summary_channel.id, assigned_memory=assigned_memory)
+                if "Error" in summary:
+                    await summary_channel.send(summary)
                 else:
-                    logging.warning("Transcript is empty. No summary generated.")
+                    await send_response_in_chunks(summary_channel, summary)
 
-                
-                
+                # Mark this chunk as processed
+                chunk_queue.task_done()
 
-            except Exception as e:
-                logging.error(f"Error reading transcript file or sending summary: {e}")
+        # Process all chunks in order
+        await process_chunks()
