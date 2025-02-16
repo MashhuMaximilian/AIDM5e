@@ -113,11 +113,18 @@ class VoiceRecorder:
     async def cleanup_files(self):
         """Cleanup transcript.txt and audio files."""
         logging.info("Cleaning up transcript and audio files...")
-
+        category_id = get_category_id_voice(self.voice_client.channel)
+        guild = self.voice_client.guild
+        summary_channel = discord.utils.get(guild.text_channels, name='session-summary', category_id=category_id)
+        if not summary_channel:
+                    logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
+                    return
+        await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
         # Clear contents of transcript.txt
         try:
             with open(self.transcript_path, 'w', encoding='utf-8') as file:
-                file.truncate(0)  # Clear the file
+                # Clear the file
+                file.truncate(0) 
             logging.info("Transcript file cleared.")
         except Exception as e:
             logging.error(f"Error clearing transcript file: {e}")
@@ -201,7 +208,6 @@ class VoiceRecorder:
             return
 
         logging.info("Transcript content loaded for summarization.")
-        await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
 
         if not transcript_content:
             logging.warning("Transcript is empty. No summary generated.")
@@ -214,48 +220,61 @@ class VoiceRecorder:
             for i in range(0, len(transcript_content), characters_per_chunk)
         ]
 
-        # Create a queue and enqueue all chunks
-        chunk_queue = asyncio.Queue()
-        for chunk in chunks:
-            await chunk_queue.put(chunk)
+       # Process each chunk sequentially
+        for i, chunk in enumerate(chunks):
+            logging.info(f"Processing chunk {i + 1} of {len(chunks)}...")
 
-        # Define a worker coroutine that processes each chunk sequentially
-        async def process_chunks():
-            while not chunk_queue.empty():
-                chunk = await chunk_queue.get()
+            # Determine the appropriate prompt based on the chunk's position
+            if i == 0:
+                # First chunk prompt
+                prompt = (
+                    "You are summarizing a D&D session transcript. This is the first chunk of the transcript. "
+                    "Your task is to create a comprehensive recap of the session, including all key story elements, this is just the first chunk, so keep this in mind. "
+                    "player actions, combat encounters, NPC interactions, and notable dialogue. "
+                    "Provide enough detail so the session can be resumed without confusion. "
+                    "Highlight major decisions, challenges, and unresolved plot points. "
+                    "If there are significant revelations or twists, note them. "
+                    "This is part of a larger transcript, so focus on summarizing this chunk while keeping the overall session in mind. "
+                    "Here is the first chunk:\n\n{chunk}"
+                )
+            elif i == len(chunks) - 1:
+                # Final chunk prompt
+                prompt = (
+                    "This is the final chunk of the D&D session transcript. "
+                    "Summarize this chunk as before, keeping in mind the context of the previous chunks."
+                    "Include all key story elements, player actions, combat encounters, NPC interactions, and notable dialogue. "
+                    "Highlight major decisions, challenges, and unresolved plot points. "
+                    "Note any significant revelations or twists. "
+                    "End by outlining in short what players should remember for the next session and also provide a short summary of the entire session.  "
+                    "Here is the final chunk:\n\n{chunk}"
+                )
+            else:
+                # Continuing chunks prompt
+                prompt = (
+                    "This is a continuation of the D&D session transcript. "
+                    "Summarize this chunk in the same detailed manner as before, keeping in mind the context of the previous chunks. "
+                    "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
+                    "Include character names, major decisions, challenges, and unresolved plot points. "
+                    "Highlight any significant revelations or twists. "
+                    "This is not the final chunk, so there will be more to summarize. "
+                    "Here is the current chunk:\n\n{chunk}"
+                )
 
-                # Determine the appropriate prompt based on whether this is the first chunk or a subsequent one.
-                if chunk == chunks[0]:
-                    prompt = (
-                        "Make a comprehensive recap of the following file. It should be our entire session of gameplay. "
-                        "Players may have used a single recording device and spoken in a jumble, so please include all key story elements, "
-                        "player actions, combat encounters, NPC interactions, and notable dialogue. "
-                        "Provide enough detail so the session can be resumed without confusion. "
-                        "Highlight major decisions, challenges, and unresolved plot points. "
-                        "If there were significant revelations or twists, please note them. "
-                        "End by outlining what players should remember for the next session."
-                        f"\n\n{chunk}"
-                    )
-                else:
-                    prompt = (
-                        "Please make a comprehensive recap of the following text in the same detailed manner as before. "
-                        "This is a continuation of our D&D session transcript, which may include random conversations. "
-                        "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
-                        "Include character names, major decisions, challenges, and unresolved plot points. "
-                        "Highlight any significant revelations or twists. "
-                        "There will be more chunks to summarize."
-                        f"\n\n{chunk}"
-                    )
+            # # Format the prompt with the current chunk
+            # formatted_prompt = prompt.format(chunk=chunk)
 
-                # Get the assistant's summary response
+
+            # Get the assistant's summary response
+            try:
                 summary = await get_assistant_response(prompt, summary_channel.id, assigned_memory=assigned_memory)
                 if "Error" in summary:
                     await summary_channel.send(summary)
+                    logging.error(f"Error summarizing chunk {i + 1}: {summary}")
                 else:
                     await send_response_in_chunks(summary_channel, summary)
+                    logging.info(f"Chunk {i + 1} summarized and sent successfully.")
+            except Exception as e:
+                logging.error(f"Error processing chunk {i + 1}: {e}")
+                await summary_channel.send(f"Error summarizing chunk {i + 1}: {e}")
 
-                # Mark this chunk as processed
-                chunk_queue.task_done()
-
-        # Process all chunks in order
-        await process_chunks()
+        logging.info("Transcript summarization completed.")
