@@ -11,7 +11,7 @@ from memory_management import get_assigned_memory
 from pathlib import Path
 from shared_functions import send_response_in_chunks, send_response
 import openai #Added
-recording_duration = 10
+recording_duration = 550 #CHANGE TO 550 FOR REAL DEAL
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -110,6 +110,26 @@ class VoiceRecorder:
 
         logging.info("Final transcription processing completed.")
 
+    async def archive_transcript(self, content):
+        """Append the transcript content to the archive with formatting."""
+        archive_path = Path(__file__).parent / 'transcript_archive.txt'
+        try:
+            with open(archive_path, 'a', encoding='utf-8') as archive_file:  # <- This is the critical line
+                # Write the separator and headers
+                archive_file.write("\n\n\n")
+                archive_file.write("_______________________________________________________________________\n")
+                archive_file.write("\n\n")
+                archive_file.write("SESSION TRANSCRIPTION\n")
+                archive_file.write("_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n")
+                archive_file.write("\n\n")
+                # Write the content
+                archive_file.write(content)
+                # Add some spacing after the content
+                archive_file.write("\n\n")
+            logging.info("Transcript archived successfully.")
+        except Exception as e:
+            logging.error(f"Error archiving transcript: {e}")
+
     async def cleanup_files(self):
         """Cleanup transcript.txt and audio files."""
         logging.info("Cleaning up transcript and audio files...")
@@ -119,11 +139,23 @@ class VoiceRecorder:
         if not summary_channel:
             logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
             return
+
+        # Read transcript content for archiving
+        try:
+            with open(self.transcript_path, 'r', encoding='utf-8') as f:
+                transcript_content = f.read()
+        except Exception as e:
+            logging.error(f"Error reading transcript for archiving: {e}")
+            transcript_content = ""
+
+        # Archive the transcript
+        await self.archive_transcript(transcript_content)
+
         await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
+
         # Clear contents of transcript.txt
         try:
             with open(self.transcript_path, 'w', encoding='utf-8') as file:
-                # Clear the file
                 file.truncate(0)
             logging.info("Transcript file cleared.")
         except Exception as e:
@@ -212,8 +244,9 @@ class VoiceRecorder:
                     "You are retelling a D&D session transcript as a story. This is the first chunk of the transcript. "
                     "Your task is to narrate the session as if you were describing it to someone who wasn't there, focusing on the story elements. "
                     "Pay close attention to each player's actions, combat encounters, NPC interactions, and notable dialogue. "
-                    "Be meticulous in accurately portraying each player's actions and abilities, without mixing them up. "
-                    "Do not add any details that are not present in the transcript; stick strictly to what is said and done. "
+                    "Be meticulous in accurately portraying each player's actions and abilities, without mixing them up."
+                    "Exercise caution, as the transcription may be inaccurate due to language mixing, microphone distance, and challenges with correctly capturing names."
+                    "DO NOT add any details that are not present in the transcript; stick strictly to what is said and done."
                     "This is the beginning of the story, so set the scene and introduce the characters and their actions. "
                     "Here is the first part of the session:\n\n{chunk}"
                 )
@@ -232,7 +265,7 @@ class VoiceRecorder:
                 # Continuing chunks prompt
                 prompt = (
                     "This is a continuation of the D&D session transcript. "
-                    "Continue narrating the session as a story, maintaining accuracy and detail. "
+                    "Continue in a similar manner narrating the session as a story, maintaining accuracy and detail. "
                     "Describe the ongoing player actions, combat encounters, NPC interactions, and dialogue. "
                     "Ensure that player actions and abilities are correctly attributed. "
                     "Do not add any information that is not in the transcript. "

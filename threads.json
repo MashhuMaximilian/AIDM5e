@@ -104,44 +104,6 @@
             }
         }
     },
-    "1286219880403701760": {
-        "name": "Corpselight",
-        "default_memory": "gameplay",
-        "memory_threads": {
-            "gameplay": "thread_M5CO0fAdiDY8HSIAMPklJAAs",
-            "out-of-game": "thread_cJJ9cMB64FhTPTapMsmRO7mv"
-        },
-        "channels": {
-            "1340325812091490337": {
-                "name": "gameplay",
-                "assigned_memory": "thread_M5CO0fAdiDY8HSIAMPklJAAs",
-                "memory_name": "gameplay",
-                "always_on": false,
-                "threads": {}
-            },
-            "1340325813387661352": {
-                "name": "telldm",
-                "assigned_memory": "thread_cJJ9cMB64FhTPTapMsmRO7mv",
-                "memory_name": "out-of-game",
-                "always_on": true,
-                "threads": {}
-            },
-            "1340325814545158355": {
-                "name": "session-summary",
-                "assigned_memory": "thread_M5CO0fAdiDY8HSIAMPklJAAs",
-                "memory_name": "gameplay",
-                "always_on": false,
-                "threads": {}
-            },
-            "1340325815837134858": {
-                "name": "feedback",
-                "assigned_memory": "thread_M5CO0fAdiDY8HSIAMPklJAAs",
-                "memory_name": "gameplay",
-                "always_on": false,
-                "threads": {}
-            }
-        }
-    },
     "1340326317345734686": {
         "name": "Corpselight",
         "default_memory": "gameplay",
