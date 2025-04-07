@@ -5,13 +5,13 @@ import aiohttp
 import asyncio
 import logging
 from discord import app_commands
-from config import WHISPER_API_URL, WHISPER_API_KEY
+from config import OPENAI_API_KEY # Changed from WHISPER_API_KEY
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
 from pathlib import Path
 from shared_functions import send_response_in_chunks, send_response
-
-
+import openai #Added
+recording_duration = 10
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -31,7 +31,7 @@ class VoiceRecorder:
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
         self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
 
-    async def capture_audio(self, voice_client, duration=180): #120 seconds or 5-10 for testing.
+    async def capture_audio(self, voice_client, duration=recording_duration): #120 seconds or 5-10 for testing.
         self.voice_client = voice_client
         logging.info("Starting continuous audio capture...")
 
@@ -83,7 +83,7 @@ class VoiceRecorder:
 
                     if audio_filename.exists() and audio_filename.stat().st_size > 0:
                         # Send the audio file for transcription as a background task
-                        task = asyncio.create_task(self.send_to_whisper(audio_filename))
+                        task = asyncio.create_task(self.send_to_openai(audio_filename)) #changed function name
                         self.transcription_tasks.append(task)  # Track the task
                         task.add_done_callback(lambda t: self.transcription_tasks.remove(t))  # Remove task after completion
                     else:
@@ -117,14 +117,14 @@ class VoiceRecorder:
         guild = self.voice_client.guild
         summary_channel = discord.utils.get(guild.text_channels, name='session-summary', category_id=category_id)
         if not summary_channel:
-                    logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
-                    return
+            logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
+            return
         await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
         # Clear contents of transcript.txt
         try:
             with open(self.transcript_path, 'w', encoding='utf-8') as file:
                 # Clear the file
-                file.truncate(0) 
+                file.truncate(0)
             logging.info("Transcript file cleared.")
         except Exception as e:
             logging.error(f"Error clearing transcript file: {e}")
@@ -138,46 +138,27 @@ class VoiceRecorder:
             except Exception as e:
                 logging.error(f"Failed to delete audio file {file_path}: {e}")
 
-    async def send_to_whisper(self, audio_filename):
-        """Send the recorded audio file to Whisper for transcription."""
-        logging.info(f"Preparing to send {audio_filename} to Whisper API for transcription...")
-
+    async def send_to_openai(self, audio_filename): #Changed from whisper
+        """Send the recorded audio file to OpenAI for transcription."""
+        logging.info(f"Preparing to send {audio_filename} to OpenAI API for transcription...")
+        openai.api_key = OPENAI_API_KEY
         if not audio_filename.exists() or audio_filename.stat().st_size == 0:
             logging.error(f"Audio file {audio_filename} does not exist or is empty.")
             return
+        try:
+            with open(audio_filename, "rb") as audio_file:
+                transcript = openai.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="text"
+                )
+                logging.info(f"Received transcription from OpenAI API: {transcript[:100]}")
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-            for attempt in range(3):  # Retry up to 3 times
-                try:
-                    await asyncio.sleep(1)  # Small delay before sending
-                    with open(audio_filename, 'rb') as audio_file:
-                        form_data = aiohttp.FormData()
-                        form_data.add_field('file', audio_file, content_type='audio/wav')
-                        form_data.add_field('model', 'whisper-1')
+                with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
+                    transcript_file.write(f"{transcript}\n")
 
-                        logging.info(f"Sending {audio_filename} to Whisper API...")
-                        async with session.post(
-                            WHISPER_API_URL,
-                            headers={'Authorization': f'Bearer {WHISPER_API_KEY}'},
-                            data=form_data
-                        ) as response:
-                            if response.status == 200:
-                                transcription = await response.json()
-                                logging.info(f"Received transcription from Whisper API: {transcription['text'][:100]}")
-
-                                # Append transcription to transcript.txt
-                                with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
-                                    transcript_file.write(f"{transcription['text']}\n")
-                                break  # Exit the loop if successful
-                            else:
-                                error_msg = await response.text()
-                                logging.error(f"Whisper API returned error {response.status}: {error_msg}")
-                                await asyncio.sleep(1)  # Delay before retry
-                except aiohttp.ClientError as e:
-                    logging.error(f"Failed to connect to Whisper API: {e}")
-                except Exception as e:
-                    logging.error(f"Unexpected error during Whisper API request: {e}")
-
+        except Exception as e:
+            logging.error(f"Unexpected error during OpenAI API request: {e}")
 
     async def summarize_transcript(self, category_id):
         logging.info("Starting transcript summarization...")
@@ -220,7 +201,7 @@ class VoiceRecorder:
             for i in range(0, len(transcript_content), characters_per_chunk)
         ]
 
-       # Process each chunk sequentially
+        # Process each chunk sequentially
         for i, chunk in enumerate(chunks):
             logging.info(f"Processing chunk {i + 1} of {len(chunks)}...")
 
@@ -228,41 +209,38 @@ class VoiceRecorder:
             if i == 0:
                 # First chunk prompt
                 prompt = (
-                    "You are summarizing a D&D session transcript. This is the first chunk of the transcript. "
-                    "Your task is to create a comprehensive recap of the session, including all key story elements, this is just the first chunk, so keep this in mind. "
-                    "player actions, combat encounters, NPC interactions, and notable dialogue. "
-                    "Provide enough detail so the session can be resumed without confusion. "
-                    "Highlight major decisions, challenges, and unresolved plot points. "
-                    "If there are significant revelations or twists, note them. "
-                    "This is part of a larger transcript, so focus on summarizing this chunk while keeping the overall session in mind. "
-                    "Here is the first chunk:\n\n{chunk}"
+                    "You are retelling a D&D session transcript as a story. This is the first chunk of the transcript. "
+                    "Your task is to narrate the session as if you were describing it to someone who wasn't there, focusing on the story elements. "
+                    "Pay close attention to each player's actions, combat encounters, NPC interactions, and notable dialogue. "
+                    "Be meticulous in accurately portraying each player's actions and abilities, without mixing them up. "
+                    "Do not add any details that are not present in the transcript; stick strictly to what is said and done. "
+                    "This is the beginning of the story, so set the scene and introduce the characters and their actions. "
+                    "Here is the first part of the session:\n\n{chunk}"
                 )
             elif i == len(chunks) - 1:
                 # Final chunk prompt
                 prompt = (
-                    "This is the final chunk of the D&D session transcript. "
-                    "Summarize this chunk as before, keeping in mind the context of the previous chunks."
-                    "Include all key story elements, player actions, combat encounters, NPC interactions, and notable dialogue. "
-                    "Highlight major decisions, challenges, and unresolved plot points. "
-                    "Note any significant revelations or twists. "
-                    "End by outlining in short what players should remember for the next session and also provide a short summary of the entire session.  "
-                    "Here is the final chunk:\n\n{chunk}"
+                    "This is the final part of the D&D session transcript. "
+                    "Continue narrating the session as a story, maintaining accuracy and detail. "
+                    "Describe the remaining player actions, combat encounters, NPC interactions, and dialogue. "
+                    "Ensure that player actions and abilities are correctly attributed. "
+                    "Do not add any information that is not in the transcript. "
+                    "Conclude the story with a concise summary of the key events and outcomes of the session. "
+                    "Here is the final part of the session:\n\n{chunk}"
                 )
             else:
                 # Continuing chunks prompt
                 prompt = (
                     "This is a continuation of the D&D session transcript. "
-                    "Summarize this chunk in the same detailed manner as before, keeping in mind the context of the previous chunks. "
-                    "Capture all key events, player actions, combat encounters, NPC interactions, and notable dialogue. "
-                    "Include character names, major decisions, challenges, and unresolved plot points. "
-                    "Highlight any significant revelations or twists. "
-                    "This is not the final chunk, so there will be more to summarize. "
-                    "Here is the current chunk:\n\n{chunk}"
+                    "Continue narrating the session as a story, maintaining accuracy and detail. "
+                    "Describe the ongoing player actions, combat encounters, NPC interactions, and dialogue. "
+                    "Ensure that player actions and abilities are correctly attributed. "
+                    "Do not add any information that is not in the transcript. "
+                    "Here is the next part of the session:\n\n{chunk}"
                 )
 
-            # # Format the prompt with the current chunk
-            # formatted_prompt = prompt.format(chunk=chunk)
-
+            # Format the prompt with the current chunk
+            prompt = prompt.format(chunk=chunk)
 
             # Get the assistant's summary response
             try:

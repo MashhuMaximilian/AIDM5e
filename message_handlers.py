@@ -3,7 +3,7 @@ import logging
 from config import client
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
-from shared_functions import check_always_on 
+from shared_functions import check_always_on, send_response_in_chunks
 import PyPDF2
 import io
 from docx import Document
@@ -13,68 +13,51 @@ logging.basicConfig(level=logging.INFO)
 
 @client.event
 async def on_message(message):
-    # Ignore messages from the bot itself
     if message.author == client.user:
         return
     logging.info(f"Received message from {message.author}")
 
-    # Format user_message as "author said: message"
     user_message = f"{message.author.display_name} said: {message.content.strip()}" if message.content else "No message provided."
-    
-    # Log the first 100 characters of the user message
     logging.info(f"User message (first 100 characters): {user_message[:100]}")
-    
+
     channel_name = message.channel.name
     channel_id = message.channel.id
     category_id = message.channel.category.id if message.channel.category else None
     thread_id = message.thread.id if hasattr(message, 'thread') and message.thread else None
 
-    # Flag to check if the assistant response has been sent
     response_sent = False
-
-    # Check if the channel has always_on set to true
     channel_always_on = await check_always_on(channel_id, category_id, thread_id)
 
-    # If always_on is True for the channel or thread, respond to the message
+    async def send_response(response):
+        if response:
+            await send_response_in_chunks(message.channel, response)
+            return True
+        return False
+
     if channel_always_on:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            if response:  # Check if response is not empty
-                await message.channel.send(response)
-                response_sent = True
-            else:
-                logging.error("Received an empty response from the assistant.")
+            response_sent = await send_response(response)
         else:
             logging.error("Assigned memory ID is invalid or empty.")
 
-    # Automatically respond to messages in the #telldm channel, only if response hasn't been sent
     if channel_name == "telldm" and not response_sent:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            if response:  # Check if response is not empty
-                await message.channel.send(response)
-                response_sent = True
-            else:
-                logging.error("Received an empty response from the assistant.")
+            response_sent = await send_response(response)
         else:
             logging.error("Assigned memory ID is invalid or empty.")
 
-    # Respond to mentions (this block will only trigger if the message mentions the bot)
     if client.user in message.mentions and not response_sent:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)  # Pass category_id here
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            if response:  # Check if response is not empty
-                await message.channel.send(response)
-                response_sent = True
-            else:
-                logging.error("Received an empty response from the assistant.")
+            response_sent = await send_response(response)
         else:
             logging.error("Assigned memory ID is invalid or empty.")
 
-    # Check for attachments
     if message.attachments and not response_sent:
         for attachment in message.attachments:
             logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
@@ -163,10 +146,10 @@ def extract_text_from_docx(docx_data):
             text += para.text + "\n"
     return text
 
-async def send_response_in_chunks(channel, response):
-    """Send response in chunks if it exceeds Discord's message length limit."""
-    if len(response) > 2000:
-        for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-            await channel.send(chunk)
-    else:
-        await channel.send(response)
+# async def send_response_in_chunks(channel, response):
+#     """Send response in chunks if it exceeds Discord's message length limit."""
+#     if len(response) > 2000:
+#         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
+#             await channel.send(chunk)
+#     else:
+#         await channel.send(response)

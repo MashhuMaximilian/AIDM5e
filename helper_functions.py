@@ -213,37 +213,65 @@ def get_category_id(interaction):
     return channel.category.id if channel.category else None
 
 async def thread_autocomplete(interaction: discord.Interaction, current: str):
-    # Ensure the options are available and correct
-    for option in interaction.data['options']:
-        if option['name'] == 'channel':  # Check if 'channel' is provided
-            try:
-                channel_id = int(option['value'])  # Convert channel ID to integer
-                channel_obj = interaction.guild.get_channel(channel_id)
+    try:
+        # Load thread data from JSON
+        category_threads = load_thread_data()
+        category_id = str(interaction.channel.category.id)
+        channel_id = None
 
-                if not channel_obj:
-                    return []
+        # Find the channel ID from command options
+        for option in interaction.data.get('options', []):
+            if option['name'] == 'channel':
+                channel_id = str(option['value'])
+                break
 
-                # Fetch active and archived threads
-                active_threads = channel_obj.threads
-                archived_threads = []
-                async for thread in channel_obj.archived_threads():
-                    archived_threads.append(thread)
+        if not channel_id or category_id not in category_threads:
+            return []
 
-                all_threads = active_threads + archived_threads
+        # Get threads from JSON structure
+        channel_data = category_threads[category_id]['channels'].get(channel_id)
+        if not channel_data:
+            return []
 
-                # Filter threads by current input
-                matching_threads = [
-                    discord.app_commands.Choice(name=thread.name, value=str(thread.id))
-                    for thread in all_threads if current.lower() in thread.name.lower()
-                ]
+        # Get both active threads and JSON-stored threads
+        choices = []
+        
+        # 1. Add threads from JSON data
+        for thread_id, thread_data in channel_data.get('threads', {}).items():
+            thread_name = thread_data.get('name', f"Unnamed Thread {thread_id}")
+            choices.append(
+                discord.app_commands.Choice(
+                    name=f"{thread_name}",
+                    value=thread_id
+                )
+            )
 
-                return matching_threads[:50]  # Limit to 50 suggestions
+        # 2. Add active threads from Discord API
+        channel_obj = interaction.guild.get_channel(int(channel_id))
+        if channel_obj:
+            # Get active threads
+            active_threads = channel_obj.threads
+            # Get archived threads (adjust limits as needed)
+            archived_threads = []
+            async for thread in channel_obj.archived_threads(limit=100):
+                archived_threads.append(thread)
 
-            except ValueError:
-                print(f"Invalid channel ID: {option['value']}")
-                return []  # Return empty list if there's an error
+            for thread in active_threads + archived_threads:
+                if str(thread.id) not in channel_data.get('threads', {}):
+                    choices.append(
+                        discord.app_commands.Choice(
+                            name=f"{thread.name} ({'active' if not thread.archived else 'archived'})",
+                            value=str(thread.id)
+                        )
+                    )
 
-    return []  # Return empty if no 'channel' option was found
+        # Filter by current input
+        filtered = [c for c in choices if current.lower() in c.name.lower()]
+        return filtered[:25]
+
+    except Exception as e:
+        logging.error(f"Thread autocomplete error: {str(e)}")
+        return []
 
 async def channel_autocomplete(interaction: discord.Interaction, current: str):
     # Assuming get_channels_in_category is a function you've defined for fetching channels in a category
@@ -324,11 +352,21 @@ async def process_query_command(interaction: discord.Interaction, query_type: ap
         await interaction.followup.send("No memory found for the specified parameters.")
         return
 
-    # Get the assistant's response using the constructed prompt and the assigned memory
-    response = await get_assistant_response(prompt, channel_id, category_id, thread_id, assigned_memory=assigned_memory)
+    # Get the assistant's response without sending it directly
+    response = await get_assistant_response(
+        prompt, 
+        channel_id, 
+        category_id, 
+        thread_id, 
+        assigned_memory=assigned_memory,
+        send_message=False  # Crucial change: prevent auto-sending
+    )
 
-    # Send the response to the specified channel, thread, or backup channel
-    await send_response(interaction, response, channel_id=channel_id, thread_id=thread_id, backup_channel_name=backup_channel_name)
-
-    # Helper function to fetch the target channel and thread (if provided)
-
+    # Send the response through the proper interaction flow
+    await send_response(
+        interaction, 
+        response, 
+        channel_id=channel_id, 
+        thread_id=thread_id, 
+        backup_channel_name=backup_channel_name
+    )

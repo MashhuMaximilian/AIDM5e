@@ -26,16 +26,16 @@ async def start_run(session, thread_id):
         if run_response.status != 200:
             raise Exception(f"Error starting run: {await run_response.text()}")
         return await run_response.json()
-
+            
 async def wait_for_run_completion(session, thread_id, run_id):
-    """Wait for the assistant run to complete."""
     while True:
         await asyncio.sleep(1)
         async with session.get(f"https://api.openai.com/v1/threads/{thread_id}/runs/{run_id}", headers=HEADERS) as run_status_response:
             run_data = await run_status_response.json()
             run_status = run_data['status']
             if run_status == "failed":
-                raise Exception("Error: Run failed")
+                logging.error(f"Run failed with details: {run_data}")
+                raise Exception(f"Error: Run failed with details: {run_data}")
             if run_status not in ["queued", "in_progress"]:
                 return run_data
 
@@ -64,7 +64,8 @@ def extract_assistant_response(messages_data):
             break
     return assistant_response
 
-async def get_assistant_response(user_message, channel_id, category_id=None, thread_id=None, assigned_memory=None):
+
+async def get_assistant_response(user_message, channel_id, category_id=None, thread_id=None, assigned_memory=None, send_message=False):  # Changed default to False
     """Main function to interact with the assistant and return the response."""
     try:
         async with aiohttp.ClientSession() as session:
@@ -85,7 +86,6 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
             # Start typing indicator while processing
             async with channel.typing():
                 await send_user_message(session, assigned_memory, user_message)
-                logging.info(f"Message sent to assistant in memory '{assigned_memory}'.")
 
                 run_data = await start_run(session, assigned_memory)
                 run_id = run_data['id']
@@ -99,8 +99,9 @@ async def get_assistant_response(user_message, channel_id, category_id=None, thr
                     return "No valid response received from the assistant."
 
                 logging.info(f"Assistant responded in memory '{assigned_memory}': {assistant_response[:100]}")
-                await send_response_in_chunks(channel, assistant_response)
-                # return assistant_response
+                if send_message:  # Now only sends when explicitly requested
+                    await send_response_in_chunks(channel, assistant_response)
+                return assistant_response
 
     except Exception as e:
         logging.error(f"Error during the assistant interaction: {str(e)}")

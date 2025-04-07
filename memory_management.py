@@ -155,44 +155,36 @@ async def get_default_memory(category_id):
     return None
 
 async def get_assigned_memory(channel_id, category_id, thread_id=None):
-    """Retrieve the assigned memory for a specific channel or thread in a category."""
     logging.info(f"Fetching assigned memory for channel_id: {channel_id}, thread_id: {thread_id}, category_id: {category_id}")
-
-    category_threads = load_thread_data()  # Load your JSON data
+    category_threads = load_thread_data()
     category_id_str = str(category_id)
+    channel_id_str = str(channel_id)
 
-    # Check if category data exists
     if category_id_str not in category_threads:
         logging.info(f"No data found for category '{category_id_str}'.")
         return None
 
-    # Search through all channels in the category
-    for ch_id, channel_data in category_threads[category_id_str]['channels'].items():
-        # If we are given a thread_id, check if it's in this channel's threads
-        if thread_id and str(thread_id) in channel_data['threads']:
-            logging.info(f"Thread '{thread_id}' found in channel '{ch_id}'")
-            thread_data = channel_data['threads'][str(thread_id)]
-            assigned_memory = thread_data.get('assigned_memory')
-            if assigned_memory:
-                # If found in thread, return its memory ID
-                assigned_memory = assigned_memory.strip().strip("'\". ")
-                logging.info(f"Assigned Memory found for thread: {assigned_memory}")
-                return assigned_memory
-            else:
-                logging.info(f"No assigned memory found for thread '{thread_id}' in channel '{ch_id}'")
-                return None
+    category_data = category_threads[category_id_str]
+    channel_data = category_data['channels'].get(channel_id_str)
 
-        # If no thread_id is given, return the assigned_memory for the entire channel
-        if not thread_id:
-            assigned_memory = channel_data.get('assigned_memory')
-            if assigned_memory:
-                assigned_memory = assigned_memory.strip().strip("'\". ")
-                logging.info(f"Assigned Memory found for channel '{ch_id}': {assigned_memory}")
+    if channel_data:
+        if thread_id:
+            thread_data = channel_data['threads'].get(str(thread_id))
+            if thread_data and thread_data.get('assigned_memory'):
+                assigned_memory = thread_data['assigned_memory'].strip().strip("'\". ")
+                logging.info(f"Assigned Memory found for thread '{thread_id}' in channel '{channel_id}': {assigned_memory}")
                 return assigned_memory
+            logging.info(f"No assigned memory found for thread '{thread_id}' in channel '{channel_id}'")
+
+        assigned_memory = channel_data.get('assigned_memory')
+        if assigned_memory:
+            assigned_memory = assigned_memory.strip().strip("'\". ")
+            logging.info(f"Assigned Memory found for channel '{channel_id}': {assigned_memory}")
+            return assigned_memory
+        logging.info(f"No assigned memory found in channel data for '{channel_id}'")
 
     logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
     return None
-
 
 async def initialize_threads(category):
     """Initialize threads and channels for a specific category."""
@@ -339,3 +331,29 @@ def delete_memory(memory_name_or_id: str) -> str:
     except Exception as e:
         logging.error(f"Error deleting memory '{memory_name_or_id}': {e}")
         return f"An error occurred while deleting memory '{memory_name_or_id}': {e}"
+
+async def list_thread_messages(session, thread_id):
+    messages = []
+    after = None
+    while True:
+        params = {"after": after} if after else {}
+        async with session.get(f"https://api.openai.com/v1/threads/{thread_id}/messages", headers=HEADERS, params=params) as resp:
+            if resp.status != 200:
+                logging.error(f"Error fetching messages: {await resp.text()}")
+                return None
+            data = await resp.json()
+            messages.extend(data['data'])
+            if not data.get('has_more'):
+                break
+            after = data['data'][-1]['id']  # Use the last message ID for the next page
+    return messages
+
+async def delete_message(session, thread_id, message_id):
+    """Delete a specific message from a thread."""
+    async with session.delete(f"https://api.openai.com/v1/threads/{thread_id}/messages/{message_id}", headers=HEADERS) as resp:
+        if resp.status == 200:
+            logging.info(f"Deleted message {message_id} from thread {thread_id}")
+            return True
+        else:
+            logging.error(f"Error deleting message: {await resp.text()}")
+            return False

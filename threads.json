@@ -147,7 +147,9 @@
         "default_memory": "gameplay",
         "memory_threads": {
             "gameplay": "thread_mw4CGwSjRzMUgyB4F4XgBGf3",
-            "out-of-game": "thread_xqMP5R5zsKJT8qVLwYyuZgnA"
+            "out-of-game": "thread_xqMP5R5zsKJT8qVLwYyuZgnA",
+            "testmemory": "thread_6ZlcDpCV8nw3tn4fUNrnf1Di",
+            "testname": "thread_5aNF3ExzXqLSd0TYMC9VTTbU"
         },
         "channels": {
             "1340326440876507207": {
@@ -186,8 +188,8 @@
             },
             "1340326761346629673": {
                 "name": "npcs",
-                "assigned_memory": "thread_xqMP5R5zsKJT8qVLwYyuZgnA",
-                "memory_name": "out-of-game",
+                "assigned_memory": "thread_6ZlcDpCV8nw3tn4fUNrnf1Di",
+                "memory_name": "testmemory",
                 "threads": {},
                 "always_on": false
             },
@@ -210,6 +212,19 @@
                 "assigned_memory": "thread_xqMP5R5zsKJT8qVLwYyuZgnA",
                 "memory_name": "out-of-game",
                 "threads": {},
+                "always_on": false
+            },
+            "1358862360453972139": {
+                "name": "test",
+                "assigned_memory": "thread_6ZlcDpCV8nw3tn4fUNrnf1Di",
+                "memory_name": "testmemory",
+                "threads": {
+                    "1358879676801613947": {
+                        "name": "test2.1",
+                        "assigned_memory": "thread_6ZlcDpCV8nw3tn4fUNrnf1Di",
+                        "memory_name": "testmemory"
+                    }
+                },
                 "always_on": false
             }
         }

@@ -5,8 +5,8 @@ from discord import app_commands
 from shared_functions import *
 from helper_functions import *
 import logging
-from memory_management import create_memory, get_assigned_memory, handle_memory_assignment, delete_memory, set_default_memory,initialize_threads
-from shared_functions import apply_always_on
+from memory_management import *
+from shared_functions import apply_always_on, send_response_in_chunks
 
     # Set up logging (you can configure this as needed)
 logging.basicConfig(level=logging.INFO)
@@ -510,3 +510,146 @@ def setup_commands(tree, get_assistant_response):
         
         # Send the final message after the interaction is acknowledged
         await interaction.followup.send(f"Threads and channels have been initialized for the category: {category.name}")
+
+
+    @tree.command(name="repairthread", description="Repair a thread by removing messages with invalid image URLs")
+    async def repair_thread(interaction: discord.Interaction, thread_id: str = None):
+        await interaction.response.defer()  # Defer response since this might take time
+
+        # Use the current channel's assigned memory if no thread_id is provided
+        if not thread_id:
+            channel_id = interaction.channel.id
+            category_id = interaction.channel.category.id if interaction.channel.category else None
+            thread_id = await get_assigned_memory(channel_id, category_id)
+            if not thread_id:
+                await interaction.followup.send("Error: No assigned memory found for this channel.")
+                return
+
+        logging.info(f"Attempting to repair thread: {thread_id}")
+
+        async with aiohttp.ClientSession() as session:
+            # Step 1: List all messages with pagination
+            messages = await list_thread_messages(session, thread_id)
+            if not messages:
+                await interaction.followup.send(f"Error: Could not fetch messages for thread {thread_id}.")
+                return
+
+            bad_message_ids = []
+            for msg in messages:
+                content = msg.get('content', [])
+                msg_id = msg['id']
+                if isinstance(content, list):
+                    for item in content:
+                        if item.get('type') == 'text':
+                            text = item['text'].get('value', '')
+                            if "https://cdn.discordapp.com" in text:
+                                bad_message_ids.append(msg_id)
+                                logging.info(f"Found problematic URL in text of message ID: {msg_id}, Content: {text}")
+                        elif item.get('type') == 'image_url':
+                            url = item['image_url'].get('url', '')
+                            if "https://cdn.discordapp.com" in url or "image0.jpg" in url:
+                                bad_message_ids.append(msg_id)
+                                logging.info(f"Found problematic image URL in message ID: {msg_id}, URL: {url}")
+
+            if not bad_message_ids:
+                await interaction.followup.send(f"No messages with invalid image URLs found in thread {thread_id}.")
+                return
+
+            # Step 2: Delete problematic messages
+            for msg_id in bad_message_ids:
+                success = await delete_message(session, thread_id, msg_id)
+                if not success:
+                    await interaction.followup.send(f"Failed to delete message {msg_id} in thread {thread_id}.")
+                    return
+
+            # Step 3: Test the thread without sending a message
+            test_response = await get_assistant_response("Test message", interaction.channel.id, assigned_memory=thread_id, send_message=False)
+            if test_response and "Error: Run failed" not in test_response:
+                await interaction.followup.send(f"Thread {thread_id} repaired successfully!")
+            else:
+                await interaction.followup.send(f"Thread {thread_id} still fails after repair: {test_response or 'No response received'}")
+
+    @tree.command(name="listmemory", description="List memory details for a channel or thread")
+    async def listmemory(interaction: discord.Interaction, channel: str = None, thread: str = None):
+        await interaction.response.defer()
+        
+        try:
+            channel_id = int(channel) if channel else interaction.channel.id
+            thread_id = int(thread) if thread else None
+            category_id = get_category_id(interaction)
+            
+            # Load the complete memory data
+            category_threads = load_thread_data()
+            category_id_str = str(category_id)
+            channel_id_str = str(channel_id)
+            
+            if category_id_str not in category_threads:
+                await interaction.followup.send("No memory data found for this category.")
+                return
+                
+            category_data = category_threads[category_id_str]
+            
+            # Get the target object for proper mention
+            target_channel = interaction.guild.get_channel(channel_id)
+            target_thread = await interaction.guild.fetch_channel(thread_id) if thread_id else None
+            
+            if not target_channel:
+                await interaction.followup.send("Channel not found.")
+                return
+            
+            # Prepare response data
+            response_data = {
+                "target": target_thread.mention if target_thread else target_channel.mention,
+                "memory_id": None,
+                "memory_name": None,
+                "always_on": None
+            }
+            
+            # Check channel data first
+            channel_data = category_data['channels'].get(channel_id_str)
+            
+            if thread_id:
+                # Thread-specific memory
+                if channel_data and 'threads' in channel_data:
+                    thread_data = channel_data['threads'].get(str(thread_id))
+                    if thread_data:
+                        response_data.update({
+                            "memory_id": thread_data.get('assigned_memory', 'None').strip("'\""),
+                            "memory_name": thread_data.get('memory_name', 'None'),
+                            "always_on": channel_data.get('always_on', False)  # Threads inherit channel's always_on
+                        })
+            else:
+                # Channel memory
+                if channel_data:
+                    response_data.update({
+                        "memory_id": channel_data.get('assigned_memory', 'None').strip("'\""),
+                        "memory_name": channel_data.get('memory_name', 'None'),
+                        "always_on": channel_data.get('always_on', False)
+                    })
+            
+            # Format the response
+            response = (
+                f"**Memory details for {response_data['target']}**\n"
+                f"• Memory ID: `{response_data['memory_id']}`\n"
+                f"• Memory Name: `{response_data['memory_name']}`\n"
+                f"• Always On: `{'✅ ON' if response_data['always_on'] else '❌ OFF'}`"
+            )
+            
+            await interaction.followup.send(response)
+            
+        except ValueError:
+            await interaction.followup.send("Error: Invalid channel or thread ID format.")
+        except discord.NotFound:
+            await interaction.followup.send("Error: Channel or thread not found.")
+        except Exception as e:
+            logging.error(f"Error in listmemory command: {str(e)}")
+            await interaction.followup.send(f"An error occurred: {str(e)}")
+
+    @listmemory.autocomplete('channel')
+    async def listmemory_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @listmemory.autocomplete('thread')
+    async def listmemory_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
+
