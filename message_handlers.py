@@ -63,53 +63,62 @@ async def on_message(message):
             logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
             await handle_attachments(attachment, user_message, channel_id, category_id, thread_id)
 
+
 async def handle_attachments(attachment, user_message, channel_id, category_id, thread_id):
     """Handle image, PDF, and text file attachments from the message."""
     logging.info(f"Processing attachment: {attachment.filename}")
     file_url = attachment.url
+    channel = client.get_channel(channel_id)
 
     async with aiohttp.ClientSession() as session:
         async with session.get(file_url) as resp:
             if resp.status == 200:
                 logging.info(f"Successfully retrieved attachment: {attachment.filename}")
-                content_type = attachment.content_type  # Get content type to differentiate files
+                content_type = attachment.content_type
 
+                assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+                if not assigned_memory:
+                    logging.error("Assigned memory ID is invalid or empty.")
+                    return
+
+                # IMAGE HANDLING
                 if "image" in content_type:
-                    # Process image files
                     image_data = await resp.read()
                     gpt_request_content = [
                         {"type": "text", "text": user_message},
                         {"type": "image_url", "image_url": {"url": file_url, "detail": "high"}},
                     ]
-                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-                    if assigned_memory:
-                        await get_assistant_response(gpt_request_content, channel_id, category_id, thread_id, assigned_memory)
-                    else:
-                        logging.error("Assigned memory ID is invalid or empty.")
+                    response = await get_assistant_response(gpt_request_content, channel_id, category_id, thread_id, assigned_memory)
+                    if response:
+                        await send_response_in_chunks(channel, response)
 
+                # PDF HANDLING
                 elif "pdf" in content_type:
-                    # Process PDF files
                     pdf_data = await resp.read()
                     text = extract_text_from_pdf(pdf_data)
                     combined_message = f"{user_message}\n\nExtracted text from PDF:\n{text}"
-                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-                    if assigned_memory:
-                        await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
-                    else:
-                        logging.error("Assigned memory ID is invalid or empty.")
+                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    if response:
+                        await send_response_in_chunks(channel, response)
 
-                elif content_type in ["text/plain", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
-                    # Process .txt, .docx, and .doc files
+                # TXT / DOCX / DOC HANDLING
+                elif content_type in [
+                    "text/plain",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/msword"
+                ]:
                     extracted_text = await extract_text_from_file(file_url, content_type)
                     combined_message = f"{user_message}\n\nExtracted text:\n{extracted_text}"
-                    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-                    if assigned_memory:
-                        await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
-                    else:
-                        logging.error("Assigned memory ID is invalid or empty.")
+                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    if response:
+                        await send_response_in_chunks(channel, response)
+
+                else:
+                    logging.warning(f"Unsupported content type: {content_type}")
 
             else:
                 logging.error(f"Failed to retrieve attachment: {attachment.filename}, Status: {resp.status}")
+
 
 def extract_text_from_pdf(pdf_data):
     """Extract text from a PDF file."""

@@ -5,6 +5,7 @@ from discord import app_commands
 from shared_functions import *
 from helper_functions import *
 import logging
+import asyncio
 from memory_management import *
 from shared_functions import apply_always_on, send_response_in_chunks
 
@@ -653,46 +654,75 @@ def setup_commands(tree, get_assistant_response):
     async def listmemory_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
 
-
-    @tree.command(name="reset_memory", description="Clear all assistant messages from the assigned memory thread.")
-    async def reset_memory_command(interaction: discord.Interaction, channel: str = None, thread: str = None):
+    
+    @tree.command(name="reset_memory", description="Clear memory and Discord messages from a given message onward.")
+    @app_commands.describe(
+        channel="Target channel ID (optional).",
+        thread="Target thread ID (optional).",
+        starting_with_message_id="Start deleting from this message ID (inclusive)."
+    )
+    async def reset_memory_command(interaction: discord.Interaction, channel: str = None, thread: str = None, starting_with_message_id: str = None):
         await interaction.response.defer()
 
         try:
-            # Resolve IDs
             channel_id = int(channel) if channel else interaction.channel.id
             thread_id = int(thread) if thread else None
             category_id = get_category_id(interaction)
 
-            # Get the assigned memory ID
             assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
             if not assigned_memory:
                 await interaction.followup.send("No memory assigned to this channel/thread.")
                 return
 
-            logging.info(f"Resetting memory for thread ID: {assigned_memory}")
-
-            # Fetch all messages
-            async with aiohttp.ClientSession() as session:
-                messages = await list_thread_messages(session, assigned_memory)
-
-                if not messages:
-                    await interaction.followup.send("No messages found in this memory.")
+            ref_timestamp = None
+            if starting_with_message_id:
+                try:
+                    ref_message = await interaction.channel.fetch_message(int(starting_with_message_id))
+                    ref_timestamp = ref_message.created_at
+                except discord.NotFound:
+                    logging.warning(f"Message ID {starting_with_message_id} not found in this channel.")
+                    await interaction.followup.send("Invalid message ID — message not found.")
                     return
 
-                # Delete messages one by one
+            # === DELETE OPENAI MEMORY ===
+            async with aiohttp.ClientSession() as session:
+                all_memory_messages = await list_thread_messages(session, assigned_memory)
                 delete_count = 0
-                for msg in messages:
-                    msg_id = msg['id']
-                    if await delete_message(session, assigned_memory, msg_id):
-                        delete_count += 1
+                for msg in all_memory_messages:
+                    if not ref_timestamp or int(msg.get("created_at", 0)) >= int(ref_timestamp.timestamp()):
+                        success = await delete_message(session, assigned_memory, msg['id'])
+                        if success:
+                            delete_count += 1
+                            await asyncio.sleep(0.25)  # avoid rate limiting OpenAI too
+
+            # === DELETE DISCORD MESSAGES ===
+            deleted_discord_msgs = 0
+            target = interaction.guild.get_channel(channel_id)
+            if thread_id:
+                target = await interaction.guild.fetch_channel(thread_id)
+
+            async for message in target.history(limit=500):
+                if message.author.id == interaction.client.user.id:
+                    if not starting_with_message_id or int(message.id) >= int(starting_with_message_id):
+                        try:
+                            await message.delete()
+                            deleted_discord_msgs += 1
+                            await asyncio.sleep(0.35)  # avoid rate limiting Discord (429s)
+                        except (discord.Forbidden, discord.HTTPException) as e:
+                            logging.warning(f"Could not delete message {message.id}: {e}")
 
             await interaction.followup.send(
-                f"🧹 Memory thread reset complete.\nDeleted `{delete_count}` messages from thread `{assigned_memory}`."
+                f"🧹 **Reset complete!**\n"
+                f"• OpenAI messages deleted: `{delete_count}`\n"
+                f"• Discord messages deleted: `{deleted_discord_msgs}`"
             )
+
         except Exception as e:
             logging.error(f"Error during memory reset: {e}")
-            await interaction.followup.send(f"❌ Error while resetting memory: {e}")
+            try:
+                await interaction.followup.send(f"❌ Unexpected error: {e}")
+            except discord.NotFound:
+                logging.error("Couldn't send followup message – maybe the interaction expired.")
 
     @reset_memory_command.autocomplete('channel')
     async def reset_memory_channel_autocomplete(interaction: discord.Interaction, current: str):
