@@ -653,3 +653,51 @@ def setup_commands(tree, get_assistant_response):
     async def listmemory_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
 
+
+    @tree.command(name="reset_memory", description="Clear all assistant messages from the assigned memory thread.")
+    async def reset_memory_command(interaction: discord.Interaction, channel: str = None, thread: str = None):
+        await interaction.response.defer()
+
+        try:
+            # Resolve IDs
+            channel_id = int(channel) if channel else interaction.channel.id
+            thread_id = int(thread) if thread else None
+            category_id = get_category_id(interaction)
+
+            # Get the assigned memory ID
+            assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
+            if not assigned_memory:
+                await interaction.followup.send("No memory assigned to this channel/thread.")
+                return
+
+            logging.info(f"Resetting memory for thread ID: {assigned_memory}")
+
+            # Fetch all messages
+            async with aiohttp.ClientSession() as session:
+                messages = await list_thread_messages(session, assigned_memory)
+
+                if not messages:
+                    await interaction.followup.send("No messages found in this memory.")
+                    return
+
+                # Delete messages one by one
+                delete_count = 0
+                for msg in messages:
+                    msg_id = msg['id']
+                    if await delete_message(session, assigned_memory, msg_id):
+                        delete_count += 1
+
+            await interaction.followup.send(
+                f"🧹 Memory thread reset complete.\nDeleted `{delete_count}` messages from thread `{assigned_memory}`."
+            )
+        except Exception as e:
+            logging.error(f"Error during memory reset: {e}")
+            await interaction.followup.send(f"❌ Error while resetting memory: {e}")
+
+    @reset_memory_command.autocomplete('channel')
+    async def reset_memory_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @reset_memory_command.autocomplete('thread')
+    async def reset_memory_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)

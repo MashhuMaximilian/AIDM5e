@@ -11,7 +11,7 @@ from memory_management import get_assigned_memory
 from pathlib import Path
 from shared_functions import send_response_in_chunks, send_response
 import openai #Added
-recording_duration = 550 #CHANGE TO 550 FOR REAL DEAL
+recording_duration = 10 #CHANGE TO 550 FOR REAL DEAL
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
@@ -170,32 +170,44 @@ class VoiceRecorder:
             except Exception as e:
                 logging.error(f"Failed to delete audio file {file_path}: {e}")
 
-    async def send_to_openai(self, audio_filename): #Changed from whisper
-        """Send the recorded audio file to OpenAI for transcription."""
-        logging.info(f"Preparing to send {audio_filename} to OpenAI API for transcription...")
-        openai.api_key = OPENAI_API_KEY
+    async def send_to_openai(self, audio_filename):
+        """Send the recorded audio file to OpenAI GPT-4o API for transcription."""
+        logging.info(f"Preparing to send {audio_filename} to OpenAI API for transcription (GPT-4o)...")
+        
         if not audio_filename.exists() or audio_filename.stat().st_size == 0:
             logging.error(f"Audio file {audio_filename} does not exist or is empty.")
             return
+
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}"
+        }
+
         try:
-            with open(audio_filename, "rb") as audio_file:
-                transcript = openai.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    response_format="text"
-                )
-                logging.info(f"Received transcription from OpenAI API: {transcript[:100]}")
+            async with aiohttp.ClientSession() as session:
+                with open(audio_filename, "rb") as audio_file:
+                    data = aiohttp.FormData()
+                    data.add_field('file', audio_file, filename=audio_filename.name, content_type='audio/mpeg')
+                    data.add_field('model', 'gpt-4o-transcribe')
 
-                with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
-                    transcript_file.write(f"{transcript}\n")
+                    async with session.post(url, headers=headers, data=data) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            transcript = result.get("text", "")
+                            logging.info(f"Received transcription: {transcript[:100]}")
 
+                            with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
+                                transcript_file.write(f"{transcript}\n")
+                        else:
+                            error_text = await response.text()
+                            logging.error(f"API request failed: {response.status} - {error_text}")
         except Exception as e:
             logging.error(f"Unexpected error during OpenAI API request: {e}")
+
 
     async def summarize_transcript(self, category_id):
         logging.info("Starting transcript summarization...")
 
-        # Ensure voice_client is connected and find the proper summary channel
         if not self.voice_client:
             logging.error("Voice client is not connected. Cannot summarize transcript.")
             return
@@ -206,13 +218,11 @@ class VoiceRecorder:
             logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
             return
 
-        # Fetch assigned memory (if needed for context)
         assigned_memory = await get_assigned_memory(summary_channel.id, category_id)
         if assigned_memory is None:
             logging.error("No assigned memory found for this channel.")
             return
 
-        # Read and attach the full transcript file
         try:
             with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
                 transcript_content = transcript_file.read()
@@ -221,71 +231,82 @@ class VoiceRecorder:
             return
 
         logging.info("Transcript content loaded for summarization.")
-
         if not transcript_content:
             logging.warning("Transcript is empty. No summary generated.")
             return
 
-        # Split the transcript into chunks
+        # Split into chunks with overlap
         characters_per_chunk = 14000
-        chunks = [
-            transcript_content[i:i + characters_per_chunk]
-            for i in range(0, len(transcript_content), characters_per_chunk)
-        ]
+        overlap = 500
+        chunks = []
+        start = 0
+        while start < len(transcript_content):
+            end = start + characters_per_chunk
+            if end > len(transcript_content):
+                end = len(transcript_content)
+            chunk = transcript_content[max(0, start - overlap):end] if start > 0 else transcript_content[start:end]
+            if len(chunk) >= 100:  # Minimum size threshold
+                chunks.append(chunk)
+            start = end
+        if not chunks and transcript_content:
+            chunks.append(transcript_content)
 
-        # Process each chunk sequentially
+        # Process chunks sequentially
         for i, chunk in enumerate(chunks):
-            logging.info(f"Processing chunk {i + 1} of {len(chunks)}...")
+            chapter_num = i + 1
+            total_chunks = len(chunks)
+            logging.info(f"Processing chunk {chapter_num} of {total_chunks}...")
+            logging.info(f"Chunk {chapter_num} length: {len(chunk)} characters")
+            logging.info(f"Chunk {chapter_num} content preview: {chunk[:100]}...")
 
-            # Determine the appropriate prompt based on the chunk's position
+            # Set prompt based on chunk position
             if i == 0:
-                # First chunk prompt
                 prompt = (
-                    "You are retelling a D&D session transcript as a story. This is the first chunk of the transcript. "
-                    "Your task is to narrate the session as if you were describing it to someone who wasn't there, focusing on the story elements. "
-                    "Pay close attention to each player's actions, combat encounters, NPC interactions, and notable dialogue. "
-                    "Be meticulous in accurately portraying each player's actions and abilities, without mixing them up."
-                    "Exercise caution, as the transcription may be inaccurate due to language mixing, microphone distance, and challenges with correctly capturing names."
-                    "DO NOT add any details that are not present in the transcript; stick strictly to what is said and done."
-                    "This is the beginning of the story, so set the scene and introduce the characters and their actions. "
-                    "Here is the first part of the session:\n\n{chunk}"
+                    "Retell this D&D session’s start from the transcript in a vivid third-person story, like telling a friend. "
+                    "Stay 100% true—no additions. Use in-game names and classes only. Mark unclear names as [unknown, possibly character name]. "
+                    "weave dialogue into the narration naturally, using only what’s said in the transcript, but never use direct quotes - convert all dialogue to descriptive prose;"
+                    "Keep character actions exact, weave transcript dialogue into narration naturally, skip out-of-game talk. "
+                    "Start with 'Chapter 1: [Title from the Action]' and cover this chunk: {chunk}"
                 )
-            elif i == len(chunks) - 1:
-                # Final chunk prompt
-                prompt = (
-                    "This is the final part of the D&D session transcript. "
-                    "Continue narrating the session as a story, maintaining accuracy and detail. "
-                    "Describe the remaining player actions, combat encounters, NPC interactions, and dialogue. "
-                    "Ensure that player actions and abilities are correctly attributed. "
-                    "Do not add any information that is not in the transcript. "
-                    "Conclude the story with a concise summary of the key events and outcomes of the session. "
-                    "Here is the final part of the session:\n\n{chunk}"
-                )
+                prompt = prompt.format(chunk=chunk)
             else:
-                # Continuing chunks prompt
-                prompt = (
-                    "This is a continuation of the D&D session transcript. "
-                    "Continue in a similar manner narrating the session as a story, maintaining accuracy and detail. "
-                    "Describe the ongoing player actions, combat encounters, NPC interactions, and dialogue. "
-                    "Ensure that player actions and abilities are correctly attributed. "
-                    "Do not add any information that is not in the transcript. "
-                    "Here is the next part of the session:\n\n{chunk}"
-                )
+                previous_chapter_num = chapter_num - 1
+                if i == len(chunks) - 1:
+                    prompt = (
+                        "Continue the story from where you left off in Chapter {previous_chapter_num}. Finish retelling this D&D session from the transcript in a vivid third-person story, like telling a friend. "
+                        "Stay 100% true—no additions. Use in-game names and classes only. Mark unclear names as [unknown, possibly character name]. "
+                        "Keep character actions exact, weave transcript dialogue into narration naturally, skip out-of-game talk. "
+                        "weave dialogue into the narration naturally, using only what’s said in the transcript, but never use direct quotes - convert all dialogue to descriptive prose;"
+                        "If the chunk is short or unclear, base the conclusion on any clear in-character actions or dialogue available. "
+                        "Start with 'Chapter {chapter_num}: [Ending Title]', cover this chunk, then add a short prose summary of key moments, finds, and loose ends from this chunk only: {chunk}"
+                        "After you are done, please make a recap of the entire session"
+                        "=== SESSION RECAP ===\n"
+                        "Key NPCs Met: [list names and brief descriptions]\n"
+                        "Major Events: [bullet points of key plot developments]\n"
+                        "Important Items: [notable loot/artifacts]\n"
+                        "Unresolved Threads: [outstanding questions/mysteries]\n\n"
+                    )
+                else:
+                    prompt = (
+                        "Continue the story from where you left off in Chapter {previous_chapter_num}. Retell this D&D session chunk in a vivid third-person story, like telling a friend. "
+                        "Stay 100% true—no additions. Use in-game names and classes only. Mark unclear names as [unknown, possibly character name]. "
+                        "Keep character actions exact, weave transcript dialogue into narration naturally, skip out-of-game talk. "
+                        "If the chunk is short or unclear, base the narrative on any clear in-character actions or dialogue available. "
+                        "Start with 'Chapter {chapter_num}: [Title from the Action]' and cover this chunk: {chunk}"
+                    )
+                prompt = prompt.format(previous_chapter_num=previous_chapter_num, chapter_num=chapter_num, chunk=chunk)
 
-            # Format the prompt with the current chunk
-            prompt = prompt.format(chunk=chunk)
-
-            # Get the assistant's summary response
+            # Send prompt and wait for response
             try:
                 summary = await get_assistant_response(prompt, summary_channel.id, assigned_memory=assigned_memory)
-                if "Error" in summary:
-                    await summary_channel.send(summary)
-                    logging.error(f"Error summarizing chunk {i + 1}: {summary}")
+                if "Error" in summary or "can't assist" in summary.lower():
+                    logging.error(f"Chunk {chapter_num} failed: {summary}")
+                    await summary_channel.send(f"Failed to summarize chunk {chapter_num}: {summary}")
                 else:
                     await send_response_in_chunks(summary_channel, summary)
-                    logging.info(f"Chunk {i + 1} summarized and sent successfully.")
+                    logging.info(f"Chunk {chapter_num} summarized and sent successfully.")
             except Exception as e:
-                logging.error(f"Error processing chunk {i + 1}: {e}")
-                await summary_channel.send(f"Error summarizing chunk {i + 1}: {e}")
+                logging.error(f"Error processing chunk {chapter_num}: {e}")
+                await summary_channel.send(f"Error summarizing chunk {chapter_num}: {e}")
 
         logging.info("Transcript summarization completed.")

@@ -138,7 +138,7 @@
                 "name": "session-summary",
                 "assigned_memory": "thread_mw4CGwSjRzMUgyB4F4XgBGf3",
                 "memory_name": "gameplay",
-                "always_on": false,
+                "always_on": true,
                 "threads": {}
             },
             "1340326445204897923": {
@@ -164,8 +164,8 @@
             },
             "1340327180202414122": {
                 "name": "lore-and-teasers",
-                "assigned_memory": "thread_xqMP5R5zsKJT8qVLwYyuZgnA",
-                "memory_name": "out-of-game",
+                "assigned_memory": "thread_mw4CGwSjRzMUgyB4F4XgBGf3",
+                "memory_name": "gameplay",
                 "threads": {},
                 "always_on": false
             },
