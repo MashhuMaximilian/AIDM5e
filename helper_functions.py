@@ -1,12 +1,16 @@
 # helper_funtions
 
+import asyncio
+import logging
+
 import discord
 from discord import app_commands
+
 from assistant_interactions import get_assistant_response
-import logging
-from utils import load_thread_data, save_thread_data, category_threads
-from memory_management import create_openai_thread, get_assigned_memory, assign_memory
+from db_repository import ensure_thread_for_channel, list_memory_names
+from memory_management import get_assigned_memory, assign_memory
 from shared_functions import send_response
+from utils import category_threads, load_thread_data
 
 category_conversations = {}
 
@@ -160,30 +164,11 @@ async def handle_thread_creation(interaction, channel, thread_name, category_id,
         thread = await channel.create_thread(name=thread_name)
         logging.info(f"Created new thread: {thread.id} ({thread.name})")
         
-        # Immediately update JSON for the new thread
-        category_threads = load_thread_data()
-        category_id_str = str(category_id)
+        await asyncio.to_thread(ensure_thread_for_channel, channel.id, thread.id, thread.name, False)
 
-        # Create an entry for the new thread in the JSON
-        if category_id_str in category_threads:
-            channel_data = category_threads[category_id_str]['channels'].setdefault(str(channel.id), {
-                "name": channel.name,
-                "assigned_memory": None,
-                "memory_name": None,
-                "threads": {}
-            })
-            channel_data['threads'][str(thread.id)] = {
-                "name": thread.name,
-                "assigned_memory": None,
-                "memory_name": None
-            }
-
-            # Save the updated JSON data
-            save_thread_data(category_threads)
-
-            # Optionally assign memory to the new thread if provided
-            if memory_name:
-                await assign_memory(interaction, memory_name, str(channel.id), str(thread.id))
+        # Optionally assign memory to the new thread if provided
+        if memory_name:
+            await assign_memory(interaction, memory_name, str(channel.id), str(thread.id))
 
         return thread, None
     else:
@@ -196,15 +181,11 @@ async def get_channels_in_category(category, guild):
     ]
 
 async def get_memory_options(category_id, session, predefined_threads):
-    if category_id not in category_threads:
-        category_threads[category_id] = {}
-    for predefined_thread in predefined_threads:
-        if predefined_thread not in category_threads[category_id]:
-            category_threads[category_id][predefined_thread] = await create_openai_thread(
-                session, f"{predefined_thread} context message", category_id, predefined_thread)
+    del session, predefined_threads
+    memory_names = await asyncio.to_thread(list_memory_names, int(category_id))
     return [
-        app_commands.Choice(name=thread_name, value=thread_name)
-        for thread_name in category_threads[category_id].keys()
+        app_commands.Choice(name=memory_name, value=memory_name)
+        for memory_name in memory_names
     ] + [app_commands.Choice(name="CREATE NEW MEMORY", value="CREATE NEW MEMORY")]
 
 def get_category_id(interaction):

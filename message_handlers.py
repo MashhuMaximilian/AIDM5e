@@ -22,8 +22,14 @@ async def on_message(message):
 
     channel_name = message.channel.name
     channel_id = message.channel.id
-    category_id = message.channel.category.id if message.channel.category else None
-    thread_id = message.thread.id if hasattr(message, 'thread') and message.thread else None
+    category = message.channel.category if hasattr(message.channel, "category") else None
+    if isinstance(message.channel, discord.Thread):
+        category = message.channel.parent.category if message.channel.parent else None
+        channel_id = message.channel.parent.id if message.channel.parent else message.channel.id
+        thread_id = message.channel.id
+    else:
+        thread_id = None
+    category_id = category.id if category else None
 
     response_sent = False
     channel_always_on = await check_always_on(channel_id, category_id, thread_id)
@@ -68,7 +74,7 @@ async def handle_attachments(attachment, user_message, channel_id, category_id, 
     """Handle image, PDF, and text file attachments from the message."""
     logging.info(f"Processing attachment: {attachment.filename}")
     file_url = attachment.url
-    channel = client.get_channel(channel_id)
+    channel = client.get_channel(thread_id or channel_id)
 
     async with aiohttp.ClientSession() as session:
         async with session.get(file_url) as resp:
@@ -82,18 +88,14 @@ async def handle_attachments(attachment, user_message, channel_id, category_id, 
                     return
 
                 # IMAGE HANDLING
-                if "image" in content_type:
-                    image_data = await resp.read()
-                    gpt_request_content = [
-                        {"type": "text", "text": user_message},
-                        {"type": "image_url", "image_url": {"url": file_url, "detail": "high"}},
-                    ]
-                    response = await get_assistant_response(gpt_request_content, channel_id, category_id, thread_id, assigned_memory)
+                if content_type and "image" in content_type:
+                    combined_message = f"{user_message}\n\nThe user attached an image here: {file_url}"
+                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
                     if response:
                         await send_response_in_chunks(channel, response)
 
                 # PDF HANDLING
-                elif "pdf" in content_type:
+                elif content_type and "pdf" in content_type:
                     pdf_data = await resp.read()
                     text = extract_text_from_pdf(pdf_data)
                     combined_message = f"{user_message}\n\nExtracted text from PDF:\n{text}"

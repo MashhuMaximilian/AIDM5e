@@ -242,8 +242,8 @@ def setup_commands(tree, get_assistant_response):
         channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
         channel_name="Name for the new channel (only if 'NEW CHANNEL' is selected).",
         thread_name="Name for the new thread (only if you choose 'CREATE A NEW THREAD').",
-        memory="Choose an existing OpenAI thread or create a new memory.",
-        memory_name="Provide a name for the new OpenAI thread (only if 'CREATE NEW MEMORY' is selected).",
+        memory="Choose an existing memory or create a new one.",
+        memory_name="Provide a name for the new memory (only if 'CREATE NEW MEMORY' is selected).",
         always_on="Set the assistant always on or off."
     )
     @app_commands.choices(always_on=[
@@ -316,7 +316,7 @@ def setup_commands(tree, get_assistant_response):
             )
 
         # Prepare follow-up messages based on the scenario
-        always_on_status = "ON" if always_on.value.lower() == "true" else "OFF"
+        always_on_status = "ON" if always_on.value.lower() == "on" else "OFF"
         followup_messages = []
 
         # Channel follow-up
@@ -460,33 +460,10 @@ def setup_commands(tree, get_assistant_response):
     async def delete_memory_command(interaction: discord.Interaction, memory: str):
         await interaction.response.defer()
 
-        # Call the reusable function to delete the memory
-        result = delete_memory(memory)
-
-        # After deleting the memory, set the default memory for the category
-        if result == "Memory deleted successfully":  # Ensure memory was successfully deleted
-            category_id = str(interaction.channel.category.id)  # Get the category ID
-            await set_default_memory(category_id)  # Set the default memory for the category
-
-            # Assign the new default memory to the channel or thread
-            default_memory_id = category_threads[category_id]["gameplay"]
-            channel_id = interaction.channel.id  # Channel ID
-            thread_id = interaction.thread.id if interaction.thread else None  # Thread ID, if any
-
-            # Now, assign the default memory to the channel or thread
-            memory_assignment_result = await assign_memory(
-                interaction,
-                default_memory_id,
-                channel_id=channel_id,
-                thread_id=thread_id
-            )
-
-            # Respond with the result of memory assignment
-            await interaction.followup.send(memory_assignment_result)
-
-        else:
-            # In case memory deletion failed
-            await interaction.followup.send(result)
+        result = delete_memory(memory, interaction.channel.category.id)
+        if "deleted successfully" in result.lower():
+            await set_default_memory(str(interaction.channel.category.id))
+        await interaction.followup.send(result)
 
     # Add autocomplete functionality for the memory argument
     @delete_memory_command.autocomplete('memory')
@@ -506,11 +483,19 @@ def setup_commands(tree, get_assistant_response):
         # Acknowledge the interaction immediately
         await interaction.response.defer()  # Defer response to avoid timeout
 
-        # Initialize threads for the category
-        await initialize_threads(category)
-        
-        # Send the final message after the interaction is acknowledged
-        await interaction.followup.send(f"Threads and channels have been initialized for the category: {category.name}")
+        try:
+            invite_result = await initialize_threads(category)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc))
+            return
+
+        created = ", ".join(invite_result["created"]) if invite_result["created"] else "none"
+        reused = ", ".join(invite_result["reused"]) if invite_result["reused"] else "none"
+        await interaction.followup.send(
+            f"Campaign initialized for **{category.name}**.\n"
+            f"Created channels: {created}\n"
+            f"Reused channels: {reused}"
+        )
 
 
     @tree.command(name="repairthread", description="Repair a thread by removing messages with invalid image URLs")
@@ -526,49 +511,10 @@ def setup_commands(tree, get_assistant_response):
                 await interaction.followup.send("Error: No assigned memory found for this channel.")
                 return
 
-        logging.info(f"Attempting to repair thread: {thread_id}")
-
-        async with aiohttp.ClientSession() as session:
-            # Step 1: List all messages with pagination
-            messages = await list_thread_messages(session, thread_id)
-            if not messages:
-                await interaction.followup.send(f"Error: Could not fetch messages for thread {thread_id}.")
-                return
-
-            bad_message_ids = []
-            for msg in messages:
-                content = msg.get('content', [])
-                msg_id = msg['id']
-                if isinstance(content, list):
-                    for item in content:
-                        if item.get('type') == 'text':
-                            text = item['text'].get('value', '')
-                            if "https://cdn.discordapp.com" in text:
-                                bad_message_ids.append(msg_id)
-                                logging.info(f"Found problematic URL in text of message ID: {msg_id}, Content: {text}")
-                        elif item.get('type') == 'image_url':
-                            url = item['image_url'].get('url', '')
-                            if "https://cdn.discordapp.com" in url or "image0.jpg" in url:
-                                bad_message_ids.append(msg_id)
-                                logging.info(f"Found problematic image URL in message ID: {msg_id}, URL: {url}")
-
-            if not bad_message_ids:
-                await interaction.followup.send(f"No messages with invalid image URLs found in thread {thread_id}.")
-                return
-
-            # Step 2: Delete problematic messages
-            for msg_id in bad_message_ids:
-                success = await delete_message(session, thread_id, msg_id)
-                if not success:
-                    await interaction.followup.send(f"Failed to delete message {msg_id} in thread {thread_id}.")
-                    return
-
-            # Step 3: Test the thread without sending a message
-            test_response = await get_assistant_response("Test message", interaction.channel.id, assigned_memory=thread_id, send_message=False)
-            if test_response and "Error: Run failed" not in test_response:
-                await interaction.followup.send(f"Thread {thread_id} repaired successfully!")
-            else:
-                await interaction.followup.send(f"Thread {thread_id} still fails after repair: {test_response or 'No response received'}")
+        await interaction.followup.send(
+            "The `repairthread` command is no longer needed after the Gemini/Supabase cutover. "
+            "Memories now live in Supabase instead of provider-side assistant threads."
+        )
 
     @tree.command(name="listmemory", description="List memory details for a channel or thread")
     async def listmemory(interaction: discord.Interaction, channel: str = None, thread: str = None):
@@ -684,16 +630,7 @@ def setup_commands(tree, get_assistant_response):
                     await interaction.followup.send("Invalid message ID — message not found.")
                     return
 
-            # === DELETE OPENAI MEMORY ===
-            async with aiohttp.ClientSession() as session:
-                all_memory_messages = await list_thread_messages(session, assigned_memory)
-                delete_count = 0
-                for msg in all_memory_messages:
-                    if not ref_timestamp or int(msg.get("created_at", 0)) >= int(ref_timestamp.timestamp()):
-                        success = await delete_message(session, assigned_memory, msg['id'])
-                        if success:
-                            delete_count += 1
-                            await asyncio.sleep(0.25)  # avoid rate limiting OpenAI too
+            delete_count = await reset_memory_history(assigned_memory)
 
             # === DELETE DISCORD MESSAGES ===
             deleted_discord_msgs = 0
@@ -713,7 +650,7 @@ def setup_commands(tree, get_assistant_response):
 
             await interaction.followup.send(
                 f"🧹 **Reset complete!**\n"
-                f"• OpenAI messages deleted: `{delete_count}`\n"
+                f"• Memory messages deleted: `{delete_count}`\n"
                 f"• Discord messages deleted: `{deleted_discord_msgs}`"
             )
 

@@ -31,6 +31,7 @@ Combat:
 Interaction:
 - Respect player decisions, reward creativity, and adapt the story accordingly.
 - Encourage roleplay based on the character’s traits.
+- When providing links in Discord, do not use Markdown masked links like [text](url). Use plain URLs instead
 
 Tracking and Fair Play:
 - Track resources (HP, spell slots, etc.) and announce statuses clearly.

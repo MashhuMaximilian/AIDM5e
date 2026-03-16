@@ -1,24 +1,22 @@
 import discord
 import subprocess
 import os
-import aiohttp
 import asyncio
 import logging
-from discord import app_commands
-from config import OPENAI_API_KEY # Changed from WHISPER_API_KEY
+from config import AUDIO_CHUNK_SECONDS, AUDIO_FILES_PATH, AUDIO_PROMPT, TRANSCRIPT_PATH
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
 from pathlib import Path
-from shared_functions import send_response_in_chunks, send_response
-import openai #Added
+from shared_functions import send_response_in_chunks
+from gemini_client import gemini_client
 
 # CHANGE Recording duration TO | 550 | FOR REAL DEAL
-recording_duration = 5
+recording_duration = AUDIO_CHUNK_SECONDS
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # Create the folder to save audio files if it doesn't exist
-audio_files_path = Path('audio_files')
+audio_files_path = Path(AUDIO_FILES_PATH)
 audio_files_path.mkdir(exist_ok=True)
 
 def get_category_id_voice(voice_channel):
@@ -31,7 +29,7 @@ class VoiceRecorder:
     def __init__(self):
         self.voice_client = None
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
-        self.transcript_path = Path(__file__).parent / 'transcript.txt'  # Absolute path for transcript
+        self.transcript_path = Path(TRANSCRIPT_PATH)
 
     async def capture_audio(self, voice_client, duration=recording_duration): #120 seconds or 5-10 for testing.
         self.voice_client = voice_client
@@ -85,7 +83,7 @@ class VoiceRecorder:
 
                     if audio_filename.exists() and audio_filename.stat().st_size > 0:
                         # Send the audio file for transcription as a background task
-                        task = asyncio.create_task(self.send_to_openai(audio_filename)) #changed function name
+                        task = asyncio.create_task(self.send_to_openai(audio_filename))
                         self.transcription_tasks.append(task)  # Track the task
                         task.add_done_callback(lambda t: self.transcription_tasks.remove(t))  # Remove task after completion
                     else:
@@ -173,38 +171,25 @@ class VoiceRecorder:
                 logging.error(f"Failed to delete audio file {file_path}: {e}")
 
     async def send_to_openai(self, audio_filename):
-        """Send the recorded audio file to OpenAI GPT-4o API for transcription."""
-        logging.info(f"Preparing to send {audio_filename} to OpenAI API for transcription (GPT-4o)...")
+        """Legacy method name kept for compatibility; uses Gemini for transcription."""
+        logging.info("Preparing to send %s to Gemini for transcription...", audio_filename)
         
         if not audio_filename.exists() or audio_filename.stat().st_size == 0:
             logging.error(f"Audio file {audio_filename} does not exist or is empty.")
             return
 
-        url = "https://api.openai.com/v1/audio/transcriptions"
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
-        }
-
         try:
-            async with aiohttp.ClientSession() as session:
-                with open(audio_filename, "rb") as audio_file:
-                    data = aiohttp.FormData()
-                    data.add_field('file', audio_file, filename=audio_filename.name, content_type='audio/mpeg')
-                    data.add_field('model', 'gpt-4o-transcribe')
+            transcript = await asyncio.to_thread(
+                gemini_client.transcribe_audio,
+                str(audio_filename),
+                AUDIO_PROMPT,
+            )
+            logging.info("Received transcription: %s", transcript[:100])
 
-                    async with session.post(url, headers=headers, data=data) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            transcript = result.get("text", "")
-                            logging.info(f"Received transcription: {transcript[:100]}")
-
-                            with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
-                                transcript_file.write(f"{transcript}\n")
-                        else:
-                            error_text = await response.text()
-                            logging.error(f"API request failed: {response.status} - {error_text}")
+            with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
+                transcript_file.write(f"{transcript}\n")
         except Exception as e:
-            logging.error(f"Unexpected error during OpenAI API request: {e}")
+            logging.error("Unexpected error during Gemini transcription request: %s", e)
 
 
     async def summarize_transcript(self, category_id):

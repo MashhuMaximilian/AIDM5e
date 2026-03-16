@@ -1,64 +1,49 @@
+import asyncio
 import logging
-import aiohttp
+
 import discord
 from discord import app_commands
-from config import HEADERS
-from utils import load_thread_data, save_thread_data, category_threads
+
+from config import DM_ROLE_NAME
+from db_repository import (
+    DEFAULT_CHANNEL_SPECS,
+    DEFAULT_MEMORY_NAMES,
+    assign_memory_to_channel,
+    assign_memory_to_thread,
+    clear_memory_messages,
+    delete_memory as delete_memory_record,
+    ensure_channel_for_category,
+    ensure_memory,
+    ensure_thread_for_channel,
+    fetch_memory_messages,
+    get_assigned_memory_id,
+    get_campaign_context_by_category,
+    get_default_memory_id,
+    get_memory_id_by_name,
+    get_memory_name,
+    get_or_create_campaign_context,
+    list_memory_names,
+    set_default_memory as set_default_memory_record,
+)
 from shared_functions import apply_always_on
 
 
-async def create_openai_thread(session, user_message, category_id, memory_name):
-    """Create a new OpenAI thread and store its ID for the category."""
-    logging.info(f"Creating new OpenAI thread for category {category_id} of type {memory_name}")
-    
-    async with session.post("https://api.openai.com/v1/threads", headers=HEADERS, json={
-        "messages": [{"role": "user", "content": user_message}]
-    }) as thread_response:
-        if thread_response.status != 200:
-            raise Exception(f"Error creating thread: {await thread_response.text()}")
-        
-        thread_data = await thread_response.json()
-        thread_id = thread_data['id']
-        
-        # Store thread ID in the category-specific structure
-        if category_id not in category_threads:
-            category_threads[category_id] = {}
+logger = logging.getLogger(__name__)
 
-        # Store the thread under the appropriate thread type
-        category_threads[category_id][memory_name] = thread_id
-        logging.info(f"New OpenAI thread created for category {category_id} with thread ID: {thread_id} of type {memory_name}")
-    
-    return thread_id
-
-async def set_default_memory(category_id):
-    """Set the default memory for a category to 'gameplay' if not already set."""
-    global category_threads
-    if category_id not in category_threads:
-        category_threads[category_id] = {"gameplay": None, "out-of-game": None}
-    
-    # Set the default memory to gameplay if it's not already set
-    if not category_threads[category_id]["gameplay"]:
-        category_threads[category_id]["gameplay"] = "gameplay_thread_id"  # Replace with the actual thread ID or retrieval logic
-    
-    save_thread_data(category_threads)  # Save the updated data
-    logging.info(f"Default memory set for category {category_id}.")
 
 async def create_memory(interaction: discord.Interaction, memory_name: str, category_id_str: str):
-    async with aiohttp.ClientSession() as session:
-        memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
+    context = await asyncio.to_thread(get_campaign_context_by_category, int(category_id_str))
+    if not context:
+        context = await asyncio.to_thread(
+            get_or_create_campaign_context,
+            interaction.guild.id,
+            interaction.guild.name,
+            int(category_id_str),
+            interaction.channel.category.name,
+            DM_ROLE_NAME,
+        )
+    return await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
 
-    # Load the current category threads data
-    category_threads = load_thread_data()
-    if category_id_str not in category_threads:
-        category_threads[category_id_str] = {'memory_threads': {}, 'channels': {}}
-
-    # Store the new memory in the memory_threads
-    category_threads[category_id_str]['memory_threads'][memory_name] = memory_thread_id
-
-    # Save the updated JSON data
-    save_thread_data(category_threads)
-
-    return memory_thread_id  # Return the ID of the created memory thread
 
 async def assign_memory(
     interaction: discord.Interaction,
@@ -67,185 +52,146 @@ async def assign_memory(
     thread_id: str = None,
     memory_name: str = None,
 ):
-    # No need to defer again since it's already been done
-    logging.info(f"Assigning memory: {memory}, channel_id: {channel_id}, thread_id: {thread_id}, memory_name: {memory_name}")
+    logger.info("Assigning memory=%s channel_id=%s thread_id=%s memory_name=%s", memory, channel_id, thread_id, memory_name)
 
     if memory == "CREATE NEW MEMORY" and not memory_name:
-        logging.error("Error: You must provide a name for the new memory.")
         return "Error: You must provide a name for the new memory."
 
     channel_obj = interaction.guild.get_channel(int(channel_id))
     if not channel_obj:
-        logging.error("Invalid channel specified.")
         return "Invalid channel specified. Please specify a valid channel."
 
-    category_id_str = str(interaction.channel.category.id)
-    category_threads = load_thread_data()  # Load your JSON data
+    category = channel_obj.category or interaction.channel.category
+    context = await asyncio.to_thread(
+        get_or_create_campaign_context,
+        interaction.guild.id,
+        interaction.guild.name,
+        category.id,
+        category.name,
+        DM_ROLE_NAME,
+    )
+    await asyncio.to_thread(
+        ensure_channel_for_category,
+        category.id,
+        channel_obj.id,
+        channel_obj.name,
+        False,
+        channel_obj.name == "dm-planning",
+    )
 
-    if category_id_str not in category_threads:
-        logging.error(f"Error: Category ID '{category_id_str}' does not exist.")
-        return f"Error: Category ID '{category_id_str}' does not exist."
-
-    category_data = category_threads[category_id_str]
-
-    # Create a new memory if necessary
     if memory == "CREATE NEW MEMORY":
-        async with aiohttp.ClientSession() as session:
-            memory_thread_id = await create_openai_thread(session, f"Memory: {memory_name}", category_id_str, memory_name)
-            category_data['memory_threads'][memory_name] = memory_thread_id  # Set the new memory in memory_threads
-            logging.info(f"New memory created: {memory_name} with ID: {memory_thread_id}")
+        target_memory_name = memory_name
+        memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
     else:
-        memory_thread_id = category_data['memory_threads'].get(memory)
-        if memory_thread_id is None:
-            logging.error(f"Error: Memory '{memory}' does not exist in category '{category_id_str}'.")
-            return f"Error: Memory '{memory}' does not exist in category '{category_id_str}'. Available memories: {list(category_data['memory_threads'].keys())}."
+        target_memory_name = memory
+        memory_id = await asyncio.to_thread(get_memory_id_by_name, context.campaign_id, memory)
+        if memory_id is None:
+            return (
+                f"Error: Memory '{memory}' does not exist in category '{category.id}'. "
+                f"Available memories: {await asyncio.to_thread(list_memory_names, category.id)}."
+            )
 
-        memory_name = memory  # Use memory as the name
-        logging.info(f"Using existing memory: {memory_name}")
-
-    # Update or create the channel entry
-    channel_data = category_data['channels'].setdefault(str(channel_id), {
-        "name": channel_obj.name,
-        "assigned_memory": None,
-        "memory_name": None,
-        "threads": {}
-    })
-
-    # Update memory assignment for a specific thread if provided
     if thread_id:
-        thread_obj = await interaction.guild.fetch_channel(int(thread_id))  # Assuming `thread` is the ID of the thread
+        thread_obj = await interaction.guild.fetch_channel(int(thread_id))
         if not isinstance(thread_obj, discord.Thread):
-            logging.error(f"Error: Thread with ID '{thread_id}' not found or is not a thread.")
             return f"Error: Thread with ID '{thread_id}' not found or is not a thread."
 
-        thread_id_str = str(thread_obj.id)
-        thread_name = thread_obj.name
+        await asyncio.to_thread(
+            ensure_thread_for_channel,
+            channel_obj.id,
+            thread_obj.id,
+            thread_obj.name,
+            False,
+        )
+        await asyncio.to_thread(assign_memory_to_thread, thread_obj.id, memory_id)
+        return (
+            f"Memory '{target_memory_name}' assigned to thread '{thread_obj.name}' in channel "
+            f"'{channel_obj.name}' with memory ID '{memory_id}'."
+        )
 
-        logging.info(f"Assigning memory to thread: {thread_name}, ID: {thread_id_str}")
-        # Assign the memory to the thread within the channel
-        channel_data['threads'][thread_id_str] = {
-            "name": thread_name,
-            "assigned_memory": memory_thread_id,
-            "memory_name": memory_name
-        }
-    else:
-        # If no thread is specified, assign the memory to the entire channel
-        logging.info(f"Assigning memory to channel: {channel_obj.name}")
-        channel_data['assigned_memory'] = memory_thread_id
-        channel_data['memory_name'] = memory_name
-        # Update the memory_threads with the channel-wide memory
-        category_data['memory_threads'][memory_name] = memory_thread_id
+    await asyncio.to_thread(assign_memory_to_channel, channel_obj.id, memory_id)
+    return f"Memory '{target_memory_name}' assigned to channel '{channel_obj.name}' with memory ID '{memory_id}'."
 
-    # Save the updated JSON data
-    save_thread_data(category_threads)
-    logging.info("Thread data saved successfully.")
-
-    if thread_id:
-        return f"Memory '{memory_name}' assigned to thread '{thread_obj.name}' in channel '{channel_obj.name}' with thread ID '{memory_thread_id}'."
-    else:
-        return f"Memory '{memory_name}' assigned to channel '{channel_obj.name}' with thread ID '{memory_thread_id}'."
 
 async def get_default_memory(category_id):
-    """Retrieve the default or 'out-of-game' memory for a category."""
-    category_data = category_threads.get(category_id)
-    if category_data:
-        return category_data['memory_threads'].get("out-of-game")
+    return await asyncio.to_thread(get_default_memory_id, int(category_id))
 
-    logging.info(f"No default memory found for category {category_id}.")
-    return None
+
+async def set_default_memory(category_id):
+    context = await asyncio.to_thread(get_campaign_context_by_category, int(category_id))
+    if not context:
+        return
+    gameplay_memory_id = await asyncio.to_thread(get_memory_id_by_name, context.campaign_id, "gameplay")
+    if gameplay_memory_id:
+        await asyncio.to_thread(set_default_memory_record, context.campaign_id, gameplay_memory_id)
+
 
 async def get_assigned_memory(channel_id, category_id, thread_id=None):
-    logging.info(f"Fetching assigned memory for channel_id: {channel_id}, thread_id: {thread_id}, category_id: {category_id}")
-    category_threads = load_thread_data()
-    category_id_str = str(category_id)
-    channel_id_str = str(channel_id)
+    logger.info("Fetching assigned memory channel_id=%s category_id=%s thread_id=%s", channel_id, category_id, thread_id)
+    return await asyncio.to_thread(get_assigned_memory_id, int(channel_id), int(category_id), int(thread_id) if thread_id else None)
 
-    if category_id_str not in category_threads:
-        logging.info(f"No data found for category '{category_id_str}'.")
-        return None
-
-    category_data = category_threads[category_id_str]
-    channel_data = category_data['channels'].get(channel_id_str)
-
-    if channel_data:
-        if thread_id:
-            thread_data = channel_data['threads'].get(str(thread_id))
-            if thread_data and thread_data.get('assigned_memory'):
-                assigned_memory = thread_data['assigned_memory'].strip().strip("'\". ")
-                logging.info(f"Assigned Memory found for thread '{thread_id}' in channel '{channel_id}': {assigned_memory}")
-                return assigned_memory
-            logging.info(f"No assigned memory found for thread '{thread_id}' in channel '{channel_id}'")
-
-        assigned_memory = channel_data.get('assigned_memory')
-        if assigned_memory:
-            assigned_memory = assigned_memory.strip().strip("'\". ")
-            logging.info(f"Assigned Memory found for channel '{channel_id}': {assigned_memory}")
-            return assigned_memory
-        logging.info(f"No assigned memory found in channel data for '{channel_id}'")
-
-    logging.info(f"No assigned memory found for channel '{channel_id}' in category '{category_id}'.")
-    return None
 
 async def initialize_threads(category):
-    """Initialize threads and channels for a specific category."""
-    category_id = str(category.id)
-    category_name = category.name
+    guild = category.guild
+    dm_role = discord.utils.get(guild.roles, name=DM_ROLE_NAME)
+    if dm_role is None:
+        raise ValueError(f"Role '{DM_ROLE_NAME}' was not found. Create it and assign it to at least one user before running /invite.")
 
-    # Load existing thread data
-    existing_data = load_thread_data() or {}
+    context = await asyncio.to_thread(
+        get_or_create_campaign_context,
+        guild.id,
+        guild.name,
+        category.id,
+        category.name,
+        DM_ROLE_NAME,
+    )
 
-    # Create a session for API requests
-    async with aiohttp.ClientSession() as session:
-        # Create category structure if it doesn't exist
-        if category_id not in existing_data:
-            # Initialize category with default values
-            existing_data[category_id] = {
-                "name": category_name,
-                "default_memory": "gameplay",
-                "memory_threads": {
-                    "gameplay": None,
-                    "out-of-game": None
-                },
-                "channels": {}
-            }
+    memory_ids = {}
+    for memory_name in DEFAULT_MEMORY_NAMES:
+        memory_ids[memory_name] = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
 
-            # Create OpenAI threads for gameplay and out-of-game if missing
-            existing_data[category_id]["memory_threads"]["gameplay"] = await create_openai_thread(session, f"Gameplay memory for {category_name}", category_id, "gameplay")
-            existing_data[category_id]["memory_threads"]["out-of-game"] = await create_openai_thread(session, f"Out-of-game memory for {category_name}", category_id, "out-of-game")
+    await asyncio.to_thread(set_default_memory_record, context.campaign_id, memory_ids["gameplay"])
 
-        # Create required channels if they don't exist
-        required_channels = ['gameplay', 'telldm', 'session-summary', 'feedback']
-        for channel_name in required_channels:
-            if channel_name not in existing_data[category_id]["channels"]:
-                # Create channel in Discord if it doesn't exist
-                new_channel = await category.guild.create_text_channel(name=channel_name, category=category)
-                logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")
-                
-                # Add new channel to existing data with the channel ID as the key
-                assigned_memory = existing_data[category_id]["memory_threads"]["gameplay"] if channel_name != "telldm" else existing_data[category_id]["memory_threads"]["out-of-game"]
-                memory_name = "gameplay" if channel_name != "telldm" else "out-of-game"
-                always_on = False if channel_name != "telldm" else True  # Set "telldm" to always_on = True
+    created_channels = []
+    reused_channels = []
+    bot_member = guild.me or guild.get_member(getattr(guild._state.user, "id", 0))
+    dm_overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        dm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+    }
+    if bot_member:
+        dm_overwrites[bot_member] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True,
+        )
 
-                # Use channel ID instead of name in the structure
-                existing_data[category_id]["channels"][str(new_channel.id)] = {
-                    "name": channel_name,
-                    "assigned_memory": assigned_memory,
-                    "memory_name": memory_name,
-                    "always_on": always_on,
-                    "threads": {}
-                }
+    for spec in DEFAULT_CHANNEL_SPECS:
+        channel = discord.utils.get(category.text_channels, name=spec["name"])
+        if channel is None:
+            kwargs = {"name": spec["name"], "category": category}
+            if spec["is_dm_private"]:
+                kwargs["overwrites"] = dm_overwrites
+            channel = await guild.create_text_channel(**kwargs)
+            created_channels.append(spec["name"])
+        else:
+            reused_channels.append(spec["name"])
+            if spec["is_dm_private"]:
+                await channel.edit(overwrites=dm_overwrites)
 
-        # Initialize thread data (as needed)
-        for channel_id, channel_data in existing_data[category_id]["channels"].items():
-            if channel_data["memory_name"] == "gameplay" and channel_data["name"] != "telldm":
-                channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["gameplay"]
-            elif channel_data["name"] == "telldm":
-                channel_data["assigned_memory"] = existing_data[category_id]["memory_threads"]["out-of-game"]
-                channel_data["always_on"] = True  # Telldm always_on = True
+        await asyncio.to_thread(
+            ensure_channel_for_category,
+            category.id,
+            channel.id,
+            channel.name,
+            spec["always_on"],
+            spec["is_dm_private"],
+        )
+        await asyncio.to_thread(assign_memory_to_channel, channel.id, memory_ids[spec["memory"]])
 
-        # Save the updated thread data
-        save_thread_data(existing_data)
-        logging.info(f"Threads and channels initialized for category {category_name}.")
+    return {"created": created_channels, "reused": reused_channels}
+
 
 async def handle_memory_assignment(
     interaction: discord.Interaction,
@@ -253,107 +199,70 @@ async def handle_memory_assignment(
     channel_id: str,
     thread_id: str,
     memory_name: str = None,
-    always_on: app_commands.Choice[str] = None
+    always_on: app_commands.Choice[str] = None,
 ):
-    # If creating a new memory
+    if memory == "CREATE NEW MEMORY" and not memory_name:
+        await interaction.followup.send("Error: You must provide a name for the new memory.")
+        return None, None
+
     if memory == "CREATE NEW MEMORY":
-        if not memory_name:
-            await interaction.followup.send("Error: You must provide a name for the new memory.")
-            return None, None  # No memory assignment to return
-
-        # Create the new memory and assign it
-        memory_thread_id = await create_memory(interaction, memory_name, str(interaction.channel.category.id))
-        memory_assignment_result = await assign_memory(
-            interaction,
-            memory_name,
-            channel_id=channel_id,
-            thread_id=thread_id,
-            memory_name=memory_name
-        )
-
-    # If just assigning an existing memory
+        await create_memory(interaction, memory_name, str(interaction.channel.category.id))
+        memory_to_assign = memory_name
     else:
-        memory_assignment_result = await assign_memory(
-            interaction,
-            memory,
-            channel_id=channel_id,
-            thread_id=thread_id,
-            memory_name=memory_name
-        )
+        memory_to_assign = memory
 
-    # Get the target channel and thread
+    result = await assign_memory(
+        interaction,
+        memory_to_assign,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        memory_name=memory_name,
+    )
+    logger.info(result)
+
     target_channel, target_thread = await get_channel_and_thread(interaction, channel_id, thread_id)
-
-    # Apply 'always_on' if specified
     if always_on:
         await apply_always_on(target_channel, target_thread, always_on.value)
 
     return target_channel, target_thread
 
+
 async def get_channel_and_thread(interaction: discord.Interaction, channel_id: str, thread_id: str = None):
-        target_channel = interaction.guild.get_channel(int(channel_id)) if channel_id.isdigit() else None
-        target_thread = None
+    target_channel = interaction.guild.get_channel(int(channel_id)) if channel_id and channel_id.isdigit() else None
+    target_thread = None
+    if thread_id:
+        target_thread = interaction.guild.get_channel(int(thread_id)) if thread_id.isdigit() else None
+    return target_channel, target_thread
 
-        if thread_id:
-            target_thread = interaction.guild.get_channel(int(thread_id)) if thread_id.isdigit() else None
 
-        return target_channel, target_thread
-
-def delete_memory(memory_name_or_id: str) -> str:
+def delete_memory(memory_name_or_id: str, category_id: int | None = None) -> str:
     try:
-        # Load the current memory data
-        category_threads = load_thread_data()  # Load JSON
-
-        # Flag to track deletion
-        deleted = False
-
-        # Iterate through categories to find the memory
-        for category_id, category_data in category_threads.items():
-            for channel_id, channel_data in category_data.get('channels', {}).items():
-                if channel_data.get('memory_name') == memory_name_or_id or channel_data.get('assigned_memory') == memory_name_or_id:
-                    # Remove the memory from the channel
-                    channel_data['assigned_memory'] = None
-                    channel_data['memory_name'] = None
-                    deleted = True
-
-                # Check and remove the memory from threads
-                for thread_id, thread_data in channel_data.get('threads', {}).items():
-                    if thread_data.get('memory_name') == memory_name_or_id or thread_data.get('assigned_memory') == memory_name_or_id:
-                        thread_data['assigned_memory'] = None
-                        thread_data['memory_name'] = None
-                        deleted = True
-
+        if category_id is None:
+            return "Error: Category ID is required to delete a memory."
+        deleted = delete_memory_record(memory_name_or_id, int(category_id))
         if deleted:
-            save_thread_data(category_threads)  # Save updated data
             return f"Memory '{memory_name_or_id}' deleted successfully."
-        else:
-            return f"Error: Memory '{memory_name_or_id}' not found in any category, channel, or thread."
-    except Exception as e:
-        logging.error(f"Error deleting memory '{memory_name_or_id}': {e}")
-        return f"An error occurred while deleting memory '{memory_name_or_id}': {e}"
+        return f"Error: Memory '{memory_name_or_id}' not found in this category."
+    except ValueError as exc:
+        return str(exc)
+    except Exception as exc:
+        logger.error("Error deleting memory '%s': %s", memory_name_or_id, exc)
+        return f"An error occurred while deleting memory '{memory_name_or_id}': {exc}"
 
-async def list_thread_messages(session, thread_id):
-    messages = []
-    after = None
-    while True:
-        params = {"after": after} if after else {}
-        async with session.get(f"https://api.openai.com/v1/threads/{thread_id}/messages", headers=HEADERS, params=params) as resp:
-            if resp.status != 200:
-                logging.error(f"Error fetching messages: {await resp.text()}")
-                return None
-            data = await resp.json()
-            messages.extend(data['data'])
-            if not data.get('has_more'):
-                break
-            after = data['data'][-1]['id']  # Use the last message ID for the next page
-    return messages
 
-async def delete_message(session, thread_id, message_id):
-    """Delete a specific message from a thread."""
-    async with session.delete(f"https://api.openai.com/v1/threads/{thread_id}/messages/{message_id}", headers=HEADERS) as resp:
-        if resp.status == 200:
-            logging.info(f"Deleted message {message_id} from thread {thread_id}")
-            return True
-        else:
-            logging.error(f"Error deleting message: {await resp.text()}")
-            return False
+async def list_thread_messages(_session, memory_id):
+    return await asyncio.to_thread(fetch_memory_messages, memory_id)
+
+
+async def delete_message(_session, _memory_id, _message_id):
+    return False
+
+
+async def reset_memory_history(memory_id: str) -> int:
+    return await asyncio.to_thread(clear_memory_messages, memory_id)
+
+
+async def lookup_memory_name(memory_id: str | None) -> str | None:
+    if not memory_id:
+        return None
+    return await asyncio.to_thread(get_memory_name, memory_id)

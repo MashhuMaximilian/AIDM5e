@@ -1,113 +1,92 @@
+import asyncio
 import logging
+
 import discord
+
 from config import client
-from utils import load_thread_data, save_thread_data
+from db_repository import (
+    ensure_channel_for_category,
+    ensure_thread_for_channel,
+    get_or_create_campaign_context,
+    is_always_on,
+    set_channel_always_on,
+    set_thread_always_on,
+)
 
 
 always_on_channels = {}
 
+
 async def set_always_on(channel_or_thread, always_on_value):
-    existing_data = load_thread_data()
-    if existing_data is None:
-        existing_data = {}
+    always_on = bool(always_on_value)
+    category = channel_or_thread.parent.category if isinstance(channel_or_thread, discord.Thread) else channel_or_thread.category
+    await asyncio.to_thread(
+        get_or_create_campaign_context,
+        channel_or_thread.guild.id,
+        channel_or_thread.guild.name,
+        category.id,
+        category.name,
+    )
 
-    category_id = str(channel_or_thread.category.id)
-    channel_id = str(channel_or_thread.id)
-
-    # Check if it's a channel or thread
-    if category_id in existing_data:
-        if channel_id in existing_data[category_id]["channels"]:
-            # It's a channel
-            always_on = always_on_value is True  # Ensure only True/False values are considered
-            existing_data[category_id]["channels"][channel_id]["always_on"] = always_on
-            
-            # Update runtime dictionary
-            always_on_channels[channel_or_thread.id] = always_on
-            if not always_on:
-                always_on_channels.pop(channel_or_thread.id, None)
-
-            # Log the state before saving
-            logging.info(f"Setting channel {channel_id} always on: {always_on}")
-            
-            # Save changes to JSON
-            save_thread_data(existing_data)
-
-            # Send confirmation message
-            status_message = "now always listening to all messages." if always_on else "now only responding when mentioned."
-            await channel_or_thread.send(f"AI assistant is {status_message}")
-            logging.info(f"Channel {channel_or_thread.id} set to always on: {always_on}. Current always_on_channels: {always_on_channels}")
-
-        elif str(channel_or_thread.parent.id) in existing_data[category_id]["channels"]:
-            # It's a thread
-            parent_channel_id = str(channel_or_thread.parent.id)
-            always_on = always_on_value is True
-
-            if parent_channel_id in existing_data[category_id]["channels"]:
-                # Check if the thread already exists
-                if str(channel_or_thread.id) in existing_data[category_id]["channels"][parent_channel_id]["threads"]:
-                    # Update only the always_on property
-                    existing_data[category_id]["channels"][parent_channel_id]["threads"][str(channel_or_thread.id)]["always_on"] = always_on
-                else:
-                    # If the thread does not exist, create it with the always_on value
-                    existing_data[category_id]["channels"][parent_channel_id]["threads"][str(channel_or_thread.id)] = {
-                        "always_on": always_on  # Add the always_on attribute for the thread
-                    }
-
-                # Update runtime dictionary
-                always_on_channels[channel_or_thread.id] = always_on
-                if not always_on:
-                    always_on_channels.pop(channel_or_thread.id, None)
-
-                # Log the state before saving
-                logging.info(f"Setting thread {channel_or_thread.id} always on: {always_on}")
-                
-                # Save changes to JSON
-                save_thread_data(existing_data)
-
-                # Send confirmation message
-                status_message = "now always listening to all messages." if always_on else "now only responding when mentioned."
-                await channel_or_thread.send(f"AI assistant is {status_message}")
-                logging.info(f"Thread {channel_or_thread.id} set to always on: {always_on}. Current always_on_channels: {always_on_channels}")
-            else:
-                logging.error(f"Parent channel {parent_channel_id} not found in thread data.")
-        else:
-            logging.error(f"Channel/Thread {channel_or_thread.id} not found in thread data.")
+    if isinstance(channel_or_thread, discord.Thread):
+        await asyncio.to_thread(
+            ensure_channel_for_category,
+            channel_or_thread.parent.category.id,
+            channel_or_thread.parent.id,
+            channel_or_thread.parent.name,
+            False,
+            False,
+        )
+        await asyncio.to_thread(
+            ensure_thread_for_channel,
+            channel_or_thread.parent.id,
+            channel_or_thread.id,
+            channel_or_thread.name,
+            always_on,
+        )
+        await asyncio.to_thread(set_thread_always_on, channel_or_thread.id, always_on)
     else:
-        logging.error(f"Category {category_id} not found in thread data.")
+        await asyncio.to_thread(
+            ensure_channel_for_category,
+            channel_or_thread.category.id,
+            channel_or_thread.id,
+            channel_or_thread.name,
+            always_on,
+            False,
+        )
+        await asyncio.to_thread(set_channel_always_on, channel_or_thread.id, always_on)
 
-# Function to check if a channel or thread has always_on set to true
+    always_on_channels[channel_or_thread.id] = always_on
+    if not always_on:
+        always_on_channels.pop(channel_or_thread.id, None)
+
+    status_message = "now always listening to all messages." if always_on else "now only responding when mentioned."
+    await channel_or_thread.send(f"AI assistant is {status_message}")
+    logging.info("%s %s always_on=%s", type(channel_or_thread).__name__, channel_or_thread.id, always_on)
+
+
 async def check_always_on(channel_id, category_id, thread_id):
-    # Load the data for the category
-    category_threads = load_thread_data()
+    try:
+        return await asyncio.to_thread(is_always_on, channel_id, thread_id)
+    except Exception as exc:
+        logging.error("Failed to check always_on for category %s channel %s thread %s: %s", category_id, channel_id, thread_id, exc)
+        return False
 
-    # Check if the channel exists in the category
-    channel_data = category_threads.get(str(category_id), {}).get('channels', {}).get(str(channel_id))
-    if channel_data and channel_data.get('always_on'):
-        return True  # Always on for the channel
-
-    # Check if the thread exists and has always_on set to true
-    if thread_id:
-        thread_data = channel_data.get('threads', {}).get(str(thread_id))
-        if thread_data and thread_data.get('always_on'):
-            return True  # Always on for the thread
-
-    return False  # Default to False if neither is set to true
 
 async def send_response_in_chunks(channel, response):
     if response is None:
         logging.error("Received None as response.")
-        return  # Early return if response is None
+        return
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
             await channel.send(chunk)
     else:
         await channel.send(response)
 
-# Revised send response function to avoid repeat interactions
+
 async def send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name=None):
     target_channel = None
-    
-    # Attempt to retrieve specific channel or thread, or fall back to backup
+
     if channel_id and thread_id is None:
         target_channel = client.get_channel(channel_id)
     elif thread_id:
@@ -124,10 +103,8 @@ async def send_response(interaction, response, channel_id=None, thread_id=None, 
     await send_response_in_chunks(target_channel, response)
 
     if target_channel != interaction.channel:
-        location_msg = f"Response sent to <#{target_channel.id}>."
-        await interaction.followup.send(location_msg)
+        await interaction.followup.send(f"Response sent to <#{target_channel.id}>.")
     else:
-        # Do nothing if the target channel is the same as the interaction channel
         await interaction.followup.send("See Below.")
 
 
@@ -142,4 +119,3 @@ async def apply_always_on(target_channel, target_thread, always_on_value: str):
             await set_always_on(target_thread, False)
         elif target_channel:
             await set_always_on(target_channel, False)
-
