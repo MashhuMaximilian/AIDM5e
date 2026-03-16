@@ -7,6 +7,10 @@ from config import AUDIO_CHUNK_SECONDS, AUDIO_FILES_PATH, AUDIO_PROMPT, TRANSCRI
 from assistant_interactions import get_assistant_response
 from memory_management import get_assigned_memory
 from pathlib import Path
+from prompts.transcription_prompts import (
+    build_final_session_summary_prompt,
+    build_transcript_chunk_prompt,
+)
 from shared_functions import send_response_in_chunks
 from gemini_client import gemini_client
 
@@ -238,32 +242,12 @@ class VoiceRecorder:
         for i, chunk in enumerate(chunks):
             chapter_num = i + 1
 
-            if i == 0:
-                prompt = (
-                    f"Great! We'll start a fresh session story retelling. The transcript you see is from another D&D session. "
-                    f"Disregard any output you produced earlier for chapter numbering. Base your response solely on the transcript chunk and the following instructions. "
-                    f"This is the first prompt only—do not include any session recap. And do not think of previous sessions. "
-                    f"Do not consider any earlier retellings or chapter numbers—treat this chunk as a fresh continuation. "
-                    f"Retell this D&D session’s start in a vivid third-person story, like telling a friend, staying 100% true to the transcript. "
-                    f"Use in-game names and classes only, marking unclear names as [unknown, possibly character name]. "
-                    f"Weave dialogue into the narration naturally (do not include direct quotes). "
-                    f"Begin your response with 'Chapter 1: [Title from the Action]' and retell the following chunk:\n\n{f'''{chunk}'''}"
-                )
-            elif i < len(chunks) - 1:
-                prompt = (
-                    f"Continue the story from where you left off in Chapter {chapter_num - 1}. "
-                    f"Do not consider any earlier retellings or chapter numbers—treat this chunk as a fresh continuation. (Only remember chapter number) "
-                    f"Retell this next chunk of the D&D session in a vivid third-person narrative, sticking solely to the transcript events. "
-                    f"Do not include a session recap yet. Use in-game names and mark unclear names as [unknown, possibly character name]. "
-                    f"Begin your response with 'Chapter {chapter_num}: [Title from the Action]' and retell the following chunk:\n\n{f'''{chunk}'''}"
-                )
-            else:
-                prompt = (
-                    f"This is the final chunk of the transcript. Continue the story from where you left off in Chapter {chapter_num - 1}. "
-                    f"Retell the concluding part of the D&D session in a vivid third-person story, accurately and exactly following the transcript. "
-                    f"Do not provide a session recap in this response. Use in-game names and mark unclear names as [unknown, possibly character name]. "
-                    f"Begin your response with 'Chapter {chapter_num}: [Ending Title]' and retell the following chunk:\n\n{f'''{chunk}'''}"
-                )
+            prompt = build_transcript_chunk_prompt(
+                chunk,
+                chapter_num,
+                is_first=i == 0,
+                is_last=i == len(chunks) - 1,
+            )
             
             logging.debug(f"Generated prompt for chunk {chapter_num} (first 300 chars):\n{prompt[:300]}")
 
@@ -286,15 +270,7 @@ class VoiceRecorder:
             await asyncio.sleep(1)
 
         # Now, send the final summary prompt once all chunks have been processed.
-        final_summary_prompt = (
-            "Now that all parts of the session have been retold as a continuous story, please provide a full session recap. "
-            "This recap should cover the entire session, including:\n"
-            "- Key NPCs Met: [list names and brief descriptions]\n"
-            "- Major Events: [bullet points of key plot developments]\n"
-            "- Important Items: [notable loot/artifacts]\n"
-            "- Unresolved Threads: [outstanding questions/mysteries]\n\n"
-            "Please provide a final summary of the entire D&D session."
-        )
+        final_summary_prompt = build_final_session_summary_prompt()
 
         try:
             final_summary = await get_assistant_response(final_summary_prompt, summary_channel.id, assigned_memory=assigned_memory)

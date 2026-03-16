@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 import discord
 
@@ -15,6 +16,16 @@ from db_repository import (
 
 
 always_on_channels = {}
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+
+def format_for_discord(response: str) -> str:
+    """Normalize model output to Discord-friendly formatting."""
+    if not response:
+        return response
+
+    # Discord does not reliably render masked markdown links in bot content.
+    return MARKDOWN_LINK_RE.sub(lambda match: match.group(2), response)
 
 
 async def set_always_on(channel_or_thread, always_on_value):
@@ -77,6 +88,7 @@ async def send_response_in_chunks(channel, response):
     if response is None:
         logging.error("Received None as response.")
         return
+    response = format_for_discord(response)
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
             await channel.send(chunk)

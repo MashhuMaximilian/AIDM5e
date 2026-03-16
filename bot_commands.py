@@ -7,6 +7,7 @@ from helper_functions import *
 import logging
 import asyncio
 from memory_management import *
+from prompts.summary_prompts import build_feedback_prompt
 from shared_functions import apply_always_on, send_response_in_chunks
 
     # Set up logging (you can configure this as needed)
@@ -157,11 +158,7 @@ def setup_commands(tree, get_assistant_response):
         assigned_memory = await get_assigned_memory(interaction.channel.id, category_id, thread_id=None)
 
         # Step 6: Send the conversation to the assistant for summarization, focusing on the last message
-        prompt = (f"Make a recap of the following feedback messages regarding the AIDM’s performance. "
-                f"Here is the entire message history from the #feedback channel:\n\n{conversation_history}"
-                f"Pay special attention to the **last feedback message**, which is:\n\n{last_message}\n\n"
-                f"1)Summarize this last message briefly and confirm you understood the feedback. "
-                f"2)Also mention that you have reviewed all feedback messages for better implementation. ")
+        prompt = build_feedback_prompt(conversation_history, last_message)
 
         # Update the assistant response call with the correct memory
         response = await get_assistant_response(prompt, interaction.channel.id, thread_id=None, assigned_memory=assigned_memory)

@@ -12,8 +12,11 @@ env_path = Path(".") / ".env"
 load_dotenv(dotenv_path=env_path)
 
 
+from prompts.transcription_prompts import DEFAULT_AUDIO_PROMPT
+
+
 BASE_DIR = Path(__file__).parent.resolve()
-AIDM_PROMPT_PATH = BASE_DIR / "aidm_prompt.txt"
+AIDM_PROMPT_PATH = BASE_DIR / "prompts" / "system" / "aidm_prompt.txt"
 TRANSCRIPT_PATH = BASE_DIR / "transcript.txt"
 AUDIO_FILES_PATH = BASE_DIR / "audio_files"
 
@@ -44,7 +47,7 @@ SUPABASE_DB_SSLMODE = os.getenv("SUPABASE_DB_SSLMODE", "require")
 AUDIO_CHUNK_SECONDS = int(os.getenv("AUDIO_CHUNK_SECONDS", "180"))
 AUDIO_PROMPT = os.getenv(
     "AUDIO_PROMPT",
-    "Transcribe this D&D session audio. Identify speakers if possible. Mix of Romanian and English.",
+    DEFAULT_AUDIO_PROMPT,
 )
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
