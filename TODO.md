@@ -1,35 +1,75 @@
 # AIDM TODO
 
-## Now
+## Immediate
 
-- [ ] Live-test the recently updated command UX:
-  - [ ] `/tellme`
-  - [ ] `/askdm`
-  - [ ] `/reference`
-  - [ ] `/listmemory`
-  - [ ] `/feedback`
-- [ ] Live-test the remaining utility commands end-to-end:
-  - [ ] `/delete_memory`
-  - [ ] `/reset_memory`
-  - [ ] `/send`
-  - [ ] `/startnew`
-  - [ ] `/assign_memory`
-  - [ ] `/set_always_on`
-- [ ] Decide whether `/tellme` and `/askdm` should keep defaulting to `#telldm` or default to the invoking channel.
-- [ ] Keep tuning formatting and prompt behavior from real Discord outputs.
+- [ ] Run the offline audio test against real session recordings and review:
+  - [ ] transcript quality
+  - [ ] speaker labeling quality
+  - [ ] `IC` / `OOC` / `META` / `UNCLEAR` tagging quality
+  - [ ] `RO` / `EN` / `RO+EN` tagging quality
+  - [ ] objective summary quality
+  - [ ] narrative summary quality
+- [ ] Live-test the rebuilt voice pipeline in Discord voice:
+  - [ ] recording lifecycle
+  - [ ] bot auto-leave when nobody is left
+  - [ ] transcript posting to `#session-summary`
+  - [ ] objective summary posting
+  - [ ] narrative summary posting
+  - [ ] retention flag behavior with `KEEP_AUDIO_FILES` / `KEEP_TRANSCRIPT_FILES`
+- [ ] Tune `AUDIO_SUMMARY_WINDOW_CHUNKS` after first real test:
+  - [ ] compare `1` chunk windows vs `2` chunk windows
+  - [ ] decide whether 20-minute or 40-minute summary windows are better
+- [ ] Decide whether final audio-summary reduction should later receive merged transcript as secondary context.
+- [ ] Review the new offline chunk-splitting behavior on long source recordings and confirm the transcript improves over the single-file test.
 
 ## Next
 
-- [ ] Split transcript/session-summary runtime into:
-  - [ ] objective/literal session record
-  - [ ] narrative story recap
-  - [ ] raw transcript output
-- [ ] Improve `/summarize` attachment handling further where needed.
+- [ ] Add `.srt` generation from the structured transcript data.
+- [ ] Harden transcript JSON parsing and malformed-model-output recovery.
+- [ ] Improve error handling and user-facing failure messages across utility commands.
+- [ ] Add offline testing support for additional audio inputs:
+  - [ ] `.m4a`
+  - [ ] optional conversion helpers
+- [ ] Make `/invite` also create a default session voice channel and wire AIDM auto-join behavior for that session flow.
+- [ ] Revisit whether `/reference` should support more attachment/document types beyond the current set.
+- [ ] Decide whether transcript should also be used as final-summary grounding context after audio-summary quality is evaluated.
+- [ ] Design a dedicated context-injection flow for summaries and future media generation:
+  - [ ] public evergreen context such as party composition and stable character facts
+  - [ ] session-only context for the next/current summary run
+  - [ ] private DM-only context kept separate from public player-facing summary context
+  - [ ] likely command shape such as `/context summary`
+  - [ ] selectors similar to summarize/reference (`message_ids`, `last_n`, etc.)
+
+## Voice / Transcript
+
+- [ ] Improve speaker labeling for in-person single-device recordings.
+- [ ] Use session-start roster introduction more explicitly in transcript prompts.
+- [ ] Decide whether to add extra transcript modes such as `RULES` or `COMBAT`.
+- [ ] Add optional SRT export alongside transcript posting.
+- [ ] Revisit summary prompt instructions for tone, uncertainty, and delivery cues.
+- [ ] Improve portability of live voice capture:
+  - [ ] Linux capture path
+  - [ ] Windows capture path
+  - [ ] Docker/device strategy
+  - [ ] VPS/server deployment expectations
+
+## Context and Content
+
+- [ ] Add per-campaign context for stable reference details such as:
+  - [ ] character appearance
+  - [ ] character sheets
+  - [ ] reusable campaign facts
+- [ ] Add a public party-composition / campaign-reference workflow so summaries can consistently know:
+  - [ ] party roster
+  - [ ] character names
+  - [ ] class/race/background shorthand
+  - [ ] recurring terms and spelling
 - [ ] Decide whether and when to add `/context_link`.
-- [ ] Re-test the full transcript/session-summary path after the next implementation pass.
-
-## Later
-
+- [ ] Design context scopes:
+  - [ ] evergreen campaign context
+  - [ ] session-only temporary context
+  - [ ] DM-private context
+- [ ] Plan optional local ignored docs/reference ingestion for user-supplied rulebooks and campaign docs.
 - [ ] Build a dedicated gameplay/DM prompt separate from the shared system prompt.
 - [ ] Add a balancing layer for gameplay:
   - [ ] party level
@@ -38,25 +78,9 @@
   - [ ] magic items
   - [ ] encounter intent
   - [ ] rest cadence
-- [ ] Plan optional local ignored docs/reference ingestion for user-supplied rulebooks and campaign docs.
-- [ ] Evaluate whether different models/providers should be used later for some tasks:
-  - [ ] Minimax
-  - [ ] Kimi
-  - [ ] Qwen3
-  - [ ] Gemini
-- [ ] Rework voice capture/runtime for VPS use.
-- [ ] If possible, send raw audio to an AI model that can translate and transcribe directly for bilingual sessions.
-- [ ] Revisit the current 180-second chunking flow and decide whether transcript should stay the main intermediate artifact or only a failsafe.
-- [ ] Extend transcript output so it can also be exported or represented as SRT.
-- [ ] Add transcript + translation + narrative flow that can produce:
-  - [ ] transcript
-  - [ ] literal summary
-  - [ ] story summary
-  - [ ] optional TTS output later
-- [ ] Add per-campaign context for stable reference details such as:
-  - [ ] character appearance
-  - [ ] character sheets
-  - [ ] reusable campaign facts
+
+## Media Generation
+
 - [ ] Add image generation from summaries:
   - [ ] derive 5-20 visual scene prompts
   - [ ] generate images for those scenes
@@ -67,9 +91,19 @@
   - [ ] character impersonation/persona agent
   - [ ] feed character sheet, backstory, ideals, flaws, etc.
 - [ ] Consider TTS story output later, with cost/server impact review.
-- [ ] Fix platform portability in the voice pipeline:
-  - [ ] remove Mac-specific assumptions
-  - [ ] make mp3-based handling portable
+
+## Model / Provider Strategy
+
+- [ ] Compare `gemini-3-flash-preview` vs `gemini-3.1-flash-lite-preview` on real D&D audio.
+- [ ] Decide whether chat should remain on `gemini-3-flash-preview`.
+- [ ] Evaluate whether different models/providers should be used later for some tasks:
+  - [ ] Minimax
+  - [ ] Kimi
+  - [ ] Qwen3
+  - [ ] Gemini
+
+## Project Hygiene
+
 - [ ] Add Docker and deployment cleanup.
 - [ ] Make a feature map document such as `map.md` and decide whether to track it.
-- [ ] Make a patch-notes workflow/folder and decide whether it should be tracked.
+- [ ] Decide whether `PATCH_NOTES.md`, `TODO.md`, and the Codex handoff file should remain the standard project-tracking docs.
