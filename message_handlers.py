@@ -1,4 +1,5 @@
 import aiohttp
+import discord
 import logging
 from config import client
 from assistant_interactions import get_assistant_response

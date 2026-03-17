@@ -1,0 +1,21 @@
+def build_reference_prompt(reference_material: str, query: str, url: str | None = None) -> str:
+    url_line = f"Public URL provided: {url}\n\n" if url else ""
+    return (
+        "You are in reference-reading mode.\n\n"
+        "The user wants you to read provided Discord messages, attachments, and/or a public URL "
+        "and then answer a question or extract useful information from that material.\n\n"
+        "Your job:\n"
+        "- Use the provided material as the primary source.\n"
+        "- Answer the user's question directly.\n"
+        "- If some relevant attachment or source was unreadable or unavailable, say that clearly.\n"
+        "- Do not invent missing content.\n"
+        "- If the material is incomplete, say what is known and what is unclear.\n"
+        "- Use plain URLs only.\n\n"
+        "Preferred output shape:\n"
+        "1. **Answer**\n"
+        "2. **Key details from the provided material**\n"
+        "3. **Gaps or uncertainties**, if any\n\n"
+        f"{url_line}"
+        f"Provided material:\n{reference_material}\n\n"
+        f"User request:\n{query}"
+    )

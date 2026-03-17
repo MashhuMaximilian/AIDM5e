@@ -92,8 +92,8 @@ def setup_commands(tree, get_assistant_response):
         # Fetch the assigned memory for the provided channel and thread
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
 
-        # Fetch conversation history based on provided parameters
-        conversation_history, options_or_error = await fetch_conversation_history(interaction.channel, start, end, message_ids, last_n)
+        # Fetch conversation history based on provided parameters, including readable attachment content
+        conversation_history, options_or_error = await fetch_reference_material(interaction.channel, start, end, message_ids, last_n)
 
         # Check if the response is an error message
         if isinstance(options_or_error, str):
@@ -119,6 +119,102 @@ def setup_commands(tree, get_assistant_response):
     @summarize.autocomplete('thread')  # Note that the parameter name is 'thread', not 'thread_id'
     async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
                 return await thread_autocomplete(interaction, current)
+
+    @tree.command(name="reference", description="Read selected messages, attachments, or a public URL and answer a question.")
+    @app_commands.describe(
+        query="What you want AIDM to extract, explain, or answer from the references.",
+        start="Message ID to start from (if applicable).",
+        end="Message ID to end at (if applicable).",
+        message_ids="Individual message IDs to read.",
+        last_n="Read the last 'n' messages (optional).",
+        url="Optional public URL to read as additional context."
+    )
+    async def reference(
+        interaction: discord.Interaction,
+        query: str,
+        start: str = None,
+        end: str = None,
+        message_ids: str = None,
+        last_n: int = None,
+        url: str = None,
+        channel: str = None,
+        thread: str = None,
+    ):
+        await interaction.response.defer()
+
+        channel_id = int(channel) if channel else interaction.channel.id
+        thread_id = int(thread) if thread else None
+        category_id = get_category_id(interaction)
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
+        if not assigned_memory:
+            await interaction.followup.send("No memory found for the specified parameters.")
+            return
+
+        reference_chunks: list[str] = []
+        if any(value is not None for value in (start, end, message_ids, last_n)):
+            reference_material, options_or_error = await fetch_reference_material(
+                interaction.channel,
+                start,
+                end,
+                message_ids,
+                last_n,
+            )
+            if isinstance(options_or_error, str):
+                await interaction.followup.send(options_or_error)
+                return
+            reference_chunks.extend(reference_material)
+
+        has_message_refs = any(value is not None for value in (start, end, message_ids, last_n))
+
+        if not reference_chunks and not url:
+            await interaction.followup.send("You must provide message selectors and/or a public URL.")
+            return
+
+        if url and not has_message_refs:
+            try:
+                response = await answer_from_public_url(
+                    query=query,
+                    url=url,
+                    channel_id=channel_id,
+                    assigned_memory=assigned_memory,
+                    thread_id=thread_id,
+                )
+            except Exception as exc:
+                await interaction.followup.send(f"Could not read the URL: {exc}")
+                return
+        else:
+            if url:
+                try:
+                    reference_chunks.append(f"[Public URL: {url}]\n{await extract_public_url_text(url)}")
+                except Exception as exc:
+                    reference_chunks.append(
+                        f"[Public URL could not be fetched directly: {url}. Reason: {exc}. "
+                        "Use the other provided material and note that the URL may require a different retrieval path.]"
+                    )
+
+            response = await answer_from_references(
+                query=query,
+                reference_material=reference_chunks,
+                channel_id=channel_id,
+                assigned_memory=assigned_memory,
+                thread_id=thread_id,
+                url=url,
+            )
+        await send_response(
+            interaction,
+            response,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            backup_channel_name="telldm",
+        )
+
+    @reference.autocomplete('channel')
+    async def reference_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @reference.autocomplete('thread')
+    async def reference_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
 
 
     @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")

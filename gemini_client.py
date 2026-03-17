@@ -29,6 +29,24 @@ class GeminiClient:
     def generate_text(self, prompt: str, system_instruction: str | None = None) -> str:
         return self._generate_text_with_model(GEMINI_MODEL, prompt, system_instruction)
 
+    def generate_text_with_url_context(
+        self,
+        prompt: str,
+        urls: list[str],
+        system_instruction: str | None = None,
+    ) -> str:
+        joined_urls = "\n".join(f"- {url}" for url in urls)
+        contextual_prompt = f"{prompt}\n\nRelevant public URLs:\n{joined_urls}"
+        config = types.GenerateContentConfig(
+            temperature=GEMINI_TEMPERATURE,
+            top_p=GEMINI_TOP_P,
+            top_k=GEMINI_TOP_K,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            system_instruction=system_instruction,
+            tools=[types.Tool(url_context=types.UrlContext())],
+        )
+        return self._generate_with_config(GEMINI_MODEL, contextual_prompt, config)
+
     def _generate_text_with_model(self, model_name: str, prompt: str, system_instruction: str | None = None) -> str:
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
@@ -37,6 +55,9 @@ class GeminiClient:
             max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
             system_instruction=system_instruction,
         )
+        return self._generate_with_config(model_name, prompt, config)
+
+    def _generate_with_config(self, model_name: str, prompt: str, config: types.GenerateContentConfig) -> str:
         try:
             response = self.client.models.generate_content(
                 model=model_name,

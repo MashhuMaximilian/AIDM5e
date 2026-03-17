@@ -7,8 +7,16 @@ import discord
 from discord import app_commands
 
 from assistant_interactions import get_assistant_response
+from content_retrieval import (
+    extract_public_url_text,
+    format_message_text,
+    format_message_with_attachments,
+    select_messages,
+)
 from db_repository import ensure_thread_for_channel, list_memory_names
+from gemini_client import gemini_client
 from memory_management import get_assigned_memory, assign_memory
+from prompts.reference_prompts import build_reference_prompt
 from prompts.query_prompts import construct_query_prompt
 from prompts.summary_prompts import build_summary_prompt
 from shared_functions import send_response
@@ -29,6 +37,14 @@ async def fetch_discord_threads(channel):
         logging.info(f"Threads for category {category_id}: {category_threads[category_id]}")
     
     return discord_threads
+
+
+async def build_history_from_messages(messages: list[discord.Message], include_attachments: bool = False) -> list[str]:
+    formatter = format_message_with_attachments if include_attachments else format_message_text
+    history = []
+    for message in messages:
+        history.append(await formatter(message) if include_attachments else formatter(message))
+    return history
 
 async def summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory):
     if options['type'] == 'messages':
@@ -54,82 +70,60 @@ async def summarize_conversation(interaction, conversation_history, options, que
     return response
 
 async def fetch_conversation_history(channel, start=None, end=None, message_ids=None, last_n=None):
-    # Initialize an empty list to store the conversation history
-    conversation_history = []
-
-    if message_ids is not None:
-        message_ids_list = message_ids.split(',')
-        for message_id in message_ids_list:
-            try:
-                message = await channel.fetch_message(int(message_id.strip()))
-                conversation_history.append(f"{message.author.name}: {message.content}")
-            except (ValueError, discord.errors.NotFound):
-                return None, f"Message ID {message_id.strip()} not found."
-        return conversation_history, {'type': 'messages'}
-
-    # Handle 'from' option
-    if start is not None and end is not None:
-        try:
-            start_id = int(start)
-            end_id = int(end)
-            start_message = await channel.fetch_message(start_id)
-            end_message = await channel.fetch_message(end_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid message ID format or message not found."
-
-        # Fetch messages including the start and end messages
-        async for message in channel.history(after=start_message.created_at, before=end_message.created_at):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        # Add start message explicitly
-        conversation_history.insert(0, f"{start_message.author.name}: {start_message.content}")
-        
-        # Add end message explicitly if it's different from start
-        if start_id != end_id:
-            conversation_history.append(f"{end_message.author.name}: {end_message.content}")
-
-        if not conversation_history:
-            return None, "No messages found between the specified messages."
-
-        return conversation_history, {'type': 'between', 'start_index': 0, 'end_index': len(conversation_history)}
-
-    # Handle 'from' option only
-    if start is not None:
-        try:
-            start_id = int(start)
-            start_message = await channel.fetch_message(start_id)
-        except (ValueError, discord.errors.NotFound):
-            return None, "Invalid start message ID format or message not found."
-
-        async for message in channel.history(after=start_message.created_at, limit=100):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        # Add the start message explicitly
-        conversation_history.insert(0, f"{start_message.author.name}: {start_message.content}")
-
-        if not conversation_history:
-            return None, "No messages found after the specified message."
-
-        return conversation_history, {'type': 'from', 'start_index': 0}
-
-    # Handle 'last_n' option
-    if last_n is not None:
-        try:
-            last_n = int(last_n)
-        except ValueError:
-            return None, "Invalid value for 'last_n'. It must be an integer."
-
-        async for message in channel.history(limit=last_n):
-            conversation_history.append(f"{message.author.name}: {message.content}")
-
-        if not conversation_history:
-            return None, "No messages found for the last 'n' messages."
-
-        return conversation_history, {'type': 'last_n', 'last_n': last_n}
+    messages, options_or_error = await select_messages(channel, start, end, message_ids, last_n)
+    if isinstance(options_or_error, str):
+        return None, options_or_error
+    conversation_history = await build_history_from_messages(messages, include_attachments=False)
+    return conversation_history, options_or_error
 
 
-    # Error if no valid options provided
-    return None, "You must provide at least one of the options."
+async def fetch_reference_material(channel, start=None, end=None, message_ids=None, last_n=None):
+    messages, options_or_error = await select_messages(channel, start, end, message_ids, last_n)
+    if isinstance(options_or_error, str):
+        return None, options_or_error
+    material = await build_history_from_messages(messages, include_attachments=True)
+    return material, options_or_error
+
+
+async def answer_from_references(
+    query: str,
+    reference_material: list[str],
+    channel_id: int,
+    assigned_memory: str,
+    thread_id: int | None = None,
+    url: str | None = None,
+):
+    prompt = build_reference_prompt("\n\n".join(reference_material), query, url)
+    return await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+
+
+async def answer_from_public_url(
+    query: str,
+    url: str,
+    channel_id: int,
+    assigned_memory: str,
+    thread_id: int | None = None,
+):
+    try:
+        extracted_text = await extract_public_url_text(url)
+        prompt = build_reference_prompt(extracted_text, query, url)
+        return await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+    except Exception as exc:
+        logging.warning("Direct URL fetch failed for %s, falling back to Gemini URL Context: %s", url, exc)
+        prompt = build_reference_prompt(
+            "Direct fetch was unavailable. Use the provided public URL as the primary source.",
+            query,
+            url,
+        )
+        response = await asyncio.to_thread(
+            gemini_client.generate_text_with_url_context,
+            prompt,
+            [url],
+            None,
+        )
+        if not response:
+            raise
+        return response
 
 async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
