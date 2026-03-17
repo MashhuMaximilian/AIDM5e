@@ -198,6 +198,12 @@ class VoiceRecorder:
 
     async def summarize_transcript(self, category_id):
         logging.info("Starting transcript summarization...")
+        # [TODO] Split transcript processing into two explicit outputs:
+        # 1) an objective factual session record
+        # 2) a narrative story recap
+        # while still attaching or preserving the raw transcript in session-summary.
+        # [TODO] Support a future direct-audio summarization path once the voice pipeline
+        # and upload/runtime constraints are reworked for VPS-friendly execution.
 
         if not self.voice_client:
             logging.error("Voice client is not connected. Cannot summarize transcript.")

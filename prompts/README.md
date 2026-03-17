@@ -45,3 +45,10 @@ We therefore enforce this in two layers:
 
 1. Prompt guidance tells the model to use plain URLs.
 2. Send-time formatting strips masked links into plain URLs before sending.
+
+## Planned Prompt Work
+
+- [TODO] Make the shared system prompt more neutral and more explicit about memory discipline.
+- [TODO] Add a dedicated gameplay/DM prompt layer separate from the shared system prompt.
+- [TODO] Add a future balancing layer for gameplay rather than forcing balancing into one giant prompt.
+- [TODO] Split transcript objective summary prompts from transcript narrative recap prompts.
