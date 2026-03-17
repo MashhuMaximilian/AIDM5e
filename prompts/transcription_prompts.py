@@ -6,6 +6,135 @@ DEFAULT_AUDIO_PROMPT = (
 )
 
 
+def build_transcript_capture_prompt(
+    chunk_index: int,
+    start_offset_seconds: int,
+    duration_seconds: int,
+    extra_instructions: str | None = None,
+) -> str:
+    prompt = (
+        "You are transcribing a D&D session audio chunk.\n\n"
+        "Return only valid JSON. Do not wrap it in code fences. Do not add commentary.\n\n"
+        "The speakers may switch between Romanian and English, sometimes in the same sentence. "
+        "Preserve the original spoken language exactly as spoken.\n\n"
+        "Goal:\n"
+        "- produce a best-effort structured transcript for this chunk\n"
+        "- identify speakers when possible\n"
+        "- identify character names when reasonably clear\n"
+        "- tag each segment as one of: IC, OOC, META, UNCLEAR\n"
+        "- tag each segment language as one of: RO, EN, RO+EN\n"
+        "- provide best-effort timestamps relative to the start of this audio chunk\n"
+        "- if speaker identity is uncertain, use Unknown\n"
+        "- if character identity is uncertain, use null\n"
+        "- if a timestamp is uncertain, still estimate it as best you can\n"
+        "- ignore obvious dead air, page flips, and filler unless they matter to understanding the moment\n\n"
+        "Chunk metadata:\n"
+        f"- chunk_index: {chunk_index}\n"
+        f"- session_start_offset_seconds: {start_offset_seconds}\n"
+        f"- expected_duration_seconds: {duration_seconds}\n\n"
+        "Return JSON with exactly this top-level shape:\n"
+        "{\n"
+        '  "chunk_index": number,\n'
+        '  "start_offset_seconds": number,\n'
+        '  "duration_seconds": number,\n'
+        '  "notes": [string],\n'
+        '  "segments": [\n'
+        "    {\n"
+        '      "offset_seconds": number,\n'
+        '      "speaker": string,\n'
+        '      "character": string or null,\n'
+        '      "lang": "RO" | "EN" | "RO+EN",\n'
+        '      "mode": "IC" | "OOC" | "META" | "UNCLEAR",\n'
+        '      "text": string\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        "Rules:\n"
+        "- segments must be in chronological order\n"
+        "- merge adjacent lines from the same speaker only when they are clearly part of the same utterance\n"
+        "- keep text readable and lightly cleaned, but do not rewrite meaning\n"
+        "- do not translate\n"
+        "- do not invent dialogue\n"
+        "- do not hallucinate speaker names\n"
+    )
+    if extra_instructions:
+        prompt += f"\nAdditional instructions:\n{extra_instructions}\n"
+    return prompt
+
+
+def build_audio_summary_chunk_prompt(
+    window_index: int,
+    start_offset_seconds: int,
+    end_offset_seconds: int,
+) -> str:
+    return (
+        "You are analyzing D&D session audio directly.\n\n"
+        "Return only valid JSON. Do not wrap it in code fences. Do not add commentary.\n\n"
+        "You are given one or more contiguous audio chunk files from the same D&D session window. "
+        "Use the audio itself as the primary source. Pay attention not only to literal words, but also "
+        "to tone, urgency, hesitation, emotional shifts, and how things are said when that affects interpretation.\n\n"
+        "Window metadata:\n"
+        f"- window_index: {window_index}\n"
+        f"- session_start_offset_seconds: {start_offset_seconds}\n"
+        f"- session_end_offset_seconds: {end_offset_seconds}\n\n"
+        "Return JSON with exactly this shape:\n"
+        "{\n"
+        '  "window_index": number,\n'
+        '  "start_offset_seconds": number,\n'
+        '  "end_offset_seconds": number,\n'
+        '  "objective_notes": [string],\n'
+        '  "narrative_notes": [string],\n'
+        '  "notable_cues": [string],\n'
+        '  "uncertainties": [string]\n'
+        "}\n\n"
+        "Rules:\n"
+        "- objective_notes should capture concrete events, decisions, reveals, combats, and important meta decisions\n"
+        "- narrative_notes should capture scene flow, mood, tension, and memorable beats without inventing facts\n"
+        "- notable_cues should capture meaningful tone or delivery clues only when they matter\n"
+        "- uncertainties should list unclear speakers, unclear wording, or unclear interpretation\n"
+        "- preserve Romanian and English meaning correctly\n"
+        "- do not invent scenes or facts that are not supported by the audio\n"
+    )
+
+
+def build_audio_objective_summary_prompt(window_notes: str) -> str:
+    return (
+        "You are in transcript archivist mode.\n\n"
+        "Using the audio-derived session notes below, write a factual, objective session record.\n\n"
+        "Requirements:\n"
+        "- prioritize concrete events in order\n"
+        "- focus mostly on gameplay, but include important meta decisions when they affected the session\n"
+        "- preserve uncertainty explicitly instead of guessing\n"
+        "- be useful for continuity later\n"
+        "- do not turn this into a story\n\n"
+        "Then, after the objective record, add a compact continuity block in exactly this format:\n\n"
+        "==========START SESSION==========\n"
+        "Title:\n"
+        "Key Events:\n"
+        "NPCs:\n"
+        "Items:\n"
+        "Unresolved Threads:\n"
+        "Player Plans / Next Steps:\n"
+        "==========END SESSION============\n\n"
+        f"Audio-derived notes:\n{window_notes}"
+    )
+
+
+def build_audio_narrative_summary_prompt(window_notes: str) -> str:
+    return (
+        "You are in narrative recap mode.\n\n"
+        "Using the audio-derived session notes below, write a story-like session recap that remains faithful to what happened.\n\n"
+        "Requirements:\n"
+        "- stay true to events, decisions, and outcomes\n"
+        "- you may use literary flow, pacing, and atmosphere\n"
+        "- do not invent facts or scenes\n"
+        "- preserve meaningful tension, tone, and dramatic beats captured from the audio notes\n"
+        "- use chaptered scenes only when the session length justifies it; otherwise keep it as a cohesive recap\n"
+        "- preserve uncertainty cautiously if the notes mark something unclear\n\n"
+        f"Audio-derived notes:\n{window_notes}"
+    )
+
+
 def build_transcript_objective_prompt(transcript: str) -> str:
     return (
         "You are in transcript archivist mode.\n\n"

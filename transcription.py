@@ -1,15 +1,31 @@
 import discord
-import subprocess
 import os
 import asyncio
 import logging
-from config import AUDIO_CHUNK_SECONDS, AUDIO_FILES_PATH, AUDIO_PROMPT, TRANSCRIPT_PATH
+import json
+from datetime import datetime
+from config import (
+    AUDIO_BITRATE,
+    AUDIO_CHANNELS,
+    AUDIO_CHUNK_SECONDS,
+    AUDIO_FILES_PATH,
+    AUDIO_PROMPT,
+    AUDIO_SAMPLE_RATE,
+    AUDIO_SUMMARY_WINDOW_CHUNKS,
+    FFMPEG_INPUT_DEVICE,
+    FFMPEG_INPUT_FORMAT,
+    TRANSCRIPT_MANIFEST_PATH,
+    TRANSCRIPT_PATH,
+)
 from assistant_interactions import get_assistant_response
+from config import GEMINI_SUMMARY_MODEL
 from memory_management import get_assigned_memory
 from pathlib import Path
 from prompts.transcription_prompts import (
-    build_final_session_summary_prompt,
-    build_transcript_chunk_prompt,
+    build_audio_narrative_summary_prompt,
+    build_audio_objective_summary_prompt,
+    build_audio_summary_chunk_prompt,
+    build_transcript_capture_prompt,
 )
 from shared_functions import send_response_in_chunks
 from gemini_client import gemini_client
@@ -34,9 +50,263 @@ class VoiceRecorder:
         self.voice_client = None
         self.transcription_tasks = []  # Keep track of ongoing transcription tasks
         self.transcript_path = Path(TRANSCRIPT_PATH)
+        self.transcript_manifest_path = Path(TRANSCRIPT_MANIFEST_PATH)
+        self.chunk_manifest = []
+        self.chunk_counter = 0
+        self.session_started_at = None
+        self.session_chunk_seconds = recording_duration
+        self.manifest_lock = asyncio.Lock()
+
+    def _build_ffmpeg_command(self, audio_filename: Path, duration: int) -> list[str]:
+        if not FFMPEG_INPUT_FORMAT or not FFMPEG_INPUT_DEVICE:
+            raise RuntimeError(
+                "FFmpeg input source is not configured for this platform. "
+                "Set FFMPEG_INPUT_FORMAT and FFMPEG_INPUT_DEVICE in .env."
+            )
+        return [
+            'ffmpeg',
+            '-f', FFMPEG_INPUT_FORMAT,
+            '-i', FFMPEG_INPUT_DEVICE,
+            '-t', str(duration),
+            '-acodec', 'libmp3lame',
+            '-ar', str(AUDIO_SAMPLE_RATE),
+            '-ac', str(AUDIO_CHANNELS),
+            '-b:a', AUDIO_BITRATE,
+            str(audio_filename),
+        ]
+
+    async def initialize_session_files(self, duration: int) -> None:
+        self.chunk_manifest = []
+        self.chunk_counter = 0
+        self.session_started_at = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+        self.session_chunk_seconds = duration
+
+        try:
+            self.transcript_path.write_text("", encoding="utf-8")
+            self.transcript_manifest_path.write_text("", encoding="utf-8")
+        except Exception as exc:
+            logging.error("Failed to initialize transcript artifacts: %s", exc)
+
+        await self.persist_manifest()
+
+    async def persist_manifest(self) -> None:
+        manifest = {
+            "session_started_at": self.session_started_at,
+            "recording_chunk_seconds": self.session_chunk_seconds,
+            "chunks": self.chunk_manifest,
+        }
+        await asyncio.to_thread(
+            self.transcript_manifest_path.write_text,
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
+
+    async def register_chunk(self, audio_filename: Path, duration: int) -> dict:
+        async with self.manifest_lock:
+            self.chunk_counter += 1
+            chunk = {
+                "chunk_index": self.chunk_counter,
+                "audio_file": str(audio_filename),
+                "start_offset_seconds": (self.chunk_counter - 1) * duration,
+                "duration_seconds": duration,
+                "status": "recorded",
+                "notes": [],
+                "segments": [],
+            }
+            self.chunk_manifest.append(chunk)
+            await self.persist_manifest()
+            return chunk
+
+    async def update_chunk_result(
+        self,
+        chunk_index: int,
+        *,
+        status: str,
+        notes: list[str] | None = None,
+        segments: list[dict] | None = None,
+        error: str | None = None,
+    ) -> None:
+        async with self.manifest_lock:
+            chunk = next((item for item in self.chunk_manifest if item["chunk_index"] == chunk_index), None)
+            if chunk is None:
+                logging.warning("Chunk %s missing from manifest during update.", chunk_index)
+                return
+            chunk["status"] = status
+            if notes is not None:
+                chunk["notes"] = notes
+            if segments is not None:
+                chunk["segments"] = segments
+            if error:
+                chunk["error"] = error
+            await self.persist_manifest()
+
+    def _format_timestamp(self, total_seconds: int) -> str:
+        hours, remainder = divmod(max(0, int(total_seconds)), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _extract_json_payload(self, response_text: str) -> dict:
+        cleaned = response_text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        if not cleaned.startswith("{"):
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start:end + 1]
+        return json.loads(cleaned)
+
+    async def rebuild_transcript_from_manifest(self) -> str:
+        warnings = []
+        lines = []
+        sorted_chunks = sorted(self.chunk_manifest, key=lambda item: item["chunk_index"])
+
+        for chunk in sorted_chunks:
+            chunk_index = chunk["chunk_index"]
+            if chunk.get("status") != "transcribed":
+                error_message = chunk.get("error") or "Chunk transcription unavailable."
+                warnings.append(f"Chunk {chunk_index}: {error_message}")
+                continue
+
+            for segment in chunk.get("segments", []):
+                absolute_seconds = chunk["start_offset_seconds"] + int(segment.get("offset_seconds", 0))
+                timestamp = self._format_timestamp(absolute_seconds)
+                mode = segment.get("mode", "UNCLEAR")
+                speaker = segment.get("speaker") or "Unknown"
+                character = segment.get("character")
+                lang = segment.get("lang") or "RO+EN"
+                header = f"[{timestamp}][{mode}][Speaker: {speaker}]"
+                if character:
+                    header += f"[Character: {character}]"
+                header += f"[Lang: {lang}]"
+                text = (segment.get("text") or "").strip()
+                if text:
+                    lines.append(f"{header} {text}")
+
+        transcript_parts = []
+        if self.session_started_at:
+            transcript_parts.append(f"Session started: {self.session_started_at}")
+        transcript_parts.append(f"Recording chunk seconds: {self.session_chunk_seconds}")
+
+        manifest_notes = []
+        for chunk in sorted_chunks:
+            for note in chunk.get("notes", []):
+                manifest_notes.append(f"Chunk {chunk['chunk_index']}: {note}")
+
+        all_warnings = warnings + manifest_notes
+        if all_warnings:
+            transcript_parts.append("\n=== TRANSCRIPTION NOTES ===")
+            transcript_parts.extend(f"- {warning}" for warning in all_warnings)
+
+        transcript_parts.append("\n=== SESSION TRANSCRIPT ===")
+        transcript_parts.extend(lines or ["[00:00:00][UNCLEAR][Speaker: Unknown][Lang: RO+EN] No transcript content captured."])
+
+        transcript_content = "\n".join(transcript_parts).strip() + "\n"
+        await asyncio.to_thread(self.transcript_path.write_text, transcript_content, "utf-8")
+        return transcript_content
+
+    async def reset_session_artifacts(self) -> None:
+        try:
+            self.transcript_path.write_text("", encoding="utf-8")
+        except Exception as exc:
+            logging.error("Error clearing transcript file: %s", exc)
+
+        try:
+            self.transcript_manifest_path.write_text("", encoding="utf-8")
+        except Exception as exc:
+            logging.error("Error clearing transcript manifest file: %s", exc)
+
+    async def build_audio_summary_windows(self) -> list[dict]:
+        windows = []
+        transcribed_chunks = [chunk for chunk in sorted(self.chunk_manifest, key=lambda item: item["chunk_index"]) if chunk.get("audio_file")]
+        if not transcribed_chunks:
+            return windows
+
+        step = max(1, AUDIO_SUMMARY_WINDOW_CHUNKS)
+        window_index = 0
+        for i in range(0, len(transcribed_chunks), step):
+            subset = transcribed_chunks[i:i + step]
+            if not subset:
+                continue
+            window_index += 1
+            windows.append(
+                {
+                    "window_index": window_index,
+                    "start_offset_seconds": subset[0]["start_offset_seconds"],
+                    "end_offset_seconds": subset[-1]["start_offset_seconds"] + subset[-1]["duration_seconds"],
+                    "file_paths": [chunk["audio_file"] for chunk in subset if Path(chunk["audio_file"]).exists()],
+                    "chunk_indexes": [chunk["chunk_index"] for chunk in subset],
+                }
+            )
+        return windows
+
+    async def summarize_audio_windows(self) -> list[dict]:
+        window_summaries = []
+        windows = await self.build_audio_summary_windows()
+        for window in windows:
+            if not window["file_paths"]:
+                continue
+            prompt = build_audio_summary_chunk_prompt(
+                window["window_index"],
+                window["start_offset_seconds"],
+                window["end_offset_seconds"],
+            )
+            try:
+                result = await asyncio.to_thread(
+                    gemini_client.generate_text_from_files,
+                    window["file_paths"],
+                    prompt,
+                    GEMINI_SUMMARY_MODEL,
+                )
+                payload = self._extract_json_payload(result)
+                payload.setdefault("window_index", window["window_index"])
+                payload.setdefault("start_offset_seconds", window["start_offset_seconds"])
+                payload.setdefault("end_offset_seconds", window["end_offset_seconds"])
+                window_summaries.append(payload)
+            except Exception as exc:
+                logging.error("Audio summary window %s failed: %s", window["window_index"], exc)
+                window_summaries.append(
+                    {
+                        "window_index": window["window_index"],
+                        "start_offset_seconds": window["start_offset_seconds"],
+                        "end_offset_seconds": window["end_offset_seconds"],
+                        "objective_notes": [],
+                        "narrative_notes": [],
+                        "notable_cues": [],
+                        "uncertainties": [f"Window summary failed: {exc}"],
+                    }
+                )
+        return window_summaries
+
+    def _format_audio_summary_notes(self, window_summaries: list[dict]) -> str:
+        sections = []
+        for window in window_summaries:
+            start_time = self._format_timestamp(window.get("start_offset_seconds", 0))
+            end_time = self._format_timestamp(window.get("end_offset_seconds", 0))
+            sections.append(f"=== AUDIO WINDOW {window.get('window_index', '?')} [{start_time} - {end_time}] ===")
+            objective_notes = window.get("objective_notes", [])
+            narrative_notes = window.get("narrative_notes", [])
+            notable_cues = window.get("notable_cues", [])
+            uncertainties = window.get("uncertainties", [])
+            sections.append("Objective notes:")
+            sections.extend(f"- {note}" for note in objective_notes or ["None"])
+            sections.append("Narrative notes:")
+            sections.extend(f"- {note}" for note in narrative_notes or ["None"])
+            sections.append("Notable cues:")
+            sections.extend(f"- {note}" for note in notable_cues or ["None"])
+            sections.append("Uncertainties:")
+            sections.extend(f"- {note}" for note in uncertainties or ["None"])
+            sections.append("")
+        return "\n".join(sections).strip()
 
     async def capture_audio(self, voice_client, duration=recording_duration): #120 seconds or 5-10 for testing.
         self.voice_client = voice_client
+        await self.initialize_session_files(duration)
         logging.info("Starting continuous audio capture...")
 
         while True:
@@ -53,9 +323,10 @@ class VoiceRecorder:
                         # Wait for all transcription tasks to complete
                         if self.transcription_tasks:
                             await asyncio.gather(*self.transcription_tasks)
-                        
+
                         category_id = get_category_id_voice(self.voice_client.channel)
                         logging.info(f"Retrieved category ID: {category_id}")
+                        await self.rebuild_transcript_from_manifest()
                         # Call the summarize function
                         await self.summarize_transcript(category_id)
 
@@ -67,31 +338,27 @@ class VoiceRecorder:
                         logging.info("Disconnected from voice channel.")
                         break  # Exit the recording loop
 
-                audio_filename = audio_files_path / f'audio_recording_{int(asyncio.get_event_loop().time())}.mp3'
+                chunk_number = self.chunk_counter + 1
+                audio_filename = audio_files_path / f'audio_recording_{chunk_number:03d}.mp3'
                 
                 try:
                     logging.info(f"Recording for {duration} seconds... Saving to {audio_filename}")
-                    proc = subprocess.Popen(
-                        ['ffmpeg', '-f', 'avfoundation', '-i', ':0', '-t', str(duration), '-acodec', 'libmp3lame', '-ar', '44100', '-ac', '2','-b:a', '128k', str(audio_filename)],
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    proc = await asyncio.create_subprocess_exec(
+                        *self._build_ffmpeg_command(audio_filename, duration),
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                     )
-
-                    # Capture stderr (error messages)
-                    stderr = await asyncio.to_thread(proc.stderr.read)
-                    ffmpeg_error = stderr.decode('utf-8')
-                    # logging.error(f"FFmpeg error: {ffmpeg_error}")
-
-                    await asyncio.sleep(duration)
-                    proc.terminate()
+                    _, stderr = await proc.communicate()
+                    ffmpeg_error = stderr.decode('utf-8', errors='ignore').strip()
                     logging.info(f"Audio recording completed and saved as {audio_filename}")
 
                     if audio_filename.exists() and audio_filename.stat().st_size > 0:
+                        chunk_info = await self.register_chunk(audio_filename, duration)
                         # Send the audio file for transcription as a background task
-                        task = asyncio.create_task(self.send_to_openai(audio_filename))
+                        task = asyncio.create_task(self.send_to_openai(audio_filename, chunk_info))
                         self.transcription_tasks.append(task)  # Track the task
                         task.add_done_callback(lambda t: self.transcription_tasks.remove(t))  # Remove task after completion
                     else:
-                        logging.error(f"Audio file {audio_filename} does not exist or is empty after recording.")
+                        logging.error(f"Audio file {audio_filename} does not exist or is empty after recording. %s", ffmpeg_error)
                 except Exception as e:
                     logging.error(f"Failed during audio recording: {e}")
                     break
@@ -102,15 +369,16 @@ class VoiceRecorder:
                 break
 
     async def process_final_transcription(self):
-        logging.info("Processing remaining audio files for transcription...")
+        logging.info("Processing any recorded chunks that are still pending transcription...")
+        pending_chunks = [
+            chunk for chunk in self.chunk_manifest
+            if chunk.get("status") == "recorded" and Path(chunk.get("audio_file", "")).exists()
+        ]
 
-        # Get list of remaining audio files
-        remaining_audio_files = [file for file in self.audio_dir.iterdir() if file.suffix == ".wav"]
-
-        # Process each remaining audio file once
-        for audio_file in remaining_audio_files:
-            logging.info(f"Transcribing file: {audio_file.name}")
-            await self.transcribe_audio_file(audio_file)  # Make sure this function handles transcription
+        for chunk in pending_chunks:
+            audio_file = Path(chunk["audio_file"])
+            logging.info("Transcribing pending file: %s", audio_file.name)
+            await self.send_to_openai(audio_file, chunk)
 
         logging.info("Final transcription processing completed.")
 
@@ -157,14 +425,6 @@ class VoiceRecorder:
 
         await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
 
-        # Clear contents of transcript.txt
-        try:
-            with open(self.transcript_path, 'w', encoding='utf-8') as file:
-                file.truncate(0)
-            logging.info("Transcript file cleared.")
-        except Exception as e:
-            logging.error(f"Error clearing transcript file: {e}")
-
         # Remove all audio files
         for filename in os.listdir(audio_files_path):
             file_path = audio_files_path / filename
@@ -174,7 +434,10 @@ class VoiceRecorder:
             except Exception as e:
                 logging.error(f"Failed to delete audio file {file_path}: {e}")
 
-    async def send_to_openai(self, audio_filename):
+        await self.reset_session_artifacts()
+        logging.info("Transcript artifacts cleared.")
+
+    async def send_to_openai(self, audio_filename, chunk_info):
         """Legacy method name kept for compatibility; uses Gemini for transcription."""
         logging.info("Preparing to send %s to Gemini for transcription...", audio_filename)
         
@@ -183,27 +446,36 @@ class VoiceRecorder:
             return
 
         try:
+            prompt = build_transcript_capture_prompt(
+                chunk_info["chunk_index"],
+                chunk_info["start_offset_seconds"],
+                chunk_info["duration_seconds"],
+                AUDIO_PROMPT,
+            )
             transcript = await asyncio.to_thread(
                 gemini_client.transcribe_audio,
                 str(audio_filename),
-                AUDIO_PROMPT,
+                prompt,
             )
             logging.info("Received transcription: %s", transcript[:100])
-
-            with open(self.transcript_path, 'a', encoding='utf-8') as transcript_file:
-                transcript_file.write(f"{transcript}\n")
+            payload = self._extract_json_payload(transcript)
+            await self.update_chunk_result(
+                chunk_info["chunk_index"],
+                status="transcribed",
+                notes=payload.get("notes", []),
+                segments=payload.get("segments", []),
+            )
         except Exception as e:
             logging.error("Unexpected error during Gemini transcription request: %s", e)
+            await self.update_chunk_result(
+                chunk_info["chunk_index"],
+                status="failed",
+                error=str(e),
+            )
 
 
     async def summarize_transcript(self, category_id):
-        logging.info("Starting transcript summarization...")
-        # [TODO] Split transcript processing into two explicit outputs:
-        # 1) an objective factual session record
-        # 2) a narrative story recap
-        # while still attaching or preserving the raw transcript in session-summary.
-        # [TODO] Support a future direct-audio summarization path once the voice pipeline
-        # and upload/runtime constraints are reworked for VPS-friendly execution.
+        logging.info("Starting audio-native session summarization...")
 
         if not self.voice_client:
             logging.error("Voice client is not connected. Cannot summarize transcript.")
@@ -220,74 +492,39 @@ class VoiceRecorder:
             logging.error("No assigned memory found for this channel.")
             return
 
+        window_summaries = await self.summarize_audio_windows()
+        if not window_summaries:
+            logging.warning("No audio summary windows were produced. No summary generated.")
+            return
+        notes_text = self._format_audio_summary_notes(window_summaries)
+        objective_prompt = build_audio_objective_summary_prompt(notes_text)
+        narrative_prompt = build_audio_narrative_summary_prompt(notes_text)
+
+        await summary_channel.send("Generating session summaries from audio-derived notes...")
         try:
-            with open(self.transcript_path, 'r', encoding='utf-8') as transcript_file:
-                transcript_content = transcript_file.read()
-        except Exception as e:
-            logging.error(f"Error reading transcript file: {e}")
-            return
-
-        logging.info("Transcript content loaded for summarization.")
-        if not transcript_content:
-            logging.warning("Transcript is empty. No summary generated.")
-            return
-
-        # Split transcript into chunks with overlap
-        characters_per_chunk = 14000
-        overlap = 150
-        chunks = []
-        start = 0
-        while start < len(transcript_content):
-            end = min(start + characters_per_chunk, len(transcript_content))
-            chunk = transcript_content[max(0, start - overlap):end] if start > 0 else transcript_content[start:end]
-            if len(chunk) >= 100:
-                chunks.append(chunk)
-            start = end
-
-        # Process each chunk sequentially
-        for i, chunk in enumerate(chunks):
-            chapter_num = i + 1
-
-            prompt = build_transcript_chunk_prompt(
-                chunk,
-                chapter_num,
-                is_first=i == 0,
-                is_last=i == len(chunks) - 1,
+            objective_summary = await get_assistant_response(
+                objective_prompt,
+                summary_channel.id,
+                assigned_memory=assigned_memory,
+                model_name=GEMINI_SUMMARY_MODEL,
             )
-            
-            logging.debug(f"Generated prompt for chunk {chapter_num} (first 300 chars):\n{prompt[:300]}")
-
-            try:
-                # Await each assistant response before sending the next prompt.
-                summary = await get_assistant_response(prompt, summary_channel.id, assigned_memory=assigned_memory)
-                if "Error" in summary or "can't assist" in summary.lower():
-                    logging.error(f"Chunk {chapter_num} failed: {summary}")
-                    safe_summary = summary[:3800] + '...' if len(summary) > 3800 else summary
-                    await summary_channel.send(f"Failed to summarize chunk {chapter_num}:\n\n{safe_summary}")
-
-                else:
-                    await send_response_in_chunks(summary_channel, summary)
-                    logging.info(f"Chunk {chapter_num} retold successfully.")
-            except Exception as e:
-                logging.error(f"Error processing chunk {chapter_num}: {e}")
-                await summary_channel.send(f"Error summarizing chunk {chapter_num}: {e}")
-
-            # Optional: small delay to ensure the previous run is fully cleared.
-            await asyncio.sleep(1)
-
-        # Now, send the final summary prompt once all chunks have been processed.
-        final_summary_prompt = build_final_session_summary_prompt()
+            await summary_channel.send("**Objective Summary**")
+            await send_response_in_chunks(summary_channel, objective_summary)
+        except Exception as exc:
+            logging.error("Error generating objective session summary: %s", exc)
+            await summary_channel.send(f"Error generating objective session summary: {exc}")
 
         try:
-            final_summary = await get_assistant_response(final_summary_prompt, summary_channel.id, assigned_memory=assigned_memory)
-            if "Error" in final_summary or "can't assist" in final_summary.lower():
-                logging.error(f"Final summary failed: {final_summary}")
-                await summary_channel.send(f"Failed to generate final summary: {final_summary}")
-            else:
-                await send_response_in_chunks(summary_channel, final_summary)
-                logging.info("Final session summary generated and sent successfully.")
-        except Exception as e:
-            logging.error(f"Error generating final session summary: {e}")
-            await summary_channel.send(f"Error generating final session summary: {e}")
+            narrative_summary = await get_assistant_response(
+                narrative_prompt,
+                summary_channel.id,
+                assigned_memory=assigned_memory,
+                model_name=GEMINI_SUMMARY_MODEL,
+            )
+            await summary_channel.send("**Narrative Summary**")
+            await send_response_in_chunks(summary_channel, narrative_summary)
+        except Exception as exc:
+            logging.error("Error generating narrative session summary: %s", exc)
+            await summary_channel.send(f"Error generating narrative session summary: {exc}")
 
-        logging.info("Transcript summarization completed.")
+        logging.info("Audio-native transcript summarization completed.")
