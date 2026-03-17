@@ -17,6 +17,41 @@ from db_repository import (
 
 always_on_channels = {}
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+BULLET_ONLY_RE = re.compile(r"^\s*(?:[-*•]|o)\s*$")
+LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*•]|o)\s+(.*\S.*)$")
+
+
+def _normalize_list_formatting(response: str) -> str:
+    """Clean up dense model-generated lists without touching code fences or quotes."""
+    normalized_lines = []
+    in_code_fence = False
+
+    for raw_line in response.splitlines():
+        stripped = raw_line.strip()
+
+        if stripped.startswith("```"):
+            in_code_fence = not in_code_fence
+            normalized_lines.append(raw_line.rstrip())
+            continue
+
+        if in_code_fence or raw_line.lstrip().startswith(">"):
+            normalized_lines.append(raw_line.rstrip())
+            continue
+
+        if BULLET_ONLY_RE.match(raw_line):
+            continue
+
+        list_match = LIST_ITEM_RE.match(raw_line)
+        if list_match:
+            indent = "  " if len(list_match.group(1)) >= 2 else ""
+            normalized_lines.append(f"{indent}• {list_match.group(2).strip()}")
+            continue
+
+        normalized_lines.append(raw_line.rstrip())
+
+    cleaned = "\n".join(normalized_lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def format_for_discord(response: str) -> str:
@@ -25,7 +60,8 @@ def format_for_discord(response: str) -> str:
         return response
 
     # Discord does not reliably render masked markdown links in bot content.
-    return MARKDOWN_LINK_RE.sub(lambda match: match.group(2), response)
+    response = MARKDOWN_LINK_RE.sub(lambda match: match.group(2), response)
+    return _normalize_list_formatting(response)
 
 
 async def set_always_on(channel_or_thread, always_on_value):

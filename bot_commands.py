@@ -7,6 +7,7 @@ from helper_functions import *
 import logging
 import asyncio
 from memory_management import *
+from db_repository import build_thread_data_snapshot, fetch_memory_details
 from prompts.summary_prompts import build_feedback_prompt
 from shared_functions import apply_always_on, send_response_in_chunks
 
@@ -17,7 +18,12 @@ logger = logging.getLogger(__name__)
 def setup_commands(tree, get_assistant_response):
 
 
-    @tree.command(name="tellme", description="Info about spells, items, NPCs, character status, inventory, or roll checks.")
+    @tree.command(name="tellme", description="Campaign info lookup. Defaults to #telldm if no target is set.")
+    @app_commands.describe(
+        query="What you want to know.",
+        channel="Optional target channel. Defaults to #telldm in this category.",
+        thread="Optional target thread. Overrides the channel target when set."
+    )
     @app_commands.choices(
         query_type=[
             app_commands.Choice(name="Spell", value="spell"),
@@ -45,7 +51,12 @@ def setup_commands(tree, get_assistant_response):
 
 
     # Main logic for the askdm command (same for tellme command)
-    @tree.command(name="askdm", description="Inquire about rules, lore, monsters, and more.") 
+    @tree.command(name="askdm", description="Rules and lore lookup. Defaults to #telldm if no target is set.")
+    @app_commands.describe(
+        query="Your rules, lore, or adjudication question.",
+        channel="Optional target channel. Defaults to #telldm in this category.",
+        thread="Optional target thread. Overrides the channel target when set."
+    )
     @app_commands.choices(
         query_type=[
             app_commands.Choice(name="Game Mechanics", value="game_mechanics"),
@@ -72,13 +83,15 @@ def setup_commands(tree, get_assistant_response):
 
 
 
-    @tree.command(name="summarize", description="Summarize messages based on different options.")
+    @tree.command(name="summarize", description="Summarize selected messages. Defaults to this channel.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to summarize.",
         query="Additional requests or context for the recap.",
-        last_n="Summarize the last 'n' messages (optional)."
+        last_n="Summarize the last 'n' messages (optional).",
+        channel="Optional target channel and memory for the answer. Defaults to this channel.",
+        thread="Optional target thread and memory for the answer."
     )
     async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None, last_n: int = None, channel: str = None, thread: str = None):
         await interaction.response.defer()  # Defer the response while processing
@@ -120,14 +133,16 @@ def setup_commands(tree, get_assistant_response):
     async def send_thread_autocomplete(interaction: discord.Interaction, current: str):
                 return await thread_autocomplete(interaction, current)
 
-    @tree.command(name="reference", description="Read selected messages, attachments, or a public URL and answer a question.")
+    @tree.command(name="reference", description="Read messages, files, or a URL and answer from them.")
     @app_commands.describe(
         query="What you want AIDM to extract, explain, or answer from the references.",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to read.",
         last_n="Read the last 'n' messages (optional).",
-        url="Optional public URL to read as additional context."
+        url="Optional public URL to read as additional context.",
+        channel="Optional target channel and memory for the answer. Defaults to this channel.",
+        thread="Optional target thread and memory for the answer."
     )
     async def reference(
         interaction: discord.Interaction,
@@ -217,7 +232,7 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
 
 
-    @tree.command(name="feedback", description="Provide feedback about the AIDM’s performance or game experience.")
+    @tree.command(name="feedback", description="Send feedback to #feedback and generate a recap there.")
     async def feedback(interaction: discord.Interaction, suggestions: str):
         await interaction.response.defer()  # Defer the response while processing the feedback
 
@@ -251,13 +266,13 @@ def setup_commands(tree, get_assistant_response):
 
         # Step 5: Get the assigned memory for the feedback channel
         category_id = get_category_id(interaction)
-        assigned_memory = await get_assigned_memory(interaction.channel.id, category_id, thread_id=None)
+        assigned_memory = await get_assigned_memory(feedback_channel.id, category_id, thread_id=None)
 
         # Step 6: Send the conversation to the assistant for summarization, focusing on the last message
         prompt = build_feedback_prompt(conversation_history, last_message)
 
         # Update the assistant response call with the correct memory
-        response = await get_assistant_response(prompt, interaction.channel.id, thread_id=None, assigned_memory=assigned_memory)
+        response = await get_assistant_response(prompt, feedback_channel.id, thread_id=None, assigned_memory=assigned_memory)
 
 
         await send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name="feedback")
@@ -265,12 +280,14 @@ def setup_commands(tree, get_assistant_response):
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
 
-    @tree.command(name="send", description="Send specified messages to another channel or thread.")
+    @tree.command(name="send", description="Copy selected messages to another channel or thread.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to send (comma-separated if multiple).",
-        last_n="Send the last 'n' messages (optional)."
+        last_n="Send the last 'n' messages (optional).",
+        channel="Target channel in this category. Defaults to the current channel.",
+        thread="Optional target thread inside the chosen channel."
     )
     async def send(
         interaction: discord.Interaction, 
@@ -301,6 +318,10 @@ def setup_commands(tree, get_assistant_response):
         # Fetch the target channel object
         target_channel_obj = interaction.guild.get_channel(channel_id)
 
+        if not target_channel_obj:
+            await interaction.followup.send("Target channel not found.")
+            return
+
         # Check if the target channel is in the same category
         if target_channel_obj.category_id != interaction.channel.category_id:
             await interaction.followup.send(f"Cannot send messages to {target_channel_obj.name}. Must be in the same category.")
@@ -330,7 +351,7 @@ def setup_commands(tree, get_assistant_response):
         # Use the thread autocomplete function
         return await thread_autocomplete(interaction, current)
 
-    @tree.command(name="startnew", description="Create a new channel or new thread with options.")
+    @tree.command(name="startnew", description="Create a channel/thread in this category and assign its memory.")
     @app_commands.describe(
         channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
         channel_name="Name for the new channel (only if 'NEW CHANNEL' is selected).",
@@ -455,8 +476,14 @@ def setup_commands(tree, get_assistant_response):
 
             
 
-    @tree.command(name="assign_memory", description="Assign a memory to a Discord thread or channel.")
-    @app_commands.describe(always_on="Set the assistant always on or off.")
+    @tree.command(name="assign_memory", description="Assign an existing or new memory to a channel or thread.")
+    @app_commands.describe(
+        channel="Channel to update.",
+        memory="Existing memory name, or choose CREATE NEW MEMORY.",
+        thread="Optional thread to override the channel memory.",
+        memory_name="Required only when creating a new memory.",
+        always_on="Optionally toggle the assistant on for all messages there."
+    )
     @app_commands.choices(always_on=[
         app_commands.Choice(name="On", value="on"),
         app_commands.Choice(name="Off", value="off")
@@ -503,8 +530,12 @@ def setup_commands(tree, get_assistant_response):
     
 
 
-    @tree.command(name="set_always_on", description="Set the assistant to always be on or off for a channel or thread.")
-    @app_commands.describe(always_on="Set the assistant always on or off.")
+    @tree.command(name="set_always_on", description="Toggle whether AIDM listens without needing a mention.")
+    @app_commands.describe(
+        channel="Channel to update.",
+        thread="Optional thread to update instead of the whole channel.",
+        always_on="Choose whether AIDM should listen to every message there."
+    )
     @app_commands.choices(always_on=[
         app_commands.Choice(name="On", value="on"),
         app_commands.Choice(name="Off", value="off")
@@ -549,7 +580,7 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
     
 
-    @tree.command(name="delete_memory", description="Deletes a memory from the JSON data.")
+    @tree.command(name="delete_memory", description="Delete a non-default memory from this campaign.")
     async def delete_memory_command(interaction: discord.Interaction, memory: str):
         await interaction.response.defer()
 
@@ -564,7 +595,7 @@ def setup_commands(tree, get_assistant_response):
         return await memory_autocomplete(interaction, current)
 
 
-    @tree.command(name="invite", description="Initialize threads and channels for this category.")
+    @tree.command(name="invite", description="Initialize the default AIDM channel layout for this category.")
     async def invite_command(interaction: discord.Interaction):
         """Initialize threads and channels for the category where the command is invoked."""
         category = interaction.channel.category  # Get the category of the current channel
@@ -591,85 +622,92 @@ def setup_commands(tree, get_assistant_response):
         )
 
 
-    @tree.command(name="repairthread", description="Repair a thread by removing messages with invalid image URLs")
+    @tree.command(name="repairthread", description="Legacy no-op kept for compatibility after the cutover.")
     async def repair_thread(interaction: discord.Interaction, thread_id: str = None):
         await interaction.response.defer()  # Defer response since this might take time
-
-        # Use the current channel's assigned memory if no thread_id is provided
-        if not thread_id:
-            channel_id = interaction.channel.id
-            category_id = interaction.channel.category.id if interaction.channel.category else None
-            thread_id = await get_assigned_memory(channel_id, category_id)
-            if not thread_id:
-                await interaction.followup.send("Error: No assigned memory found for this channel.")
-                return
 
         await interaction.followup.send(
             "The `repairthread` command is no longer needed after the Gemini/Supabase cutover. "
             "Memories now live in Supabase instead of provider-side assistant threads."
         )
 
-    @tree.command(name="listmemory", description="List memory details for a channel or thread")
+    @tree.command(name="listmemory", description="Show one target, or list the whole category when no target is given.")
+    @app_commands.describe(
+        channel="Optional channel to inspect. Leave blank to list the whole category.",
+        thread="Optional thread to inspect."
+    )
     async def listmemory(interaction: discord.Interaction, channel: str = None, thread: str = None):
         await interaction.response.defer()
         
         try:
+            category_id = get_category_id(interaction)
+            if not channel and not thread:
+                snapshot = await asyncio.to_thread(build_thread_data_snapshot)
+                category_data = snapshot.get(str(category_id))
+                if not category_data:
+                    await interaction.followup.send("No memory data found for this category.")
+                    return
+
+                lines = [
+                    f"**Memory map for {interaction.channel.category.mention}**",
+                    f"• Default memory: `{category_data.get('default_memory') or 'None'}`",
+                    "",
+                ]
+                grouped_channels: dict[str, list[tuple[str, dict]]] = {}
+                for channel_discord_id, channel_data in category_data["channels"].items():
+                    memory_name = channel_data.get("memory_name") or "None"
+                    grouped_channels.setdefault(memory_name, []).append((channel_discord_id, channel_data))
+
+                for memory_name in sorted(grouped_channels, key=str.lower):
+                    lines.append(f"**{memory_name}**")
+                    channels = sorted(
+                        grouped_channels[memory_name],
+                        key=lambda item: item[1].get("name", "").lower(),
+                    )
+                    for channel_discord_id, channel_data in channels:
+                        channel_ref = interaction.guild.get_channel(int(channel_discord_id))
+                        channel_label = channel_ref.mention if channel_ref else f"<#{channel_discord_id}>"
+                        always_on_label = "✅ ON" if channel_data.get("always_on") else "❌ OFF"
+                        lines.append(f"• {channel_label} ({always_on_label})")
+
+                        threads = sorted(
+                            channel_data.get("threads", {}).items(),
+                            key=lambda item: item[1].get("name", "").lower(),
+                        )
+                        for thread_discord_id, thread_data in threads:
+                            thread_ref = interaction.guild.get_channel(int(thread_discord_id))
+                            thread_label = thread_ref.mention if thread_ref else f"<#{thread_discord_id}>"
+                            thread_memory_name = thread_data.get("memory_name") or memory_name
+                            thread_always_on = "✅ ON" if thread_data.get("always_on") else "❌ OFF"
+                            relation = "thread override" if thread_memory_name != memory_name else "thread inherits"
+                            lines.append(
+                                f"  • {relation}: {thread_label} -> `{thread_memory_name}` ({thread_always_on})"
+                            )
+                    lines.append("")
+
+                response = "\n".join(lines)
+                for chunk_start in range(0, len(response), 2000):
+                    await interaction.followup.send(response[chunk_start:chunk_start + 2000])
+                return
+
             channel_id = int(channel) if channel else interaction.channel.id
             thread_id = int(thread) if thread else None
-            category_id = get_category_id(interaction)
-            
-            # Load the complete memory data
-            category_threads = load_thread_data()
-            category_id_str = str(category_id)
-            channel_id_str = str(channel_id)
-            
-            if category_id_str not in category_threads:
-                await interaction.followup.send("No memory data found for this category.")
-                return
-                
-            category_data = category_threads[category_id_str]
-            
-            # Get the target object for proper mention
+
             target_channel = interaction.guild.get_channel(channel_id)
             target_thread = await interaction.guild.fetch_channel(thread_id) if thread_id else None
             
             if not target_channel:
                 await interaction.followup.send("Channel not found.")
                 return
-            
-            # Prepare response data
-            response_data = {
-                "target": target_thread.mention if target_thread else target_channel.mention,
-                "memory_id": None,
-                "memory_name": None,
-                "always_on": None
-            }
-            
-            # Check channel data first
-            channel_data = category_data['channels'].get(channel_id_str)
-            
-            if thread_id:
-                # Thread-specific memory
-                if channel_data and 'threads' in channel_data:
-                    thread_data = channel_data['threads'].get(str(thread_id))
-                    if thread_data:
-                        response_data.update({
-                            "memory_id": thread_data.get('assigned_memory', 'None').strip("'\""),
-                            "memory_name": thread_data.get('memory_name', 'None'),
-                            "always_on": channel_data.get('always_on', False)  # Threads inherit channel's always_on
-                        })
-            else:
-                # Channel memory
-                if channel_data:
-                    response_data.update({
-                        "memory_id": channel_data.get('assigned_memory', 'None').strip("'\""),
-                        "memory_name": channel_data.get('memory_name', 'None'),
-                        "always_on": channel_data.get('always_on', False)
-                    })
+
+            response_data = await asyncio.to_thread(fetch_memory_details, int(category_id), int(channel_id), int(thread_id) if thread_id else None)
+            if not response_data:
+                await interaction.followup.send("No memory data found for that target.")
+                return
             
             # Format the response
             response = (
-                f"**Memory details for {response_data['target']}**\n"
+                f"**Memory details for {target_thread.mention if target_thread else target_channel.mention}**\n"
                 f"• Memory ID: `{response_data['memory_id']}`\n"
                 f"• Memory Name: `{response_data['memory_name']}`\n"
                 f"• Always On: `{'✅ ON' if response_data['always_on'] else '❌ OFF'}`"
@@ -694,11 +732,11 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
 
     
-    @tree.command(name="reset_memory", description="Clear memory and Discord messages from a given message onward.")
+    @tree.command(name="reset_memory", description="Clear a target memory and delete AIDM replies from there.")
     @app_commands.describe(
-        channel="Target channel ID (optional).",
-        thread="Target thread ID (optional).",
-        starting_with_message_id="Start deleting from this message ID (inclusive)."
+        channel="Target channel. Defaults to the current channel.",
+        thread="Optional target thread.",
+        starting_with_message_id="Delete AIDM replies starting with this message ID (inclusive)."
     )
     async def reset_memory_command(interaction: discord.Interaction, channel: str = None, thread: str = None, starting_with_message_id: str = None):
         await interaction.response.defer()
@@ -708,16 +746,18 @@ def setup_commands(tree, get_assistant_response):
             thread_id = int(thread) if thread else None
             category_id = get_category_id(interaction)
 
+            target = interaction.guild.get_channel(channel_id)
+            if thread_id:
+                target = await interaction.guild.fetch_channel(thread_id)
+
             assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
             if not assigned_memory:
                 await interaction.followup.send("No memory assigned to this channel/thread.")
                 return
 
-            ref_timestamp = None
             if starting_with_message_id:
                 try:
-                    ref_message = await interaction.channel.fetch_message(int(starting_with_message_id))
-                    ref_timestamp = ref_message.created_at
+                    await target.fetch_message(int(starting_with_message_id))
                 except discord.NotFound:
                     logging.warning(f"Message ID {starting_with_message_id} not found in this channel.")
                     await interaction.followup.send("Invalid message ID — message not found.")
@@ -727,9 +767,6 @@ def setup_commands(tree, get_assistant_response):
 
             # === DELETE DISCORD MESSAGES ===
             deleted_discord_msgs = 0
-            target = interaction.guild.get_channel(channel_id)
-            if thread_id:
-                target = await interaction.guild.fetch_channel(thread_id)
 
             async for message in target.history(limit=500):
                 if message.author.id == interaction.client.user.id:
