@@ -72,6 +72,8 @@ AUDIO_PROMPT = os.getenv(
     "AUDIO_PROMPT",
     DEFAULT_AUDIO_PROMPT,
 )
+KEEP_AUDIO_FILES = os.getenv("KEEP_AUDIO_FILES", "false").lower() == "true"
+KEEP_TRANSCRIPT_FILES = os.getenv("KEEP_TRANSCRIPT_FILES", "false").lower() == "true"
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")

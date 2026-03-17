@@ -3,6 +3,7 @@ import os
 import asyncio
 import logging
 import json
+import subprocess
 from datetime import datetime
 from config import (
     AUDIO_BITRATE,
@@ -14,6 +15,8 @@ from config import (
     AUDIO_SUMMARY_WINDOW_CHUNKS,
     FFMPEG_INPUT_DEVICE,
     FFMPEG_INPUT_FORMAT,
+    KEEP_AUDIO_FILES,
+    KEEP_TRANSCRIPT_FILES,
     TRANSCRIPT_MANIFEST_PATH,
     TRANSCRIPT_PATH,
 )
@@ -102,12 +105,15 @@ class VoiceRecorder:
         )
 
     async def register_chunk(self, audio_filename: Path, duration: int) -> dict:
+        return await self.register_external_chunk(audio_filename, duration, self.chunk_counter * duration)
+
+    async def register_external_chunk(self, audio_filename: Path, duration: int, start_offset_seconds: int) -> dict:
         async with self.manifest_lock:
             self.chunk_counter += 1
             chunk = {
                 "chunk_index": self.chunk_counter,
                 "audio_file": str(audio_filename),
-                "start_offset_seconds": (self.chunk_counter - 1) * duration,
+                "start_offset_seconds": start_offset_seconds,
                 "duration_seconds": duration,
                 "status": "recorded",
                 "notes": [],
@@ -304,6 +310,162 @@ class VoiceRecorder:
             sections.append("")
         return "\n".join(sections).strip()
 
+    def probe_audio_duration(self, audio_file: Path) -> int:
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(audio_file),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return max(1, int(round(float(result.stdout.strip()))))
+        except Exception as exc:
+            logging.warning("Could not determine duration for %s via ffprobe: %s", audio_file, exc)
+            return self.session_chunk_seconds
+
+    def split_audio_file_for_offline(self, audio_file: Path, output_dir: Path) -> list[Path]:
+        duration = self.probe_audio_duration(audio_file)
+        if duration <= self.session_chunk_seconds:
+            return [audio_file]
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        suffix = audio_file.suffix or ".mp3"
+        output_pattern = output_dir / f"{audio_file.stem}_part_%03d{suffix}"
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(audio_file),
+                    "-f",
+                    "segment",
+                    "-segment_time",
+                    str(self.session_chunk_seconds),
+                    "-reset_timestamps",
+                    "1",
+                    "-c",
+                    "copy",
+                    str(output_pattern),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception as exc:
+            logging.warning(
+                "Failed to split %s into %s-second segments, falling back to original file: %s",
+                audio_file,
+                self.session_chunk_seconds,
+                exc,
+            )
+            return [audio_file]
+
+        segment_paths = sorted(output_dir.glob(f"{audio_file.stem}_part_*{suffix}"))
+        if not segment_paths:
+            logging.warning("No offline segments were produced for %s; using original file.", audio_file)
+            return [audio_file]
+        return segment_paths
+
+    async def build_final_summaries_from_windows(self, window_summaries: list[dict]) -> tuple[str | None, str | None]:
+        if not window_summaries:
+            return None, None
+
+        notes_text = self._format_audio_summary_notes(window_summaries)
+        objective_prompt = build_audio_objective_summary_prompt(notes_text)
+        narrative_prompt = build_audio_narrative_summary_prompt(notes_text)
+
+        objective_summary = await asyncio.to_thread(
+            gemini_client.generate_summary_text,
+            objective_prompt,
+            None,
+        )
+        narrative_summary = await asyncio.to_thread(
+            gemini_client.generate_summary_text,
+            narrative_prompt,
+            None,
+        )
+        return objective_summary, narrative_summary
+
+    async def process_existing_audio_files(self, file_paths: list[str], output_dir: str | None = None) -> dict:
+        resolved_paths = [Path(path).expanduser() for path in file_paths]
+        for path in resolved_paths:
+            if not path.exists():
+                raise FileNotFoundError(f"Audio file not found: {path}")
+
+        output_root = Path(output_dir).expanduser() if output_dir else Path(__file__).parent / "offline_test_outputs"
+        output_root.mkdir(parents=True, exist_ok=True)
+
+        session_label = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        transcript_output_path = output_root / f"transcript_{session_label}.txt"
+        objective_output_path = output_root / f"objective_summary_{session_label}.md"
+        narrative_output_path = output_root / f"narrative_summary_{session_label}.md"
+        manifest_output_path = output_root / f"manifest_{session_label}.json"
+        segment_output_root = output_root / f"_segments_{session_label}"
+
+        await self.initialize_session_files(self.session_chunk_seconds)
+
+        running_offset = 0
+        split_file_paths: list[Path] = []
+        for file_index, file_path in enumerate(resolved_paths, start=1):
+            split_dir = segment_output_root / f"input_{file_index:03d}"
+            split_file_paths.extend(self.split_audio_file_for_offline(file_path, split_dir))
+
+        try:
+            for file_path in split_file_paths:
+                duration = self.probe_audio_duration(file_path)
+                chunk_info = await self.register_external_chunk(file_path, duration, running_offset)
+                await self.send_to_openai(file_path, chunk_info)
+                running_offset += duration
+
+            transcript_text = await self.rebuild_transcript_from_manifest()
+            window_summaries = await self.summarize_audio_windows()
+            objective_summary, narrative_summary = await self.build_final_summaries_from_windows(window_summaries)
+
+            transcript_output_path.write_text(transcript_text, encoding="utf-8")
+            manifest_output_path.write_text(
+                json.dumps(
+                    {
+                        "window_summaries": window_summaries,
+                        "chunks": self.chunk_manifest,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            if objective_summary:
+                objective_output_path.write_text(objective_summary, encoding="utf-8")
+            if narrative_summary:
+                narrative_output_path.write_text(narrative_summary, encoding="utf-8")
+
+            return {
+                "transcript_path": str(transcript_output_path),
+                "objective_summary_path": str(objective_output_path),
+                "narrative_summary_path": str(narrative_output_path),
+                "manifest_path": str(manifest_output_path),
+                "segment_dir": str(segment_output_root),
+            }
+        finally:
+            if segment_output_root.exists() and not KEEP_AUDIO_FILES:
+                for segment_file in sorted(segment_output_root.rglob("*"), reverse=True):
+                    try:
+                        if segment_file.is_file():
+                            segment_file.unlink()
+                        else:
+                            segment_file.rmdir()
+                    except OSError:
+                        pass
+
     async def capture_audio(self, voice_client, duration=recording_duration): #120 seconds or 5-10 for testing.
         self.voice_client = voice_client
         await self.initialize_session_files(duration)
@@ -425,17 +587,22 @@ class VoiceRecorder:
 
         await summary_channel.send("Full transcript attached:", file=discord.File(self.transcript_path))
 
-        # Remove all audio files
-        for filename in os.listdir(audio_files_path):
-            file_path = audio_files_path / filename
-            try:
-                os.remove(file_path)
-                logging.info(f"Deleted audio file: {file_path}")
-            except Exception as e:
-                logging.error(f"Failed to delete audio file {file_path}: {e}")
+        if KEEP_AUDIO_FILES:
+            logging.info("KEEP_AUDIO_FILES=true, leaving recorded audio files in place.")
+        else:
+            for filename in os.listdir(audio_files_path):
+                file_path = audio_files_path / filename
+                try:
+                    os.remove(file_path)
+                    logging.info(f"Deleted audio file: {file_path}")
+                except Exception as e:
+                    logging.error(f"Failed to delete audio file {file_path}: {e}")
 
-        await self.reset_session_artifacts()
-        logging.info("Transcript artifacts cleared.")
+        if KEEP_TRANSCRIPT_FILES:
+            logging.info("KEEP_TRANSCRIPT_FILES=true, leaving transcript artifacts in place.")
+        else:
+            await self.reset_session_artifacts()
+            logging.info("Transcript artifacts cleared.")
 
     async def send_to_openai(self, audio_filename, chunk_info):
         """Legacy method name kept for compatibility; uses Gemini for transcription."""
@@ -487,27 +654,17 @@ class VoiceRecorder:
             logging.error(f"Could not find 'session-summary' channel in category {category_id}.")
             return
 
-        assigned_memory = await get_assigned_memory(summary_channel.id, category_id)
-        if assigned_memory is None:
-            logging.error("No assigned memory found for this channel.")
-            return
-
         window_summaries = await self.summarize_audio_windows()
         if not window_summaries:
             logging.warning("No audio summary windows were produced. No summary generated.")
             return
-        notes_text = self._format_audio_summary_notes(window_summaries)
-        objective_prompt = build_audio_objective_summary_prompt(notes_text)
-        narrative_prompt = build_audio_narrative_summary_prompt(notes_text)
-
         await summary_channel.send("Generating session summaries from audio-derived notes...")
+        objective_summary = None
+        narrative_summary = None
         try:
-            objective_summary = await get_assistant_response(
-                objective_prompt,
-                summary_channel.id,
-                assigned_memory=assigned_memory,
-                model_name=GEMINI_SUMMARY_MODEL,
-            )
+            objective_summary, narrative_summary = await self.build_final_summaries_from_windows(window_summaries)
+            if not objective_summary:
+                raise RuntimeError("Objective summary generation returned no content.")
             await summary_channel.send("**Objective Summary**")
             await send_response_in_chunks(summary_channel, objective_summary)
         except Exception as exc:
@@ -515,12 +672,8 @@ class VoiceRecorder:
             await summary_channel.send(f"Error generating objective session summary: {exc}")
 
         try:
-            narrative_summary = await get_assistant_response(
-                narrative_prompt,
-                summary_channel.id,
-                assigned_memory=assigned_memory,
-                model_name=GEMINI_SUMMARY_MODEL,
-            )
+            if not narrative_summary:
+                raise RuntimeError("Narrative summary generation returned no content.")
             await summary_channel.send("**Narrative Summary**")
             await send_response_in_chunks(summary_channel, narrative_summary)
         except Exception as exc:
@@ -528,3 +681,4 @@ class VoiceRecorder:
             await summary_channel.send(f"Error generating narrative session summary: {exc}")
 
         logging.info("Audio-native transcript summarization completed.")
+        return
