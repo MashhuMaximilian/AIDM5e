@@ -1,6 +1,18 @@
 .env
+.env.*
 app.yaml
 __pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
 threads.json
-
-
+transcript.txt
+transcript_archive.txt
+transcript_archive copy.txt
+audio_files/
+aidm.log
+.DS_Store
+.vscode/
+scripts/import_legacy_category.py
+scripts/
+sources/
