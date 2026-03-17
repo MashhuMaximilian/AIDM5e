@@ -130,6 +130,13 @@ async def handle_channel_creation(channel: str, channel_name: str, guild: discor
         if not channel_name:
             await send_interaction_message(interaction, "Error: You must provide a name for the new channel.")
             return None
+        existing_channel = discord.utils.get(category.text_channels, name=channel_name)
+        if existing_channel:
+            await send_interaction_message(
+                interaction,
+                f"Error: A channel named `{channel_name}` already exists in this category. Choose a different name or reuse {existing_channel.mention}.",
+            )
+            return None
         # Create new channel
         new_channel = await guild.create_text_channel(name=channel_name, category=category)
         logging.info(f"Created new channel: {new_channel.id} ({new_channel.name})")

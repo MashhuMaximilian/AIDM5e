@@ -163,6 +163,13 @@ async def send_interaction_message(interaction, content: str, **kwargs):
     return await interaction.response.send_message(content, **kwargs)
 
 
+async def send_command_ack(interaction, content: str = "Working...", **kwargs):
+    """Acknowledge a potentially long-running command without showing the thinking state."""
+    if interaction.response.is_done():
+        return None
+    return await interaction.response.send_message(content, ephemeral=True, **kwargs)
+
+
 async def apply_always_on(target_channel, target_thread, always_on_value: str):
     if always_on_value == "on":
         if target_thread:

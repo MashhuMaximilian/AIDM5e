@@ -6,6 +6,7 @@ from shared_functions import *
 from helper_functions import *
 import logging
 import asyncio
+from psycopg import errors as pg_errors
 from memory_management import *
 from db_repository import append_memory_message, build_thread_data_snapshot, fetch_memory_details
 from prompts.summary_prompts import build_feedback_prompt
@@ -16,9 +17,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def setup_commands(tree, get_assistant_response):
+    ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
+    channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
+    memory_group = app_commands.Group(name="memory", description="Memory management commands.")
 
 
-    @tree.command(name="tellme", description="Campaign info lookup. Defaults to #telldm if no target is set.")
+    @ask_group.command(name="campaign", description="Campaign info lookup. Defaults to #telldm if no target is set.")
     @app_commands.describe(
         query="What you want to know.",
         channel="Optional target channel. Defaults to #telldm in this category.",
@@ -26,12 +30,11 @@ def setup_commands(tree, get_assistant_response):
     )
     @app_commands.choices(
         query_type=[
-            app_commands.Choice(name="Spell", value="spell"),
-            app_commands.Choice(name="CheckStatus", value="checkstatus"),
-            app_commands.Choice(name="Homebrew Item", value="hbw_item"),
+            app_commands.Choice(name="Check Status", value="checkstatus"),
+            app_commands.Choice(name="Homebrew", value="homebrew"),
             app_commands.Choice(name="NPC", value="npc"),
             app_commands.Choice(name="Inventory", value="inventory"),
-            app_commands.Choice(name="RollCheck", value="rollcheck")
+            app_commands.Choice(name="Roll Check", value="rollcheck")
         ]
     )
    
@@ -51,7 +54,7 @@ def setup_commands(tree, get_assistant_response):
 
 
     # Main logic for the askdm command (same for tellme command)
-    @tree.command(name="askdm", description="Rules and lore lookup. Defaults to #telldm if no target is set.")
+    @ask_group.command(name="dm", description="Rules and lore lookup. Defaults to #telldm if no target is set.")
     @app_commands.describe(
         query="Your rules, lore, or adjudication question.",
         channel="Optional target channel. Defaults to #telldm in this category.",
@@ -59,6 +62,7 @@ def setup_commands(tree, get_assistant_response):
     )
     @app_commands.choices(
         query_type=[
+            app_commands.Choice(name="Spell", value="spell"),
             app_commands.Choice(name="Game Mechanics", value="game_mechanics"),
             app_commands.Choice(name="Monsters & Creatures", value="monsters_creatures"),
             app_commands.Choice(name="World Lore & History", value="world_lore_history"),
@@ -83,7 +87,7 @@ def setup_commands(tree, get_assistant_response):
 
 
 
-    @tree.command(name="summarize", description="Summarize selected messages. Defaults to this channel.")
+    @channel_group.command(name="summarize", description="Summarize selected messages. Defaults to this channel.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
@@ -280,7 +284,7 @@ def setup_commands(tree, get_assistant_response):
         # Step 7: Confirm that the feedback was processed
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")
 
-    @tree.command(name="send", description="Copy selected messages to another channel or thread.")
+    @channel_group.command(name="send", description="Copy selected messages to another channel or thread.")
     @app_commands.describe(
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
@@ -298,7 +302,7 @@ def setup_commands(tree, get_assistant_response):
         channel: str = None, 
         thread: str = None
     ):
-        await interaction.response.defer()  # Defer the response while processing
+        await send_command_ack(interaction, "Sending messages...")
 
         # Fetch the channel and thread if specified
         channel_id = int(channel) if channel else interaction.channel.id
@@ -384,7 +388,7 @@ def setup_commands(tree, get_assistant_response):
         # Use the thread autocomplete function
         return await thread_autocomplete(interaction, current)
 
-    @tree.command(name="startnew", description="Create a channel/thread in this category and assign its memory.")
+    @channel_group.command(name="start", description="Create a channel/thread in this category and assign its memory.")
     @app_commands.describe(
         channel="Choose an existing channel or 'NEW CHANNEL' to create a new one.",
         channel_name="Name for the new channel (only if 'NEW CHANNEL' is selected).",
@@ -417,6 +421,8 @@ def setup_commands(tree, get_assistant_response):
         if memory == "CREATE NEW MEMORY" and not memory_name:
             await send_interaction_message(interaction, "Error: You must provide a name for the new memory.")
             return
+
+        await send_command_ack(interaction, "Creating channel or thread...")
 
         # Retrieve guild and category
         guild = interaction.guild
@@ -507,7 +513,7 @@ def setup_commands(tree, get_assistant_response):
 
             
 
-    @tree.command(name="assign_memory", description="Assign an existing or new memory to a channel or thread.")
+    @memory_group.command(name="assign", description="Assign an existing or new memory to a channel or thread.")
     @app_commands.describe(
         channel="Channel to update.",
         memory="Existing memory name, or choose CREATE NEW MEMORY.",
@@ -527,6 +533,8 @@ def setup_commands(tree, get_assistant_response):
         memory_name: str = None,
         always_on: app_commands.Choice[str] = None  # Optional
     ):
+        await send_command_ack(interaction, "Assigning memory...")
+
         # Handle memory assignment
         target_channel, target_thread = await handle_memory_assignment(
             interaction, memory, channel, thread, memory_name, always_on
@@ -561,7 +569,7 @@ def setup_commands(tree, get_assistant_response):
     
 
 
-    @tree.command(name="set_always_on", description="Toggle whether AIDM listens without needing a mention.")
+    @channel_group.command(name="set_always_on", description="Toggle whether AIDM listens without needing a mention.")
     @app_commands.describe(
         channel="Channel to update.",
         thread="Optional thread to update instead of the whole channel.",
@@ -577,6 +585,8 @@ def setup_commands(tree, get_assistant_response):
         thread: str = None,
         always_on: app_commands.Choice[str] = None  # Optional; defaults to "off" if not specified
     ):
+        await send_command_ack(interaction, "Updating always-on setting...")
+
         # Explicitly parse always_on as True (on) or False (off)
         always_on_value = always_on and always_on.value == "on"
 
@@ -611,15 +621,17 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
     
 
-    @tree.command(name="delete_memory", description="Delete a non-default memory from this campaign.")
+    @memory_group.command(name="delete", description="Delete a non-default memory from this campaign.")
     async def delete_memory_command(interaction: discord.Interaction, memory: str):
+        await send_command_ack(interaction, "Deleting memory...")
+
         result = delete_memory(memory, interaction.channel.category.id)
         if "deleted successfully" in result.lower():
             await set_default_memory(str(interaction.channel.category.id))
             result = (
                 f"{result}\n"
                 "Any channels or threads that used this memory no longer have a direct assignment. "
-                "They may now resolve to their channel or campaign default memory. Use `/assign_memory` "
+                "They may now resolve to their channel or campaign default memory. Use `/memory assign` "
                 "to set a replacement explicitly, or delete/rework the affected thread or channel if needed."
             )
         await send_interaction_message(interaction, result)
@@ -640,7 +652,7 @@ def setup_commands(tree, get_assistant_response):
             return
         
         # Acknowledge the interaction immediately
-        await interaction.response.defer()  # Defer response to avoid timeout
+        await send_command_ack(interaction, "Initializing campaign...")
 
         try:
             invite_result = await initialize_threads(category)
@@ -657,7 +669,7 @@ def setup_commands(tree, get_assistant_response):
         )
 
 
-    @tree.command(name="listmemory", description="Show one target, or list the whole category when no target is given.")
+    @memory_group.command(name="list", description="Show one target, or list the whole category when no target is given.")
     @app_commands.describe(
         channel="Optional channel to inspect. Leave blank to list the whole category.",
         thread="Optional thread to inspect."
@@ -707,6 +719,29 @@ def setup_commands(tree, get_assistant_response):
                             lines.append(
                                 f"  • {relation}: {thread_label} -> `{thread_memory_name}` ({thread_always_on})"
                             )
+                    lines.append("")
+
+                assigned_memory_names = {
+                    memory_name
+                    for memory_name in grouped_channels
+                    if memory_name and memory_name != "None"
+                }
+                for channel_data in category_data["channels"].values():
+                    for thread_data in channel_data.get("threads", {}).values():
+                        thread_memory_name = thread_data.get("memory_name")
+                        if thread_memory_name:
+                            assigned_memory_names.add(thread_memory_name)
+
+                unassigned_memories = sorted(
+                    memory_name
+                    for memory_name in category_data.get("memory_threads", {}).keys()
+                    if memory_name not in assigned_memory_names
+                )
+                if unassigned_memories:
+                    lines.append("**Unassigned memories**")
+                    for memory_name in unassigned_memories:
+                        default_marker = " (default)" if memory_name == category_data.get("default_memory") else ""
+                        lines.append(f"• `{memory_name}`{default_marker}")
                     lines.append("")
 
                 response = "\n".join(lines)
@@ -777,14 +812,14 @@ def setup_commands(tree, get_assistant_response):
         return await thread_autocomplete(interaction, current)
 
     
-    @tree.command(name="reset_memory", description="Clear a target memory and delete AIDM replies from there.")
+    @memory_group.command(name="reset", description="Clear a target memory and delete AIDM replies from there.")
     @app_commands.describe(
         channel="Target channel. Defaults to the current channel.",
         thread="Optional target thread.",
         starting_with_message_id="Delete AIDM replies starting with this message ID (inclusive)."
     )
     async def reset_memory_command(interaction: discord.Interaction, channel: str = None, thread: str = None, starting_with_message_id: str = None):
-        await interaction.response.defer()
+        await send_command_ack(interaction, "Resetting memory...")
 
         try:
             channel_id = int(channel) if channel else interaction.channel.id
@@ -843,3 +878,31 @@ def setup_commands(tree, get_assistant_response):
     @reset_memory_command.autocomplete('thread')
     async def reset_memory_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
+
+    @tree.error
+    async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        original = error.original if isinstance(error, app_commands.CommandInvokeError) else error
+        logger.exception("Application command error: %s", original)
+
+        if isinstance(original, pg_errors.UniqueViolation):
+            message = (
+                "Cannot complete that command because an item with the same unique value already exists "
+                "in this campaign. If you were creating a channel or thread, choose a different name "
+                "or reuse the existing one."
+            )
+        elif isinstance(original, ValueError):
+            message = str(original)
+        elif isinstance(original, discord.Forbidden):
+            message = "I do not have permission to complete that command in Discord."
+        else:
+            command_name = interaction.command.qualified_name if interaction.command else "that command"
+            message = f"Could not complete `{command_name}` because of an internal error."
+
+        try:
+            await send_interaction_message(interaction, message, ephemeral=True)
+        except Exception:
+            logger.exception("Failed to send app command error message.")
+
+    tree.add_command(ask_group)
+    tree.add_command(channel_group)
+    tree.add_command(memory_group)

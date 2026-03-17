@@ -34,6 +34,9 @@ async def on_ready():
     try:
         if DISCORD_GUILD_ID:
             guild_object = discord.Object(id=int(DISCORD_GUILD_ID))
+            if client.application_id:
+                await client.http.bulk_upsert_global_commands(client.application_id, [])
+                logging.info("Cleared remote global slash commands because guild sync is enabled for development.")
             tree.clear_commands(guild=guild_object)
             tree.copy_global_to(guild=guild_object)
             await tree.sync(guild=guild_object)

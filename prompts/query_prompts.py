@@ -1,5 +1,6 @@
-TELLME_QUERY_TYPES = {"spell", "checkstatus", "hbw_item", "npc", "inventory", "rollcheck"}
+TELLME_QUERY_TYPES = {"checkstatus", "homebrew", "npc", "inventory", "rollcheck"}
 ASKDM_QUERY_TYPES = {
+    "spell",
     "game_mechanics",
     "monsters_creatures",
     "world_lore_history",
@@ -80,11 +81,11 @@ QUERY_PROMPT_TEMPLATES = {
         "I would like to know the current status of a character, including HP, spell slots, "
         "conditions, and any other relevant information. {query}"
     ),
-    "hbw_item": (
-        "I have a question about a homebrew item. Provide the item's full description, "
-        "properties, and usage as it was detailed by the creator of the item or as it appears "
-        "in this campaign. Mention who the item belongs to and any relevant background "
-        "information. {query}"
+    "homebrew": (
+        "I have a question about homebrew campaign content. It may involve an item, feature, "
+        "spell, NPC trait, or other custom material. Provide the full relevant description and "
+        "usage as it exists in this campaign, mention who or what it belongs to when relevant, "
+        "and include any background context that matters. {query}"
     ),
     "npc": (
         "I have a question about an NPC. Provide all known information about this NPC, "
