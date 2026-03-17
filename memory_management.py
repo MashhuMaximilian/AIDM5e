@@ -25,7 +25,7 @@ from db_repository import (
     list_memory_names,
     set_default_memory as set_default_memory_record,
 )
-from shared_functions import apply_always_on
+from shared_functions import apply_always_on, send_interaction_message
 
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ async def handle_memory_assignment(
     always_on: app_commands.Choice[str] = None,
 ):
     if memory == "CREATE NEW MEMORY" and not memory_name:
-        await interaction.followup.send("Error: You must provide a name for the new memory.")
+        await send_interaction_message(interaction, "Error: You must provide a name for the new memory.")
         return None, None
 
     if memory == "CREATE NEW MEMORY":

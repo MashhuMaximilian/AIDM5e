@@ -7,7 +7,7 @@ from helper_functions import *
 import logging
 import asyncio
 from memory_management import *
-from db_repository import build_thread_data_snapshot, fetch_memory_details
+from db_repository import append_memory_message, build_thread_data_snapshot, fetch_memory_details
 from prompts.summary_prompts import build_feedback_prompt
 from shared_functions import apply_always_on, send_response_in_chunks
 
@@ -303,6 +303,7 @@ def setup_commands(tree, get_assistant_response):
         # Fetch the channel and thread if specified
         channel_id = int(channel) if channel else interaction.channel.id
         thread_id = int(thread) if thread else None
+        category_id = get_category_id(interaction)
 
         # Fetch conversation history based on the provided parameters
         conversation_history, options_or_error = await fetch_conversation_history(interaction.channel, start, end, message_ids, last_n)
@@ -335,6 +336,38 @@ def setup_commands(tree, get_assistant_response):
         # Send all messages in the conversation history to the target (either thread or channel)
         for message in conversation_history:
             await send_response_in_chunks(target, message)
+
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
+        if assigned_memory:
+            for message in conversation_history:
+                await asyncio.to_thread(
+                    append_memory_message,
+                    assigned_memory,
+                    "user",
+                    message,
+                    channel_id,
+                    thread_id,
+                    interaction.user.id,
+                    interaction.user.display_name,
+                )
+
+            imported_content = "\n\n".join(conversation_history)
+            acknowledgment_prompt = (
+                "A user transferred the following Discord content into this channel or thread. "
+                "Acknowledge briefly what was added and mention the most important fact or takeaway "
+                "AIDM should now keep in mind for this memory. Keep the answer to at most 3 short bullets.\n\n"
+                f"Transferred content:\n{imported_content}"
+            )
+            acknowledgment = await get_assistant_response(
+                acknowledgment_prompt,
+                channel_id,
+                category_id,
+                thread_id,
+                assigned_memory=assigned_memory,
+                send_message=False,
+            )
+            if acknowledgment:
+                await send_response_in_chunks(target, acknowledgment)
 
         # Notify the user about the success after all messages are sent
         await interaction.followup.send(f"Messages sent successfully to {'thread' if thread else 'channel'} <#{target.id}>.")
@@ -374,17 +407,15 @@ def setup_commands(tree, get_assistant_response):
         thread_name: str = None,
         thread: str = None
     ):
-        await interaction.response.defer()
-
         # Validate parameters
         if channel == "NEW CHANNEL" and not channel_name:
-            await interaction.followup.send("Error: You must provide a name for the new channel.")
+            await send_interaction_message(interaction, "Error: You must provide a name for the new channel.")
             return
         if thread == "NEW THREAD" and not thread_name:
-            await interaction.followup.send("Error: You must provide a name for the new thread.")
+            await send_interaction_message(interaction, "Error: You must provide a name for the new thread.")
             return
         if memory == "CREATE NEW MEMORY" and not memory_name:
-            await interaction.followup.send("Error: You must provide a name for the new memory.")
+            await send_interaction_message(interaction, "Error: You must provide a name for the new memory.")
             return
 
         # Retrieve guild and category
@@ -403,7 +434,7 @@ def setup_commands(tree, get_assistant_response):
         if thread == "NEW THREAD":
             thread_obj, error = await handle_thread_creation(interaction, target_channel, thread_name, category.id, memory_name)
             if error:
-                await interaction.followup.send(error)
+                await send_interaction_message(interaction, error)
                 return
         elif thread:  # Fetch existing thread if provided
             thread_obj = await interaction.guild.fetch_channel(int(thread))
@@ -447,7 +478,7 @@ def setup_commands(tree, get_assistant_response):
             )
 
         # Send the combined follow-up messages
-        await interaction.followup.send("\n".join(followup_messages))
+        await send_interaction_message(interaction, "\n".join(followup_messages))
 
     @startnew_command.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
@@ -496,8 +527,6 @@ def setup_commands(tree, get_assistant_response):
         memory_name: str = None,
         always_on: app_commands.Choice[str] = None  # Optional
     ):
-        await interaction.response.defer()
-
         # Handle memory assignment
         target_channel, target_thread = await handle_memory_assignment(
             interaction, memory, channel, thread, memory_name, always_on
@@ -505,16 +534,18 @@ def setup_commands(tree, get_assistant_response):
 
         # Handle response based on the results
         if target_thread:
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 f"Memory '{memory}' assigned successfully to thread {target_thread.mention} in channel {target_channel.mention}."
             )
         elif target_channel:
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 f"Memory '{memory}' assigned successfully to channel {target_channel.mention}."
                 
             )
         else:
-            await interaction.followup.send(f"Memory '{memory}' assigned, but the specified channel or thread was not found.")
+            await send_interaction_message(interaction, f"Memory '{memory}' assigned, but the specified channel or thread was not found.")
 
     @assign_memory_command.autocomplete('channel')
     async def channel_autocomplete_wrapper(interaction: discord.Interaction, current: str):
@@ -546,8 +577,6 @@ def setup_commands(tree, get_assistant_response):
         thread: str = None,
         always_on: app_commands.Choice[str] = None  # Optional; defaults to "off" if not specified
     ):
-        await interaction.response.defer()
-
         # Explicitly parse always_on as True (on) or False (off)
         always_on_value = always_on and always_on.value == "on"
 
@@ -557,16 +586,18 @@ def setup_commands(tree, get_assistant_response):
 
         if target_thread:
             await set_always_on(target_thread, always_on_value)
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 f"Assistant 'always on' set to {'on' if always_on_value else 'off'} for thread {target_thread.mention}."
             )
         elif target_channel:
             await set_always_on(target_channel, always_on_value)
-            await interaction.followup.send(
+            await send_interaction_message(
+                interaction,
                 f"Assistant 'always on' set to {'on' if always_on_value else 'off'} for channel {target_channel.mention}."
             )
         else:
-            await interaction.followup.send("Error: Invalid channel or thread specified.")
+            await send_interaction_message(interaction, "Error: Invalid channel or thread specified.")
 
         # Log the action
         logging.info(f"{'Thread' if target_thread else 'Channel'} {target_thread.id if target_thread else target_channel.id} 'always on' set to: {always_on_value}")
@@ -582,12 +613,16 @@ def setup_commands(tree, get_assistant_response):
 
     @tree.command(name="delete_memory", description="Delete a non-default memory from this campaign.")
     async def delete_memory_command(interaction: discord.Interaction, memory: str):
-        await interaction.response.defer()
-
         result = delete_memory(memory, interaction.channel.category.id)
         if "deleted successfully" in result.lower():
             await set_default_memory(str(interaction.channel.category.id))
-        await interaction.followup.send(result)
+            result = (
+                f"{result}\n"
+                "Any channels or threads that used this memory no longer have a direct assignment. "
+                "They may now resolve to their channel or campaign default memory. Use `/assign_memory` "
+                "to set a replacement explicitly, or delete/rework the affected thread or channel if needed."
+            )
+        await send_interaction_message(interaction, result)
 
     # Add autocomplete functionality for the memory argument
     @delete_memory_command.autocomplete('memory')
@@ -622,30 +657,19 @@ def setup_commands(tree, get_assistant_response):
         )
 
 
-    @tree.command(name="repairthread", description="Legacy no-op kept for compatibility after the cutover.")
-    async def repair_thread(interaction: discord.Interaction, thread_id: str = None):
-        await interaction.response.defer()  # Defer response since this might take time
-
-        await interaction.followup.send(
-            "The `repairthread` command is no longer needed after the Gemini/Supabase cutover. "
-            "Memories now live in Supabase instead of provider-side assistant threads."
-        )
-
     @tree.command(name="listmemory", description="Show one target, or list the whole category when no target is given.")
     @app_commands.describe(
         channel="Optional channel to inspect. Leave blank to list the whole category.",
         thread="Optional thread to inspect."
     )
     async def listmemory(interaction: discord.Interaction, channel: str = None, thread: str = None):
-        await interaction.response.defer()
-        
         try:
             category_id = get_category_id(interaction)
             if not channel and not thread:
                 snapshot = await asyncio.to_thread(build_thread_data_snapshot)
                 category_data = snapshot.get(str(category_id))
                 if not category_data:
-                    await interaction.followup.send("No memory data found for this category.")
+                    await send_interaction_message(interaction, "No memory data found for this category.")
                     return
 
                 lines = [
@@ -686,7 +710,8 @@ def setup_commands(tree, get_assistant_response):
                     lines.append("")
 
                 response = "\n".join(lines)
-                for chunk_start in range(0, len(response), 2000):
+                await send_interaction_message(interaction, response[:2000])
+                for chunk_start in range(2000, len(response), 2000):
                     await interaction.followup.send(response[chunk_start:chunk_start + 2000])
                 return
 
@@ -697,12 +722,12 @@ def setup_commands(tree, get_assistant_response):
             target_thread = await interaction.guild.fetch_channel(thread_id) if thread_id else None
             
             if not target_channel:
-                await interaction.followup.send("Channel not found.")
+                await send_interaction_message(interaction, "Channel not found.")
                 return
 
             response_data = await asyncio.to_thread(fetch_memory_details, int(category_id), int(channel_id), int(thread_id) if thread_id else None)
             if not response_data:
-                await interaction.followup.send("No memory data found for that target.")
+                await send_interaction_message(interaction, "No memory data found for that target.")
                 return
             
             # Format the response
@@ -712,16 +737,36 @@ def setup_commands(tree, get_assistant_response):
                 f"• Memory Name: `{response_data['memory_name']}`\n"
                 f"• Always On: `{'✅ ON' if response_data['always_on'] else '❌ OFF'}`"
             )
+
+            if not thread_id:
+                snapshot = await asyncio.to_thread(build_thread_data_snapshot)
+                category_data = snapshot.get(str(category_id), {})
+                channel_data = category_data.get("channels", {}).get(str(channel_id), {})
+                threads = sorted(
+                    channel_data.get("threads", {}).items(),
+                    key=lambda item: item[1].get("name", "").lower(),
+                )
+                if threads:
+                    thread_lines = ["", "**Threads in this channel**"]
+                    for thread_discord_id, thread_data in threads:
+                        thread_ref = interaction.guild.get_channel(int(thread_discord_id))
+                        thread_label = thread_ref.mention if thread_ref else f"<#{thread_discord_id}>"
+                        thread_memory_name = thread_data.get("memory_name") or response_data["memory_name"] or "None"
+                        relation = "override" if thread_memory_name != response_data["memory_name"] else "inherits"
+                        thread_lines.append(f"• {thread_label} -> `{thread_memory_name}` ({relation})")
+                    response += "\n" + "\n".join(thread_lines)
             
-            await interaction.followup.send(response)
+            await send_interaction_message(interaction, response[:2000])
+            for chunk_start in range(2000, len(response), 2000):
+                await interaction.followup.send(response[chunk_start:chunk_start + 2000])
             
         except ValueError:
-            await interaction.followup.send("Error: Invalid channel or thread ID format.")
+            await send_interaction_message(interaction, "Error: Invalid channel or thread ID format.")
         except discord.NotFound:
-            await interaction.followup.send("Error: Channel or thread not found.")
+            await send_interaction_message(interaction, "Error: Channel or thread not found.")
         except Exception as e:
             logging.error(f"Error in listmemory command: {str(e)}")
-            await interaction.followup.send(f"An error occurred: {str(e)}")
+            await send_interaction_message(interaction, f"An error occurred: {str(e)}")
 
     @listmemory.autocomplete('channel')
     async def listmemory_channel_autocomplete(interaction: discord.Interaction, current: str):

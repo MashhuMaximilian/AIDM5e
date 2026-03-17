@@ -19,7 +19,7 @@ from memory_management import get_assigned_memory, assign_memory
 from prompts.reference_prompts import build_reference_prompt
 from prompts.query_prompts import construct_query_prompt
 from prompts.summary_prompts import build_summary_prompt
-from shared_functions import send_response
+from shared_functions import send_interaction_message, send_response
 from utils import category_threads, load_thread_data
 
 category_conversations = {}
@@ -128,7 +128,7 @@ async def answer_from_public_url(
 async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
         if not channel_name:
-            await interaction.followup.send("Error: You must provide a name for the new channel.")
+            await send_interaction_message(interaction, "Error: You must provide a name for the new channel.")
             return None
         # Create new channel
         new_channel = await guild.create_text_channel(name=channel_name, category=category)
@@ -139,11 +139,11 @@ async def handle_channel_creation(channel: str, channel_name: str, guild: discor
         try:
             target_channel = guild.get_channel(int(channel))  # Ensure channel ID is converted to int
         except ValueError:
-            await interaction.followup.send("Error: Invalid channel ID.")
+            await send_interaction_message(interaction, "Error: Invalid channel ID.")
             return None
 
         if target_channel is None:
-            await interaction.followup.send("Error: Channel not found.")
+            await send_interaction_message(interaction, "Error: Channel not found.")
             return None
         return target_channel
 
@@ -188,19 +188,26 @@ def get_category_id(interaction):
 
 async def thread_autocomplete(interaction: discord.Interaction, current: str):
     try:
+        def find_option_value(options, option_name):
+            for option in options or []:
+                if option.get("name") == option_name:
+                    return option.get("value")
+                nested_value = find_option_value(option.get("options"), option_name)
+                if nested_value is not None:
+                    return nested_value
+            return None
+
         # Load thread data from JSON
         category_threads = load_thread_data()
         category_id = str(interaction.channel.category.id)
-        channel_id = None
+        channel_id = getattr(interaction.namespace, "channel", None)
 
-        # Find the channel ID from command options
-        for option in interaction.data.get('options', []):
-            if option['name'] == 'channel':
-                channel_id = str(option['value'])
-                break
+        if channel_id is None:
+            channel_id = find_option_value(interaction.data.get('options', []), 'channel')
 
         if not channel_id or category_id not in category_threads:
             return []
+        channel_id = str(channel_id)
 
         # Get threads from JSON structure
         channel_data = category_threads[category_id]['channels'].get(channel_id)

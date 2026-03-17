@@ -156,6 +156,13 @@ async def send_response(interaction, response, channel_id=None, thread_id=None, 
         await interaction.followup.send("See Below.")
 
 
+async def send_interaction_message(interaction, content: str, **kwargs):
+    """Send a reply through the initial interaction response when possible."""
+    if interaction.response.is_done():
+        return await interaction.followup.send(content, **kwargs)
+    return await interaction.response.send_message(content, **kwargs)
+
+
 async def apply_always_on(target_channel, target_thread, always_on_value: str):
     if always_on_value == "on":
         if target_thread:

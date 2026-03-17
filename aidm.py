@@ -34,6 +34,7 @@ async def on_ready():
     try:
         if DISCORD_GUILD_ID:
             guild_object = discord.Object(id=int(DISCORD_GUILD_ID))
+            tree.clear_commands(guild=guild_object)
             tree.copy_global_to(guild=guild_object)
             await tree.sync(guild=guild_object)
             logging.info("Slash commands synced to guild %s.", DISCORD_GUILD_ID)
