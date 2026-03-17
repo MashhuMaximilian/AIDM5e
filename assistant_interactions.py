@@ -66,6 +66,7 @@ async def get_assistant_response(
     thread_id=None,
     assigned_memory=None,
     send_message=False,
+    model_name=None,
 ):
     try:
         channel = client.get_channel(channel_id)
@@ -89,6 +90,7 @@ async def get_assistant_response(
                 gemini_client.generate_text,
                 prompt,
                 SYSTEM_PROMPT,
+                model_name,
             )
 
         if not response_text:

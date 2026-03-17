@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 
 from assistant_interactions import get_assistant_response
+from config import GEMINI_SUMMARY_MODEL
 from content_retrieval import (
     extract_public_url_text,
     format_message_text,
@@ -66,7 +67,13 @@ async def summarize_conversation(interaction, conversation_history, options, que
     prompt = build_summary_prompt(history, query)
 
     # Call get_assistant_response with channel_id, thread_id, and assigned_memory
-    response = await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+    response = await get_assistant_response(
+        prompt,
+        channel_id,
+        thread_id=thread_id,
+        assigned_memory=assigned_memory,
+        model_name=GEMINI_SUMMARY_MODEL,
+    )
     return response
 
 async def fetch_conversation_history(channel, start=None, end=None, message_ids=None, last_n=None):

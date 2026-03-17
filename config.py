@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 import discord
@@ -18,6 +19,7 @@ from prompts.transcription_prompts import DEFAULT_AUDIO_PROMPT
 BASE_DIR = Path(__file__).parent.resolve()
 AIDM_PROMPT_PATH = BASE_DIR / "prompts" / "system" / "aidm_prompt.txt"
 TRANSCRIPT_PATH = BASE_DIR / "transcript.txt"
+TRANSCRIPT_MANIFEST_PATH = BASE_DIR / "transcript_manifest.json"
 AUDIO_FILES_PATH = BASE_DIR / "audio_files"
 
 
@@ -27,7 +29,10 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 DM_ROLE_NAME = os.getenv("DM_ROLE_NAME", "DM")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+GEMINI_TRANSCRIBE_MODEL = os.getenv("GEMINI_TRANSCRIBE_MODEL", GEMINI_CHAT_MODEL)
+GEMINI_SUMMARY_MODEL = os.getenv("GEMINI_SUMMARY_MODEL", GEMINI_CHAT_MODEL)
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
 GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "8192"))
 GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
@@ -44,7 +49,25 @@ SUPABASE_DB_USER = os.getenv("SUPABASE_DB_USER")
 SUPABASE_DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD")
 SUPABASE_DB_SSLMODE = os.getenv("SUPABASE_DB_SSLMODE", "require")
 
-AUDIO_CHUNK_SECONDS = int(os.getenv("AUDIO_CHUNK_SECONDS", "180"))
+AUDIO_CHUNK_SECONDS = int(os.getenv("AUDIO_CHUNK_SECONDS", "1200"))
+AUDIO_SUMMARY_WINDOW_CHUNKS = int(os.getenv("AUDIO_SUMMARY_WINDOW_CHUNKS", "1"))
+AUDIO_BITRATE = os.getenv("AUDIO_BITRATE", "128k")
+AUDIO_SAMPLE_RATE = int(os.getenv("AUDIO_SAMPLE_RATE", "44100"))
+AUDIO_CHANNELS = int(os.getenv("AUDIO_CHANNELS", "1"))
+if sys.platform == "darwin":
+    _default_ffmpeg_input_format = "avfoundation"
+    _default_ffmpeg_input_device = ":0"
+elif sys.platform.startswith("linux"):
+    _default_ffmpeg_input_format = ""
+    _default_ffmpeg_input_device = ""
+elif sys.platform == "win32":
+    _default_ffmpeg_input_format = ""
+    _default_ffmpeg_input_device = ""
+else:
+    _default_ffmpeg_input_format = ""
+    _default_ffmpeg_input_device = ""
+FFMPEG_INPUT_FORMAT = os.getenv("FFMPEG_INPUT_FORMAT", _default_ffmpeg_input_format)
+FFMPEG_INPUT_DEVICE = os.getenv("FFMPEG_INPUT_DEVICE", _default_ffmpeg_input_device)
 AUDIO_PROMPT = os.getenv(
     "AUDIO_PROMPT",
     DEFAULT_AUDIO_PROMPT,
