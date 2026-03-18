@@ -9,6 +9,8 @@
 - [x] `/invite` creates the default text-channel scaffold
 - [x] `/invite` creates `session-voice`
 - [x] `/invite` creates `#context`
+- [x] `/invite` posts onboarding guidance back into the channel where it was invoked
+- [x] `/help` exists as a topic-based command for onboarding and grouped command discovery
 - [x] `/context summary` writes runtime context files
 - [x] `/context summary` mirrors public/session updates into `#context`
 - [x] `/context summary` mirrors DM-private updates safely
@@ -45,32 +47,43 @@
 
 ## Voice / Transcript Quality
 
-- [ ] Improve speaker labeling for in-person single-device recordings
-- [ ] Use session-start roster introduction more explicitly in transcript prompts
+- [x] Improve speaker labeling for in-person single-device recordings
+- [x] Use session-start roster introduction more explicitly in transcript prompts
+- [x] Add explicit `RULES` / `COMBAT` transcript modes
+- [x] Use public/session context to derive roster candidates such as `Phil playing Kogone`
+- [x] Carry forward chunk-level roster hints to later transcript chunks
 - [ ] Keep testing `AUDIO_SUMMARY_WINDOW_CHUNKS=1` vs `2`
 - [ ] Decide whether final audio-summary reduction should later receive merged transcript as secondary context
 - [ ] Revisit summary prompt instructions for tone, uncertainty, and delivery cues
-- [ ] Decide whether to add extra transcript modes such as `RULES` or `COMBAT`
 - [ ] Add `.srt` generation from the structured transcript data
 - [ ] Harden malformed transcript JSON recovery further
 - [ ] Add offline support for `.m4a` inputs or conversion helpers
 
 ## Context System
 
-- [ ] Decide whether `#context` should be:
-  - [ ] the main authoring surface
-  - [ ] a mirror/audit trail only
+- [x] Phase 0:
+  - [x] `/help` explains grouped commands and context usage
+  - [x] `/invite` posts campaign onboarding in the invoking channel
 
-- [ ] Add a stronger evergreen context workflow for:
-  - [ ] party roster
-  - [ ] character names
-  - [ ] recurring spelling/nomenclature
-  - [ ] stable campaign facts
+- [ ] Phase 1: Discord-native context workflow
+  - [ ] Treat `#context` as the main human authoring surface
+  - [ ] Treat `#dm-planning` as the DM-private authoring surface
+  - [ ] Clarify `Public Evergreen` vs `Session Only` vs `DM Private` behavior in command UX
+  - [ ] Keep session context easy to replace/clear manually instead of guessing expiration dates
+  - [ ] Decide whether `/context summary` remains the only entrypoint or whether `/context add|list|clear` should exist
 
-- [ ] Add a stronger session-only context workflow for:
-  - [ ] next/current session notes
-  - [ ] imported gameplay clarifications
-  - [ ] temporary summary guidance
+- [ ] Phase 2: Context compilation without DB payload storage
+  - [ ] Stop treating local files under `voice_context/` as the long-term context source
+  - [ ] Use Discord messages and attachments as the durable source of truth for context
+  - [ ] Avoid storing context text/image payloads in Supabase
+  - [ ] Compile transcript context packets in memory from Discord-managed context entries
+  - [ ] Compile summary context packets in memory from Discord-managed context entries
+  - [ ] Decide how session context gets selected for a run without relying on automatic date inference
+
+- [ ] Phase 3: Image-aware context
+  - [ ] Support image references from `#context` / `#dm-planning` in the compiled context flow
+  - [ ] Clarify how text descriptions and image references should be combined for later scene generation
+  - [ ] Define optional user-facing tags/examples without making them mandatory
 
 - [ ] Keep DM-private context separate from public summary context
 - [ ] Decide whether and when to add `/context_link`

@@ -33,6 +33,8 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 
 The intended live flow is that AIDM auto-joins a campaign voice channel when someone joins, including the default session voice channel created by `/invite`.
 
+`/invite` now also posts a starter onboarding message back into the channel where the command was invoked so new campaigns immediately get usage guidance without having to hunt through the scaffold.
+
 ## Prompt System
 
 - Prompt system is centralized under `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/prompts/`.
@@ -57,10 +59,12 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - public evergreen
   - session-only
   - DM-private
+- `#context` is the current human-facing context surface for public and session updates, while `#dm-planning` remains the DM-private surface.
 - Public and session context updates are mirrored into `#context` for visibility and auditability.
 - DM-private context is not mirrored publicly; only metadata is mirrored into `#context`, while private content can be mirrored into `#dm-planning`.
 - Runtime context is still loaded from local files under `voice_context/`, so Discord-visible context updates become durable inputs for offline and live voice runs.
 - The user-facing `/context summary` response now confirms the channel publication instead of exposing the local file path.
+- The current long-term design direction is to treat Discord messages and attachments as the durable context source of truth, compile runtime context packets in memory, and avoid storing context payloads in Supabase.
 
 ## Commands and Memory UX
 
@@ -68,6 +72,7 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - `/ask`
   - `/channel`
   - `/memory`
+- Added `/help` as a topic-based onboarding command for grouped commands, `/invite`, `/context summary`, and campaign setup flow.
 - Standalone commands remain:
   - `/reference`
   - `/feedback`
@@ -122,7 +127,14 @@ The old transcript flow has been substantially refactored.
 - each chunk is transcribed through Gemini into structured JSON
 - transcript segments now target:
   - best-effort timestamp
-  - `IC` / `OOC` / `META` / `UNCLEAR`
+  - `IC` / `OOC` / `META` / `RULES` / `COMBAT` / `UNCLEAR`
+  - recurring `Unknown 1` / `Unknown 2` / `Unknown 3` style room-audio speaker labels
+  - cautious character attribution, including `MAYBE <name>` style fallbacks when needed
+- transcript prompting now uses:
+  - stronger single-device/in-person guidance
+  - session-start introduction handling when present
+  - chunk-local `roster_hints` for later chunks
+- public and session context can now be mined for roster candidates such as `Phil playing Kogone`, which are fed back into transcript prompting as identification aids
 
 ## Database Lifecycle
 
@@ -213,6 +225,7 @@ These stay local and should not drive runtime behavior:
 - `f80cbf6` `Remove transcript row storage and tighten context cleanup`
 - `dc0c150` `Remove migration shims after package reorg`
 - `5bb2d65` `Normalize chunk-relative transcript timestamps`
+- `a5af6b9` `Improve speaker and roster transcript handling`
 
 ## Next Major Focus
 

@@ -22,6 +22,125 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+HELP_TOPICS = (
+    ("overview", "Overview"),
+    ("invite", "Invite"),
+    ("context", "Context"),
+    ("ask", "Ask"),
+    ("channel", "Channel"),
+    ("memory", "Memory"),
+    ("reference", "Reference"),
+    ("feedback", "Feedback"),
+)
+
+
+def _get_category_channel_mention(category: discord.CategoryChannel, channel_name: str, fallback_prefix: str = "#") -> str:
+    channel = discord.utils.get(category.channels, name=channel_name)
+    return channel.mention if channel else f"{fallback_prefix}{channel_name}"
+
+
+def _build_help_text(topic: str) -> str:
+    if topic == "invite":
+        return (
+            "**/invite**\n"
+            "Use this in any text channel inside a campaign category.\n"
+            "It scaffolds the default AIDM layout for that category, including `#context`, `#dm-planning`, "
+            "`#session-summary`, and `session-voice`.\n\n"
+            "**Typical flow**\n"
+            "• Create a category and one starter text channel.\n"
+            "• Run `/invite` there.\n"
+            "• Read the onboarding post in that same channel.\n"
+            "• Use `/help topic:Context` to start loading roster and session guidance."
+        )
+    if topic == "context":
+        return (
+            "**/context summary**\n"
+            "Use this to store context that later helps transcripts, summaries, and future visual tooling.\n\n"
+            "**Scopes**\n"
+            "• `Public Evergreen`: long-lived campaign facts like roster, spellings, factions, locations.\n"
+            "• `Session Only`: current or next-session guidance. Replace or clear this manually when it goes stale.\n"
+            f"• `DM Private`: DM-only context. Only members with the `{DM_ROLE_NAME}` role can edit it.\n\n"
+            "**Good inputs**\n"
+            "• Manual notes\n"
+            "• `last_n` recent messages from a channel like `#gameplay`\n"
+            "• specific `message_ids`\n"
+            "• clarifications, art refs, and later image references\n\n"
+            "**Examples**\n"
+            "• `/context summary scope:Public Evergreen action:Append note:<party roster>`\n"
+            "• `/context summary scope:Session Only action:Replace channel:#gameplay last_n:20`\n"
+            "• `/context summary scope:Session Only action:Clear`"
+        )
+    if topic == "ask":
+        return (
+            "**/ask**\n"
+            "• `/ask dm`: rules, spells, monsters, lore, adjudication.\n"
+            "• `/ask campaign`: campaign-specific facts, homebrew, NPCs, inventory, status.\n\n"
+            "Both commands can target a channel or thread when you want the answer grounded in a specific campaign area."
+        )
+    if topic == "channel":
+        return (
+            "**/channel**\n"
+            "• `/channel summarize`: recap selected messages.\n"
+            "• `/channel send`: move/copy important content into another channel or thread.\n"
+            "• `/channel start`: create a thread or channel flow.\n"
+            "• `/channel set_always_on`: decide whether AIDM listens without a mention in that target."
+        )
+    if topic == "memory":
+        return (
+            "**/memory**\n"
+            "• `/memory list`: inspect memory assignments for this category, channel, or thread.\n"
+            "• `/memory assign`: point a channel or thread at a memory.\n"
+            "• `/memory delete`: remove a non-default memory.\n"
+            "• `/memory reset`: clear a target memory and remove AIDM replies from that target."
+        )
+    if topic == "reference":
+        return (
+            "**/reference**\n"
+            "Read selected messages, attachments, or a public URL and answer from them.\n"
+            "Use this when you want grounded extraction or explanation rather than general campaign recall."
+        )
+    if topic == "feedback":
+        return (
+            "**/feedback**\n"
+            "Use `/feedback` to capture what worked, what did not, and what should change next time. "
+            "It is the lightweight place to leave operational notes after a session or test."
+        )
+    return (
+        "**AIDM Help**\n"
+        "Use `/help` with a topic for detail.\n\n"
+        "**Topics**\n"
+        "• `Invite`: scaffold a campaign category and get started\n"
+        "• `Context`: public/session/DM guidance for transcript and summary runs\n"
+        "• `Ask`: rules or campaign questions\n"
+        "• `Channel`: summarization and routing tools\n"
+        "• `Memory`: inspect and assign memory behavior\n"
+        "• `Reference`: answer from selected messages, files, or URLs\n"
+        "• `Feedback`: leave structured follow-up notes\n\n"
+        "The fastest next step for a new campaign is: run `/invite`, then use `/help topic:Context`."
+    )
+
+
+def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
+    context_mention = _get_category_channel_mention(category, "context")
+    dm_planning_mention = _get_category_channel_mention(category, "dm-planning")
+    session_summary_mention = _get_category_channel_mention(category, "session-summary")
+    session_voice_mention = _get_category_channel_mention(category, "session-voice")
+    gameplay_mention = _get_category_channel_mention(category, "gameplay")
+    return (
+        f"**Campaign setup for {category.name} is ready.**\n"
+        f"• Use {context_mention} for public evergreen facts and session notes.\n"
+        f"• Use {dm_planning_mention} for DM-only material.\n"
+        f"• Live voice sessions should use {session_voice_mention}.\n"
+        f"• Transcript and recap output will land in {session_summary_mention}.\n"
+        f"• Session play/chat can happen in {gameplay_mention} and your other campaign channels.\n\n"
+        "**Recommended first steps**\n"
+        "• Run `/help topic:Context`\n"
+        "• Add the party roster and naming/spelling clarifications with `/context summary`\n"
+        "• Use `Session Only` context for next-session notes, then replace or clear it when it expires\n"
+        f"• Drop useful reference images into {context_mention} as the visual library grows"
+    )
+
+
 def _describe_context_source(source_target: discord.abc.GuildChannel | discord.Thread | None) -> str:
     if source_target is None:
         return "manual note"
@@ -89,6 +208,18 @@ def setup_commands(tree, get_assistant_response):
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
     memory_group = app_commands.Group(name="memory", description="Memory management commands.")
     context_group = app_commands.Group(name="context", description="Context helpers for summaries and transcripts.")
+
+    @tree.command(name="help", description="Show command help and campaign onboarding guidance.")
+    @app_commands.describe(topic="Optional topic to explain in more detail.")
+    @app_commands.choices(
+        topic=[app_commands.Choice(name=label, value=value) for value, label in HELP_TOPICS]
+    )
+    async def help_command(
+        interaction: discord.Interaction,
+        topic: app_commands.Choice[str] | None = None,
+    ):
+        help_topic = topic.value if topic else "overview"
+        await send_interaction_message(interaction, _build_help_text(help_topic), ephemeral=True)
 
 
     @ask_group.command(name="campaign", description="Campaign info lookup. Defaults to #telldm if no target is set.")
@@ -728,6 +859,8 @@ def setup_commands(tree, get_assistant_response):
             f"Created voice channels: {created_voice}\n"
             f"Reused voice channels: {reused_voice}"
         )
+        if hasattr(interaction.channel, "send"):
+            await send_response_in_chunks(interaction.channel, _build_invite_onboarding_message(category))
 
     @context_group.command(name="summary", description="Store public, session, or DM context for future transcript/summary runs.")
     @app_commands.describe(
