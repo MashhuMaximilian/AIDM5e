@@ -125,8 +125,33 @@ class TranscriptService:
         normalized["mode"] = self.normalize_mode(segment.get("mode"))
         return normalized
 
-    def normalize_segments(self, segments: list[dict]) -> list[dict]:
+    def normalize_offset_seconds(self, offset_seconds, chunk_start: int, chunk_duration: int) -> int:
+        try:
+            offset = int(offset_seconds)
+        except (TypeError, ValueError):
+            return 0
+
+        if offset < 0:
+            return 0
+
+        # Gemini sometimes returns absolute session offsets for later chunks even
+        # though we ask for chunk-relative offsets. If the value lines up with the
+        # chunk's absolute window, convert it back to a relative offset.
+        if chunk_start > 0 and offset > chunk_duration + 60 and chunk_start <= offset <= chunk_start + chunk_duration + 60:
+            offset -= chunk_start
+
+        if offset < 0:
+            return 0
+        return offset
+
+    def normalize_segments(self, segments: list[dict], chunk_start: int = 0, chunk_duration: int = 0) -> list[dict]:
         normalized = [self.normalize_segment(segment) for segment in segments]
+        for segment in normalized:
+            segment["offset_seconds"] = self.normalize_offset_seconds(
+                segment.get("offset_seconds", 0),
+                chunk_start,
+                chunk_duration,
+            )
         speaker_values = [segment.get("speaker") for segment in normalized if segment.get("speaker")]
         has_numbered_unknown = any(re.fullmatch(r"Unknown \d+", speaker or "") for speaker in speaker_values)
         plain_unknown_count = sum(1 for speaker in speaker_values if speaker == "Unknown")
@@ -176,7 +201,11 @@ class TranscriptService:
             )
             logger.info("Received transcription: %s", transcript[:100])
             payload = self.extract_json_payload(transcript)
-            normalized_segments = self.normalize_segments(payload.get("segments", []))
+            normalized_segments = self.normalize_segments(
+                payload.get("segments", []),
+                chunk_info["start_offset_seconds"],
+                chunk_info["duration_seconds"],
+            )
             await manifest_store.update_chunk_result(
                 chunk_info["chunk_index"],
                 status="transcribed",
@@ -202,7 +231,11 @@ class TranscriptService:
                 warnings.append(f"Chunk {chunk_index}: {error_message}")
                 continue
 
-            for segment in self.normalize_segments(chunk.get("segments", [])):
+            for segment in self.normalize_segments(
+                chunk.get("segments", []),
+                chunk["start_offset_seconds"],
+                chunk["duration_seconds"],
+            ):
                 absolute_seconds = chunk["start_offset_seconds"] + int(segment.get("offset_seconds", 0))
                 timestamp = self.format_timestamp(absolute_seconds)
                 mode = segment.get("mode", "UNCLEAR")
