@@ -19,6 +19,11 @@
 - [ ] Tune `AUDIO_SUMMARY_WINDOW_CHUNKS` after first real test:
   - [ ] compare `1` chunk windows vs `2` chunk windows
   - [ ] decide whether 20-minute or 40-minute summary windows are better
+- [ ] Live-test the new context workflow in Discord:
+  - [ ] `/context summary` writes the expected local file
+  - [ ] `/context summary` mirrors public/session updates into `#context`
+  - [ ] DM-private context only mirrors safely
+  - [ ] context updates affect the next live voice run without restarting the bot
 - [ ] Decide whether final audio-summary reduction should later receive merged transcript as secondary context.
 - [ ] Review the new offline chunk-splitting behavior on long source recordings and confirm the transcript improves over the single-file test.
 
@@ -30,15 +35,18 @@
 - [ ] Add offline testing support for additional audio inputs:
   - [ ] `.m4a`
   - [ ] optional conversion helpers
-- [ ] Make `/invite` also create a default session voice channel and wire AIDM auto-join behavior for that session flow.
+- [ ] Validate the new `/invite` scaffold in Discord:
+  - [ ] `#context` exists
+  - [ ] default session voice channel exists
+  - [ ] AIDM auto-joins that voice flow correctly
 - [ ] Revisit whether `/reference` should support more attachment/document types beyond the current set.
 - [ ] Decide whether transcript should also be used as final-summary grounding context after audio-summary quality is evaluated.
 - [ ] Design a dedicated context-injection flow for summaries and future media generation:
   - [ ] public evergreen context such as party composition and stable character facts
   - [ ] session-only context for the next/current summary run
   - [ ] private DM-only context kept separate from public player-facing summary context
-  - [ ] likely command shape such as `/context summary`
   - [ ] selectors similar to summarize/reference (`message_ids`, `last_n`, etc.)
+  - [ ] decide whether `#context` should become the primary authoring surface or remain a mirror/audit trail
 
 ## Voice / Transcript
 

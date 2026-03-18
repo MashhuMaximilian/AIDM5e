@@ -16,6 +16,7 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 
 - `gameplay`
 - `telldm`
+- `context`
 - `session-summary`
 - `feedback`
 - `npcs`
@@ -24,8 +25,11 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 - `items`
 - `dm-planning`
 
-Planned next:
-- add a default session voice channel and auto-join flow for AIDM.
+`/invite` also creates the default voice channel:
+
+- `session-voice`
+
+The intended live flow is that AIDM auto-joins a campaign voice channel when someone joins, including the default session voice channel created by `/invite`.
 
 ## Prompt System
 
@@ -47,6 +51,13 @@ Planned next:
   - public URLs
 - Public URL reading uses direct fetch first and Gemini URL Context as fallback.
 - Google Docs / Sheets remain out of scope for now.
+- `/context summary` stores transcript/summary support context in three scopes:
+  - public evergreen
+  - session-only
+  - DM-private
+- Public and session context updates are mirrored into `#context` for visibility and auditability.
+- DM-private context is not mirrored publicly; only metadata is mirrored into `#context`, while private content can be mirrored into `#dm-planning`.
+- Runtime context is still loaded from local files under `voice_context/`, so Discord-visible context updates become durable inputs for offline and live voice runs.
 
 ## Commands and Memory UX
 
@@ -111,6 +122,7 @@ The old transcript flow has been substantially refactored.
   - character when clear
   - `RO` / `EN` / `RO+EN`
 - the final session transcript is rebuilt from the manifest
+- timestamp normalization now repairs mixed-baseline Gemini offsets before the final session transcript is merged
 
 ### Audio-Native Summary Flow
 
@@ -161,6 +173,9 @@ These stay local and should not drive runtime behavior:
 - `3ba06f8` `Refine grouped commands and utility handling`
 - `a9bfe0a` `Wire separate Gemini chat and summary models`
 - `013a97d` `Refactor voice transcription and audio-native summaries`
+- `d1bfc97` `Refactor voice pipeline and add summary context workflow`
+- `dc0c150` `Remove migration shims after package reorg`
+- `5bb2d65` `Normalize chunk-relative transcript timestamps`
 
 ## Next Major Focus
 

@@ -10,6 +10,7 @@ from discord_app.shared_functions import apply_always_on, send_interaction_messa
 from .db_repository import (
     DEFAULT_CHANNEL_SPECS,
     DEFAULT_MEMORY_NAMES,
+    DEFAULT_VOICE_CHANNEL_SPECS,
     assign_memory_to_channel,
     assign_memory_to_thread,
     clear_memory_messages,
@@ -155,6 +156,8 @@ async def initialize_threads(category):
 
     created_channels = []
     reused_channels = []
+    created_voice_channels = []
+    reused_voice_channels = []
     bot_member = guild.me or guild.get_member(getattr(guild._state.user, "id", 0))
     dm_overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -191,7 +194,34 @@ async def initialize_threads(category):
         )
         await asyncio.to_thread(assign_memory_to_channel, channel.id, memory_ids[spec["memory"]])
 
-    return {"created": created_channels, "reused": reused_channels}
+    for spec in DEFAULT_VOICE_CHANNEL_SPECS:
+        voice_channel = discord.utils.get(category.voice_channels, name=spec["name"])
+        if voice_channel is None:
+            kwargs = {"name": spec["name"], "category": category}
+            if spec["is_dm_private"]:
+                kwargs["overwrites"] = dm_overwrites
+            voice_channel = await guild.create_voice_channel(**kwargs)
+            created_voice_channels.append(spec["name"])
+        else:
+            reused_voice_channels.append(spec["name"])
+            if spec["is_dm_private"]:
+                await voice_channel.edit(overwrites=dm_overwrites)
+
+        await asyncio.to_thread(
+            ensure_channel_for_category,
+            category.id,
+            voice_channel.id,
+            voice_channel.name,
+            False,
+            spec["is_dm_private"],
+        )
+
+    return {
+        "created": created_channels,
+        "reused": reused_channels,
+        "created_voice": created_voice_channels,
+        "reused_voice": reused_voice_channels,
+    }
 
 
 async def handle_memory_assignment(

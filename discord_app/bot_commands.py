@@ -21,6 +21,64 @@ from .shared_functions import apply_always_on, send_response_in_chunks
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def _describe_context_source(source_target: discord.abc.GuildChannel | discord.Thread | None) -> str:
+    if source_target is None:
+        return "manual note"
+    if isinstance(source_target, discord.Thread):
+        return f"{source_target.mention} in {source_target.parent.mention}" if source_target.parent else source_target.mention
+    if hasattr(source_target, "mention"):
+        return source_target.mention
+    return getattr(source_target, "name", "manual note")
+
+
+async def _mirror_context_update(
+    interaction: discord.Interaction,
+    *,
+    scope_value: str,
+    action_value: str,
+    stored_text: str | None,
+    source_target: discord.abc.GuildChannel | discord.Thread | None,
+) -> None:
+    category = interaction.channel.category
+    if not category:
+        return
+
+    context_channel = discord.utils.get(category.text_channels, name="context")
+    dm_planning_channel = discord.utils.get(category.text_channels, name="dm-planning")
+    source_label = _describe_context_source(source_target)
+    actor = getattr(interaction.user, "mention", interaction.user.display_name)
+
+    if scope_value == "dm":
+        if context_channel:
+            await context_channel.send(
+                f"**DM private context updated**\n"
+                f"• Action: `{action_value}`\n"
+                f"• By: {actor}\n"
+                f"• Source: {source_label}\n"
+                f"• Full content was not mirrored here."
+            )
+        if dm_planning_channel and stored_text:
+            await send_response_in_chunks(
+                dm_planning_channel,
+                f"**DM private context update**\n"
+                f"• Action: `{action_value}`\n"
+                f"• By: {actor}\n"
+                f"• Source: {source_label}\n\n"
+                f"{stored_text}",
+            )
+        return
+
+    if context_channel and stored_text:
+        await send_response_in_chunks(
+            context_channel,
+            f"**{scope_value.title()} context update**\n"
+            f"• Action: `{action_value}`\n"
+            f"• By: {actor}\n"
+            f"• Source: {source_label}\n\n"
+            f"{stored_text}",
+        )
+
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
@@ -668,10 +726,14 @@ def setup_commands(tree, get_assistant_response):
 
         created = ", ".join(invite_result["created"]) if invite_result["created"] else "none"
         reused = ", ".join(invite_result["reused"]) if invite_result["reused"] else "none"
+        created_voice = ", ".join(invite_result["created_voice"]) if invite_result["created_voice"] else "none"
+        reused_voice = ", ".join(invite_result["reused_voice"]) if invite_result["reused_voice"] else "none"
         await interaction.followup.send(
             f"Campaign initialized for **{category.name}**.\n"
             f"Created channels: {created}\n"
-            f"Reused channels: {reused}"
+            f"Reused channels: {reused}\n"
+            f"Created voice channels: {created_voice}\n"
+            f"Reused voice channels: {reused_voice}"
         )
 
     @context_group.command(name="summary", description="Store public, session, or DM context for future transcript/summary runs.")
@@ -726,6 +788,13 @@ def setup_commands(tree, get_assistant_response):
 
             if action.value == "clear":
                 path = clear_context_text(scope.value)
+                await _mirror_context_update(
+                    interaction,
+                    scope_value=scope.value,
+                    action_value=action.value,
+                    stored_text=None,
+                    source_target=interaction.channel,
+                )
                 await send_interaction_message(
                     interaction,
                     f"Cleared `{scope.value}` summary context at `{path}`.",
@@ -775,6 +844,13 @@ def setup_commands(tree, get_assistant_response):
                 extra = (
                     "\nDM context is stored separately. It is only included when DM context is explicitly enabled for a run."
                 )
+            await _mirror_context_update(
+                interaction,
+                scope_value=scope.value,
+                action_value=action.value,
+                stored_text=stored_text,
+                source_target=source_target,
+            )
             await send_interaction_message(
                 interaction,
                 f"Saved `{scope.value}` summary context to `{path}` using `{action.value}`.{extra}",

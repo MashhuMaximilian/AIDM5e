@@ -23,6 +23,7 @@ DEFAULT_MEMORY_NAMES = ("gameplay", "out-of-game", "dm-private")
 DEFAULT_CHANNEL_SPECS = (
     {"name": "gameplay", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "telldm", "memory": "out-of-game", "always_on": True, "is_dm_private": False},
+    {"name": "context", "memory": "out-of-game", "always_on": False, "is_dm_private": False},
     {"name": "session-summary", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "feedback", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "npcs", "memory": "gameplay", "always_on": False, "is_dm_private": False},
@@ -30,6 +31,9 @@ DEFAULT_CHANNEL_SPECS = (
     {"name": "lore-and-teasers", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "items", "memory": "out-of-game", "always_on": False, "is_dm_private": False},
     {"name": "dm-planning", "memory": "dm-private", "always_on": False, "is_dm_private": True},
+)
+DEFAULT_VOICE_CHANNEL_SPECS = (
+    {"name": "session-voice", "is_dm_private": False},
 )
 
 
