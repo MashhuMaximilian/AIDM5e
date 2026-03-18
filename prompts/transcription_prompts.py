@@ -11,6 +11,7 @@ def build_transcript_capture_prompt(
     start_offset_seconds: int,
     duration_seconds: int,
     extra_instructions: str | None = None,
+    context_block: str | None = None,
 ) -> str:
     prompt = (
         "You are transcribing a D&D session audio chunk.\n\n"
@@ -20,14 +21,25 @@ def build_transcript_capture_prompt(
         "Goal:\n"
         "- produce a best-effort structured transcript for this chunk\n"
         "- identify speakers when possible\n"
-        "- identify character names when reasonably clear\n"
+        "- identify character names only when they are explicit or highly confident\n"
+        "- if a character identity is plausible but not strong enough to state confidently, use the format MAYBE <name>\n"
         "- tag each segment as one of: IC, OOC, META, UNCLEAR\n"
         "- tag each segment language as one of: RO, EN, RO+EN\n"
         "- provide best-effort timestamps relative to the start of this audio chunk\n"
-        "- if speaker identity is uncertain, use Unknown\n"
+        "- if speaker identity is uncertain but multiple recurring unidentified voices are distinguishable within the chunk, label them Unknown 1, Unknown 2, Unknown 3, etc.\n"
+        "- if there is only one unidentified voice, use Unknown\n"
         "- if character identity is uncertain, use null\n"
         "- if a timestamp is uncertain, still estimate it as best you can\n"
         "- ignore obvious dead air, page flips, and filler unless they matter to understanding the moment\n\n"
+        "Interpretation rules:\n"
+        "- If the session begins with players saying their real names and character names, use that as a best-effort roster anchor for later speaker/character mapping.\n"
+        "- For in-person single-device recordings, use consistent recurring Unknown 1 / Unknown 2 style speaker labels when voices are distinguishable but not identifiable.\n"
+        "- META should be used for explicit table-management talk, recap framing, planning about the session as a game, scheduling, recording consent, or similar out-of-fiction coordination.\n"
+        "- OOC should be used for general out-of-character play talk, mechanics discussion, or casual table conversation that is not clearly in-character.\n"
+        "- IC should be used for speech or narration clearly happening inside the fiction.\n"
+        "- If unsure between OOC and META, prefer OOC unless the line is clearly about the session as a session.\n"
+        "- Do not use kinship or role words like Father, Daughter, DM, player, narrator, or similar generic labels as character names unless the audio makes it explicit that this is the actual character name.\n"
+        "- If character identity is only tentative, prefer MAYBE <name> over a hard assignment.\n\n"
         "Chunk metadata:\n"
         f"- chunk_index: {chunk_index}\n"
         f"- session_start_offset_seconds: {start_offset_seconds}\n"
@@ -57,6 +69,8 @@ def build_transcript_capture_prompt(
         "- do not invent dialogue\n"
         "- do not hallucinate speaker names\n"
     )
+    if context_block:
+        prompt += f"\nReference context:\n{context_block}\n"
     if extra_instructions:
         prompt += f"\nAdditional instructions:\n{extra_instructions}\n"
     return prompt
@@ -66,8 +80,9 @@ def build_audio_summary_chunk_prompt(
     window_index: int,
     start_offset_seconds: int,
     end_offset_seconds: int,
+    context_block: str | None = None,
 ) -> str:
-    return (
+    prompt = (
         "You are analyzing D&D session audio directly.\n\n"
         "Return only valid JSON. Do not wrap it in code fences. Do not add commentary.\n\n"
         "You are given one or more contiguous audio chunk files from the same D&D session window. "
@@ -95,10 +110,13 @@ def build_audio_summary_chunk_prompt(
         "- preserve Romanian and English meaning correctly\n"
         "- do not invent scenes or facts that are not supported by the audio\n"
     )
+    if context_block:
+        prompt += f"\nReference context:\n{context_block}\n"
+    return prompt
 
 
-def build_audio_objective_summary_prompt(window_notes: str) -> str:
-    return (
+def build_audio_objective_summary_prompt(window_notes: str, context_block: str | None = None) -> str:
+    prompt = (
         "You are in transcript archivist mode.\n\n"
         "Using the audio-derived session notes below, write a factual, objective session record.\n\n"
         "Requirements:\n"
@@ -118,10 +136,13 @@ def build_audio_objective_summary_prompt(window_notes: str) -> str:
         "==========END SESSION============\n\n"
         f"Audio-derived notes:\n{window_notes}"
     )
+    if context_block:
+        prompt += f"\n\nReference context:\n{context_block}"
+    return prompt
 
 
-def build_audio_narrative_summary_prompt(window_notes: str) -> str:
-    return (
+def build_audio_narrative_summary_prompt(window_notes: str, context_block: str | None = None) -> str:
+    prompt = (
         "You are in narrative recap mode.\n\n"
         "Using the audio-derived session notes below, write a story-like session recap that remains faithful to what happened.\n\n"
         "Requirements:\n"
@@ -133,6 +154,9 @@ def build_audio_narrative_summary_prompt(window_notes: str) -> str:
         "- preserve uncertainty cautiously if the notes mark something unclear\n\n"
         f"Audio-derived notes:\n{window_notes}"
     )
+    if context_block:
+        prompt += f"\n\nReference context:\n{context_block}"
+    return prompt
 
 
 def build_transcript_objective_prompt(transcript: str) -> str:

@@ -21,6 +21,7 @@ AIDM_PROMPT_PATH = BASE_DIR / "prompts" / "system" / "aidm_prompt.txt"
 TRANSCRIPT_PATH = BASE_DIR / "transcript.txt"
 TRANSCRIPT_MANIFEST_PATH = BASE_DIR / "transcript_manifest.json"
 AUDIO_FILES_PATH = BASE_DIR / "audio_files"
+VOICE_CONTEXT_DIR = BASE_DIR / "voice_context"
 
 
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -74,6 +75,10 @@ AUDIO_PROMPT = os.getenv(
 )
 KEEP_AUDIO_FILES = os.getenv("KEEP_AUDIO_FILES", "false").lower() == "true"
 KEEP_TRANSCRIPT_FILES = os.getenv("KEEP_TRANSCRIPT_FILES", "false").lower() == "true"
+VOICE_PUBLIC_CONTEXT_PATH = os.getenv("VOICE_PUBLIC_CONTEXT_PATH", str(VOICE_CONTEXT_DIR / "summary_public.txt"))
+VOICE_SESSION_CONTEXT_PATH = os.getenv("VOICE_SESSION_CONTEXT_PATH", str(VOICE_CONTEXT_DIR / "summary_session.txt"))
+VOICE_DM_CONTEXT_PATH = os.getenv("VOICE_DM_CONTEXT_PATH", str(VOICE_CONTEXT_DIR / "summary_dm.txt"))
+VOICE_INCLUDE_DM_CONTEXT = os.getenv("VOICE_INCLUDE_DM_CONTEXT", "false").lower() == "true"
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
