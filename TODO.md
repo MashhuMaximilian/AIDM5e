@@ -22,6 +22,7 @@
 - [ ] Live-test the new context workflow in Discord:
   - [ ] `/context summary` writes the expected local file
   - [ ] `/context summary` mirrors public/session updates into `#context`
+  - [ ] `/context summary` user response reflects the published channel instead of a local path
   - [ ] DM-private context only mirrors safely
   - [ ] context updates affect the next live voice run without restarting the bot
 - [ ] Decide whether final audio-summary reduction should later receive merged transcript as secondary context.
@@ -39,6 +40,9 @@
   - [ ] `#context` exists
   - [ ] default session voice channel exists
   - [ ] AIDM auto-joins that voice flow correctly
+- [ ] Validate category deletion cleanup:
+  - [ ] deleting a category removes its campaign metadata from the database
+  - [ ] deleting the last campaign in a guild removes orphaned guild metadata too
 - [ ] Revisit whether `/reference` should support more attachment/document types beyond the current set.
 - [ ] Decide whether transcript should also be used as final-summary grounding context after audio-summary quality is evaluated.
 - [ ] Design a dedicated context-injection flow for summaries and future media generation:
@@ -113,5 +117,6 @@
 ## Project Hygiene
 
 - [ ] Add Docker and deployment cleanup.
+- [ ] Decide whether any non-transcript memory table is still needed now that `memory_messages` is gone.
 - [ ] Make a feature map document such as `map.md` and decide whether to track it.
 - [ ] Decide whether `PATCH_NOTES.md`, `TODO.md`, and the Codex handoff file should remain the standard project-tracking docs.

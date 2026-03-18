@@ -13,12 +13,10 @@ from .db_repository import (
     DEFAULT_VOICE_CHANNEL_SPECS,
     assign_memory_to_channel,
     assign_memory_to_thread,
-    clear_memory_messages,
     delete_memory as delete_memory_record,
     ensure_channel_for_category,
     ensure_memory,
     ensure_thread_for_channel,
-    fetch_memory_messages,
     get_assigned_memory_id,
     get_campaign_context_by_category,
     get_default_memory_id,
@@ -282,7 +280,7 @@ def delete_memory(memory_name_or_id: str, category_id: int | None = None) -> str
 
 
 async def list_thread_messages(_session, memory_id):
-    return await asyncio.to_thread(fetch_memory_messages, memory_id)
+    return []
 
 
 async def delete_message(_session, _memory_id, _message_id):
@@ -290,7 +288,7 @@ async def delete_message(_session, _memory_id, _message_id):
 
 
 async def reset_memory_history(memory_id: str) -> int:
-    return await asyncio.to_thread(clear_memory_messages, memory_id)
+    return 0
 
 
 async def lookup_memory_name(memory_id: str | None) -> str | None:

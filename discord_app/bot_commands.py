@@ -8,7 +8,7 @@ from discord import app_commands
 from psycopg import errors as pg_errors
 
 from config import DM_ROLE_NAME
-from data_store.db_repository import append_memory_message, build_thread_data_snapshot, fetch_memory_details
+from data_store.db_repository import build_thread_data_snapshot, fetch_memory_details
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
 from voice.context_support import clear_context_text, write_context_text
@@ -39,18 +39,20 @@ async def _mirror_context_update(
     action_value: str,
     stored_text: str | None,
     source_target: discord.abc.GuildChannel | discord.Thread | None,
-) -> None:
+) -> list[str]:
     category = interaction.channel.category
     if not category:
-        return
+        return []
 
     context_channel = discord.utils.get(category.text_channels, name="context")
     dm_planning_channel = discord.utils.get(category.text_channels, name="dm-planning")
     source_label = _describe_context_source(source_target)
     actor = getattr(interaction.user, "mention", interaction.user.display_name)
+    destinations: list[str] = []
 
     if scope_value == "dm":
         if context_channel:
+            destinations.append(f"{context_channel.mention} (metadata)")
             await context_channel.send(
                 f"**DM private context updated**\n"
                 f"• Action: `{action_value}`\n"
@@ -59,6 +61,7 @@ async def _mirror_context_update(
                 f"• Full content was not mirrored here."
             )
         if dm_planning_channel and stored_text:
+            destinations.append(f"{dm_planning_channel.mention} (full)")
             await send_response_in_chunks(
                 dm_planning_channel,
                 f"**DM private context update**\n"
@@ -67,9 +70,10 @@ async def _mirror_context_update(
                 f"• Source: {source_label}\n\n"
                 f"{stored_text}",
             )
-        return
+        return destinations
 
     if context_channel and stored_text:
+        destinations.append(context_channel.mention)
         await send_response_in_chunks(
             context_channel,
             f"**{scope_value.title()} context update**\n"
@@ -78,6 +82,7 @@ async def _mirror_context_update(
             f"• Source: {source_label}\n\n"
             f"{stored_text}",
         )
+    return destinations
 
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
@@ -407,18 +412,6 @@ def setup_commands(tree, get_assistant_response):
 
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
         if assigned_memory:
-            for message in conversation_history:
-                await asyncio.to_thread(
-                    append_memory_message,
-                    assigned_memory,
-                    "user",
-                    message,
-                    channel_id,
-                    thread_id,
-                    interaction.user.id,
-                    interaction.user.display_name,
-                )
-
             imported_content = "\n\n".join(conversation_history)
             acknowledgment_prompt = (
                 "A user transferred the following Discord content into this channel or thread. "
@@ -788,16 +781,18 @@ def setup_commands(tree, get_assistant_response):
 
             if action.value == "clear":
                 path = clear_context_text(scope.value)
-                await _mirror_context_update(
+                logger.info("Cleared %s summary context at %s", scope.value, path)
+                destinations = await _mirror_context_update(
                     interaction,
                     scope_value=scope.value,
                     action_value=action.value,
                     stored_text=None,
                     source_target=interaction.channel,
                 )
+                published = f" Published to {', '.join(destinations)}." if destinations else ""
                 await send_interaction_message(
                     interaction,
-                    f"Cleared `{scope.value}` summary context at `{path}`.",
+                    f"Cleared `{scope.value}` summary context.{published}",
                     ephemeral=True,
                 )
                 return
@@ -839,21 +834,28 @@ def setup_commands(tree, get_assistant_response):
 
             stored_text = "\n\n".join(part for part in parts if part).strip()
             path = write_context_text(scope.value, stored_text, action.value)
-            extra = ""
-            if scope.value == "dm":
-                extra = (
-                    "\nDM context is stored separately. It is only included when DM context is explicitly enabled for a run."
-                )
-            await _mirror_context_update(
+            logger.info("Saved %s summary context to %s using %s", scope.value, path, action.value)
+            destinations = await _mirror_context_update(
                 interaction,
                 scope_value=scope.value,
                 action_value=action.value,
                 stored_text=stored_text,
                 source_target=source_target,
             )
+            if scope.value == "dm":
+                response_text = (
+                    "Updated `dm` summary context. "
+                    + (f"Published to {', '.join(destinations)}. " if destinations else "")
+                    + "DM context is only included when DM context is explicitly enabled for a run."
+                )
+            else:
+                response_text = (
+                    f"Updated `{scope.value}` summary context."
+                    + (f" Published to {', '.join(destinations)}." if destinations else "")
+                )
             await send_interaction_message(
                 interaction,
-                f"Saved `{scope.value}` summary context to `{path}` using `{action.value}`.{extra}",
+                response_text,
                 ephemeral=True,
             )
         except Exception as exc:
@@ -1043,7 +1045,7 @@ def setup_commands(tree, get_assistant_response):
                     await interaction.followup.send("Invalid message ID — message not found.")
                     return
 
-            delete_count = await reset_memory_history(assigned_memory)
+            await reset_memory_history(assigned_memory)
 
             # === DELETE DISCORD MESSAGES ===
             deleted_discord_msgs = 0
@@ -1060,7 +1062,7 @@ def setup_commands(tree, get_assistant_response):
 
             await interaction.followup.send(
                 f"🧹 **Reset complete!**\n"
-                f"• Memory messages deleted: `{delete_count}`\n"
+                "• Stored memory rows deleted: `0` (chat transcript storage is disabled)\n"
                 f"• Discord messages deleted: `{deleted_discord_msgs}`"
             )
 

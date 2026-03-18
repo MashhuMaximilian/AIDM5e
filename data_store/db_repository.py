@@ -102,27 +102,7 @@ def ensure_runtime_schema() -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("create extension if not exists pgcrypto")
-            cur.execute(
-                """
-                create table if not exists memory_messages (
-                  id uuid primary key default gen_random_uuid(),
-                  memory_id uuid not null references memories(id) on delete cascade,
-                  role text not null check (role in ('user', 'assistant', 'system')),
-                  content text not null,
-                  source_channel_discord_id bigint,
-                  source_thread_discord_id bigint,
-                  source_user_discord_id bigint,
-                  source_display_name text,
-                  created_at timestamptz not null default now()
-                )
-                """
-            )
-            cur.execute(
-                """
-                create index if not exists idx_memory_messages_memory_id_created_at
-                on memory_messages(memory_id, created_at)
-                """
-            )
+            cur.execute("drop table if exists memory_messages")
         conn.commit()
 
 
@@ -451,69 +431,6 @@ def is_always_on(discord_channel_id: int, discord_thread_id: int | None = None) 
     return bool(row and row["always_on"])
 
 
-def append_memory_message(
-    memory_id: str,
-    role: str,
-    content: str,
-    source_channel_discord_id: int | None = None,
-    source_thread_discord_id: int | None = None,
-    source_user_discord_id: int | None = None,
-    source_display_name: str | None = None,
-) -> None:
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into memory_messages (
-                  memory_id,
-                  role,
-                  content,
-                  source_channel_discord_id,
-                  source_thread_discord_id,
-                  source_user_discord_id,
-                  source_display_name
-                )
-                values (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    memory_id,
-                    role,
-                    content,
-                    source_channel_discord_id,
-                    source_thread_discord_id,
-                    source_user_discord_id,
-                    source_display_name,
-                ),
-            )
-        conn.commit()
-
-
-def fetch_memory_messages(memory_id: str, limit: int = 40) -> list[dict[str, Any]]:
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select role, content, source_display_name, created_at
-                from memory_messages
-                where memory_id = %s
-                order by created_at desc
-                limit %s
-                """,
-                (memory_id, limit),
-            )
-            rows = cur.fetchall()
-    return list(reversed(rows))
-
-
-def clear_memory_messages(memory_id: str) -> int:
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("delete from memory_messages where memory_id = %s", (memory_id,))
-            deleted = cur.rowcount
-        conn.commit()
-    return deleted
-
-
 def delete_memory(memory_name_or_id: str, discord_category_id: int) -> bool:
     with _connect() as conn:
         with conn.cursor() as cur:
@@ -557,7 +474,71 @@ def delete_channel_record(discord_channel_id: int) -> None:
 def delete_campaign_record(discord_category_id: int) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("delete from campaigns where discord_category_id = %s", (discord_category_id,))
+            cur.execute(
+                """
+                select id, guild_id
+                from campaigns
+                where discord_category_id = %s
+                """,
+                (discord_category_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return
+
+            campaign_id = row["id"]
+            guild_id = row["guild_id"]
+
+            cur.execute(
+                """
+                delete from thread_memory_assignments
+                where thread_id in (
+                  select threads.id
+                  from threads
+                  join channels on channels.id = threads.channel_id
+                  where channels.campaign_id = %s
+                )
+                """,
+                (campaign_id,),
+            )
+            cur.execute(
+                """
+                delete from channel_memory_assignments
+                where channel_id in (
+                  select id
+                  from channels
+                  where campaign_id = %s
+                )
+                """,
+                (campaign_id,),
+            )
+            cur.execute(
+                """
+                delete from threads
+                where channel_id in (
+                  select id
+                  from channels
+                  where campaign_id = %s
+                )
+                """,
+                (campaign_id,),
+            )
+            cur.execute("delete from channels where campaign_id = %s", (campaign_id,))
+            cur.execute("delete from memories where campaign_id = %s", (campaign_id,))
+            cur.execute("delete from campaigns where id = %s", (campaign_id,))
+            cur.execute(
+                """
+                delete from guilds
+                where id = %s
+                  and not exists (
+                    select 1
+                    from campaigns
+                    where guild_id = %s
+                  )
+                """,
+                (guild_id, guild_id),
+            )
         conn.commit()
 
 

@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from config import AIDM_PROMPT_PATH, client
-from data_store.db_repository import append_memory_message, fetch_memory_messages, get_memory_name
+from data_store.db_repository import get_memory_name
 from discord_app.shared_functions import send_response_in_chunks
 from .gemini_client import gemini_client
 
@@ -40,21 +40,12 @@ def _normalize_user_message(user_message) -> str:
     return str(user_message)
 
 
-def _build_prompt(memory_name: str | None, history: list[dict], user_message: str) -> str:
-    history_lines = []
-    for entry in history:
-        role = entry["role"].upper()
-        speaker = entry.get("source_display_name")
-        if speaker and entry["role"] == "user":
-            history_lines.append(f"{role} ({speaker}): {entry['content']}")
-        else:
-            history_lines.append(f"{role}: {entry['content']}")
-
-    history_block = "\n".join(history_lines) if history_lines else "No prior memory."
+def _build_prompt(memory_name: str | None, user_message: str) -> str:
     memory_label = memory_name or "unassigned"
     return (
         f"Current memory bucket: {memory_label}\n\n"
-        f"Prior conversation memory:\n{history_block}\n\n"
+        "Persistent chat transcript history is disabled for this bot. "
+        "Use the assigned memory bucket and the current request only.\n\n"
         f"Current user request:\n{user_message}"
     )
 
@@ -81,9 +72,8 @@ async def get_assistant_response(
             return error_message
 
         normalized_message = _normalize_user_message(user_message)
-        history = await asyncio.to_thread(fetch_memory_messages, assigned_memory, 40)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
-        prompt = _build_prompt(memory_name, history, normalized_message)
+        prompt = _build_prompt(memory_name, normalized_message)
 
         async with channel.typing():
             response_text = await asyncio.to_thread(
@@ -95,27 +85,6 @@ async def get_assistant_response(
 
         if not response_text:
             return "No valid response received from Gemini."
-
-        await asyncio.to_thread(
-            append_memory_message,
-            assigned_memory,
-            "user",
-            normalized_message,
-            channel_id,
-            thread_id,
-            None,
-            None,
-        )
-        await asyncio.to_thread(
-            append_memory_message,
-            assigned_memory,
-            "assistant",
-            response_text,
-            channel_id,
-            thread_id,
-            None,
-            None,
-        )
 
         logger.info("Gemini responded in memory '%s': %s", assigned_memory, response_text[:100])
         if send_message:

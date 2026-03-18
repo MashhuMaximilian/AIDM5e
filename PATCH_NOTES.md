@@ -5,7 +5,8 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 ## Current Architecture
 
 - Gemini is the active LLM provider.
-- Supabase-backed app-owned memories are the runtime source of truth.
+- Supabase-backed campaign/channel/thread metadata is the runtime source of truth.
+- Chat transcript rows are no longer persisted in Supabase.
 - Discord remains the source of visible history, files, and channel structure.
 - Existing Discord attachments are read on demand; they are not blindly copied into long-term memory.
 - Local-only artifacts remain out of git and should not drive runtime behavior.
@@ -58,6 +59,7 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
 - Public and session context updates are mirrored into `#context` for visibility and auditability.
 - DM-private context is not mirrored publicly; only metadata is mirrored into `#context`, while private content can be mirrored into `#dm-planning`.
 - Runtime context is still loaded from local files under `voice_context/`, so Discord-visible context updates become durable inputs for offline and live voice runs.
+- The user-facing `/context summary` response now confirms the channel publication instead of exposing the local file path.
 
 ## Commands and Memory UX
 
@@ -76,6 +78,8 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - thread inheritance vs thread override display
   - unassigned memory visibility
 - `/channel send` now mirrors transferred content into the target memory and posts a short acknowledgment there.
+- `/channel send` no longer writes transferred content into a Supabase transcript-history table.
+- `/memory reset` no longer clears Supabase chat transcript rows because that storage path has been removed.
 - Dense list formatting was normalized for Discord output.
 - Utility command error handling was improved and old command duplication issues were cleaned up.
 
@@ -118,6 +122,17 @@ The old transcript flow has been substantially refactored.
 - transcript segments now target:
   - best-effort timestamp
   - `IC` / `OOC` / `META` / `UNCLEAR`
+
+## Database Lifecycle
+
+- Deleting a Discord category now explicitly removes the associated campaign data from the runtime database:
+  - campaign
+  - memories
+  - channel assignments
+  - thread assignments
+  - channels
+  - threads
+- Orphaned guild rows are also cleaned up when the deleted category was the guild's last campaign.
   - speaker
   - character when clear
   - `RO` / `EN` / `RO+EN`
@@ -174,6 +189,9 @@ These stay local and should not drive runtime behavior:
 - `a9bfe0a` `Wire separate Gemini chat and summary models`
 - `013a97d` `Refactor voice transcription and audio-native summaries`
 - `d1bfc97` `Refactor voice pipeline and add summary context workflow`
+- `aa07b92` `Harden chunk-local transcript timestamp repair`
+- `2465f18` `Add context channel mirroring and invite voice scaffold`
+- `4269575` `Stop tracking Codex handoff notes`
 - `dc0c150` `Remove migration shims after package reorg`
 - `5bb2d65` `Normalize chunk-relative transcript timestamps`
 
