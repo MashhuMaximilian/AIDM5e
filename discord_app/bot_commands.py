@@ -7,11 +7,15 @@ import discord
 from discord import app_commands
 from psycopg import errors as pg_errors
 
+from ai_services.context_compiler import (
+    build_context_entry_messages,
+    compile_context_packet_from_category,
+)
+from content_retrieval import select_messages
 from config import DM_ROLE_NAME
 from data_store.db_repository import build_thread_data_snapshot, fetch_memory_details
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
-from voice.context_support import clear_context_text, read_context_text, write_context_text
 
 from .helper_functions import *
 from .shared_functions import *
@@ -180,11 +184,21 @@ def _context_surface_label(category: discord.CategoryChannel | None, scope_value
     return _get_category_channel_mention(category, "context")
 
 
-def _context_runtime_status(category: discord.CategoryChannel | None, scope_value: str) -> str:
-    text = read_context_text(scope_value)
+def _compiled_context_status(
+    category: discord.CategoryChannel | None,
+    scope_value: str,
+    text: str | None,
+    source_label: str,
+) -> str:
+    text = text.strip() if text else ""
     surface = _context_surface_label(category, scope_value)
     if not text:
-        return f"**{_scope_label(scope_value)}**\n• Runtime state: empty\n• Discord surface: {surface}"
+        return (
+            f"**{_scope_label(scope_value)}**\n"
+            f"• Runtime state: empty\n"
+            f"• Source: {source_label}\n"
+            f"• Discord surface: {surface}"
+        )
 
     lines = len(text.splitlines())
     chars = len(text)
@@ -192,6 +206,7 @@ def _context_runtime_status(category: discord.CategoryChannel | None, scope_valu
     return (
         f"**{_scope_label(scope_value)}**\n"
         f"• Runtime state: {chars} chars across {lines} lines\n"
+        f"• Source: {source_label}\n"
         f"• Discord surface: {surface}\n"
         f"• Preview: {preview}"
     )
@@ -232,26 +247,15 @@ async def _update_context_scope(
     if scope_value == "dm" and not _member_is_dm(interaction):
         raise PermissionError(f"Only members with the `{DM_ROLE_NAME}` role can change DM-private summary context.")
 
-    if action_value == "clear":
-        path = clear_context_text(scope_value)
-        logger.info("Cleared %s summary context at %s", scope_value, path)
-        destinations = await _mirror_context_update(
-            interaction,
-            scope_value=scope_value,
-            action_value=action_value,
-            stored_text=None,
-            source_target=interaction.channel,
-        )
-        published = f" Published to {', '.join(destinations)}." if destinations else ""
-        return f"Cleared `{scope_value}` summary context.{published}"
-
     source_target = await _resolve_context_source_target(interaction, channel=channel, thread=thread)
-    if source_target is None:
+    if source_target is None and action_value != "clear":
         raise ValueError("Source channel or thread not found.")
 
+    selected_messages = []
     parts: list[str] = []
-    if any(value is not None for value in (start, end, message_ids, last_n)):
-        material, options_or_error = await fetch_reference_material(
+    source_mode = "manual_note"
+    if action_value != "clear" and any(value is not None for value in (start, end, message_ids, last_n)):
+        selected_messages, options_or_error = await select_messages(
             source_target,
             start,
             end,
@@ -260,31 +264,54 @@ async def _update_context_scope(
         )
         if isinstance(options_or_error, str):
             raise ValueError(options_or_error)
+        material = await build_history_from_messages(selected_messages, include_attachments=True)
         parts.append("\n\n".join(material))
+        source_mode = "selected_messages"
 
-    if note:
+    if action_value != "clear" and note:
         parts.append(note.strip())
+        source_mode = "mixed" if source_mode == "selected_messages" else "manual_note"
 
-    if not parts:
+    if action_value != "clear" and not parts:
         raise ValueError("Provide message selectors and/or a manual note, or use `/context clear`.")
 
+    destination_channel = None
+    category = interaction.channel.category
+    if category:
+        if scope_value == "dm":
+            destination_channel = discord.utils.get(category.text_channels, name="dm-planning")
+        else:
+            destination_channel = discord.utils.get(category.text_channels, name="context")
+    if destination_channel is None:
+        raise ValueError("Could not find the destination context channel for this category.")
+
     stored_text = "\n\n".join(part for part in parts if part).strip()
-    path = write_context_text(scope_value, stored_text, action_value)
-    logger.info("Saved %s summary context to %s using %s", scope_value, path, action_value)
-    destinations = await _mirror_context_update(
-        interaction,
-        scope_value=scope_value,
-        action_value=action_value,
-        stored_text=stored_text,
-        source_target=source_target,
+    source_label = _describe_context_source(source_target) if source_target else "manual note"
+    messages = build_context_entry_messages(
+        scope=scope_value,
+        action=action_value,
+        text=stored_text,
+        source_label=source_label,
+        source_mode=source_mode if action_value != "clear" else "clear",
+        actor_name=getattr(interaction.user, "mention", interaction.user.display_name),
+        actor_id=getattr(interaction.user, "id", None),
+    )
+    for message in messages:
+        await destination_channel.send(message)
+
+    logger.info(
+        "Published %s context entry to #%s using %s",
+        scope_value,
+        destination_channel.name,
+        action_value,
     )
     if scope_value == "dm":
         return (
             "Updated `dm` summary context. "
-            + (f"Published to {', '.join(destinations)}. " if destinations else "")
-            + "DM context is only included when DM context is explicitly enabled for a run."
+            f"Published to {destination_channel.mention}. "
+            "DM context is only included when DM context is explicitly enabled for a run."
         )
-    return f"Updated `{scope_value}` summary context." + (f" Published to {', '.join(destinations)}." if destinations else "")
+    return f"Updated `{scope_value}` summary context. Published to {destination_channel.mention}."
 
 
 def _describe_context_source(source_target: discord.abc.GuildChannel | discord.Thread | None) -> str:
@@ -296,58 +323,6 @@ def _describe_context_source(source_target: discord.abc.GuildChannel | discord.T
         return source_target.mention
     return getattr(source_target, "name", "manual note")
 
-
-async def _mirror_context_update(
-    interaction: discord.Interaction,
-    *,
-    scope_value: str,
-    action_value: str,
-    stored_text: str | None,
-    source_target: discord.abc.GuildChannel | discord.Thread | None,
-) -> list[str]:
-    category = interaction.channel.category
-    if not category:
-        return []
-
-    context_channel = discord.utils.get(category.text_channels, name="context")
-    dm_planning_channel = discord.utils.get(category.text_channels, name="dm-planning")
-    source_label = _describe_context_source(source_target)
-    actor = getattr(interaction.user, "mention", interaction.user.display_name)
-    destinations: list[str] = []
-
-    if scope_value == "dm":
-        if context_channel:
-            destinations.append(f"{context_channel.mention} (metadata)")
-            await context_channel.send(
-                f"**DM private context updated**\n"
-                f"• Action: `{action_value}`\n"
-                f"• By: {actor}\n"
-                f"• Source: {source_label}\n"
-                f"• Full content was not mirrored here."
-            )
-        if dm_planning_channel and stored_text:
-            destinations.append(f"{dm_planning_channel.mention} (full)")
-            await send_response_in_chunks(
-                dm_planning_channel,
-                f"**DM private context update**\n"
-                f"• Action: `{action_value}`\n"
-                f"• By: {actor}\n"
-                f"• Source: {source_label}\n\n"
-                f"{stored_text}",
-            )
-        return destinations
-
-    if context_channel and stored_text:
-        destinations.append(context_channel.mention)
-        await send_response_in_chunks(
-            context_channel,
-            f"**{scope_value.title()} context update**\n"
-            f"• Action: `{action_value}`\n"
-            f"• By: {actor}\n"
-            f"• Source: {source_label}\n\n"
-            f"{stored_text}",
-        )
-    return destinations
 
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
@@ -1097,15 +1072,25 @@ def setup_commands(tree, get_assistant_response):
     @context_group.command(name="list", description="Show the current runtime state of public, session, and DM context.")
     async def context_list(interaction: discord.Interaction):
         category = interaction.channel.category
+        packet = await compile_context_packet_from_category(
+            category,
+            include_dm_context=_member_is_dm(interaction),
+            fallback_to_local_files=True,
+        )
         blocks = [
             f"**Context status for {category.mention if category else interaction.guild.name}**",
             "",
-            _context_runtime_status(category, "public"),
+            _compiled_context_status(category, "public", packet.public_text, packet.public_source),
             "",
-            _context_runtime_status(category, "session"),
+            _compiled_context_status(category, "session", packet.session_text, packet.session_source),
         ]
         if _member_is_dm(interaction):
-            blocks.extend(["", _context_runtime_status(category, "dm")])
+            blocks.extend(
+                [
+                    "",
+                    _compiled_context_status(category, "dm", packet.dm_text, packet.dm_source),
+                ]
+            )
         else:
             blocks.extend(
                 [
@@ -1119,7 +1104,7 @@ def setup_commands(tree, get_assistant_response):
         blocks.extend(
             [
                 "",
-                "This reflects the current runtime cache. In Phase 2 we will move toward compiling this directly from Discord context messages and attachments instead of depending on local files.",
+                "This reflects the effective compiled context used by the runtime. Discord-managed context entries are preferred, and local files only remain as a transition fallback for older runs.",
             ]
         )
         await send_interaction_message(interaction, "\n".join(blocks), ephemeral=True)

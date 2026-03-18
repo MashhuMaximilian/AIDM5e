@@ -11,9 +11,9 @@
 - [x] `/invite` creates `#context`
 - [x] `/invite` posts onboarding guidance back into the channel where it was invoked
 - [x] `/help` exists as a topic-based command for onboarding and grouped command discovery
-- [x] `/context summary` writes runtime context files
-- [x] `/context summary` mirrors public/session updates into `#context`
-- [x] `/context summary` mirrors DM-private updates safely
+- [x] `/context add` and `/context clear` publish canonical managed context entries into Discord
+- [x] `/context list` shows the effective compiled context state
+- [x] `/context summary` remains as a compatibility alias
 - [x] `CODEX_HANDOFF.md` removed from git tracking and ignored
 - [x] Supabase `memory_messages` storage path removed from runtime code
 - [x] Initial Docker runtime scaffold added
@@ -75,11 +75,11 @@
   - [ ] Decide how long `/context summary` should remain as a compatibility alias before removal
 
 - [ ] Phase 2: Context compilation without DB payload storage
-  - [ ] Stop treating local files under `voice_context/` as the long-term context source
-  - [ ] Use Discord messages and attachments as the durable source of truth for context
-  - [ ] Avoid storing context text/image payloads in Supabase
-  - [ ] Compile transcript context packets in memory from Discord-managed context entries
-  - [ ] Compile summary context packets in memory from Discord-managed context entries
+  - [x] Use Discord-managed context messages as the preferred source of truth for context
+  - [x] Avoid storing context text/image payloads in Supabase
+  - [x] Compile transcript context packets in memory from Discord-managed context entries
+  - [x] Compile summary context packets in memory from Discord-managed context entries
+  - [ ] Fully remove the temporary local-file fallback under `voice_context/`
   - [ ] Decide how session context gets selected for a run without relying on automatic date inference
 
 - [ ] Phase 3: Image-aware context

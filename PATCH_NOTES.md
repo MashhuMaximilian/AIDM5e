@@ -64,13 +64,12 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - `/context clear`
   - `/context list`
 - `/context summary` remains available as a compatibility alias during the transition.
-- `#context` is the current human-facing context surface for public and session updates, while `#dm-planning` remains the DM-private surface.
-- Public and session context updates are mirrored into `#context` for visibility and auditability.
-- DM-private context is not mirrored publicly; only metadata is mirrored into `#context`, while private content can be mirrored into `#dm-planning`.
-- Runtime context is still loaded from local files under `voice_context/`, so Discord-visible context updates become durable inputs for offline and live voice runs.
-- The user-facing `/context summary` response now confirms the channel publication instead of exposing the local file path.
-- `/context list` now shows the current runtime view of each scope so you can sanity-check what transcript/summary runs will consume.
-- The current long-term design direction is to treat Discord messages and attachments as the durable context source of truth, compile runtime context packets in memory, and avoid storing context payloads in Supabase.
+- `#context` is the human-facing public/session authoring surface, while `#dm-planning` remains the DM-private surface.
+- `/context add` and `/context clear` now publish canonical managed context entries directly into those Discord channels.
+- `/context list` now shows the effective compiled context state so you can sanity-check what transcript/summary runs will consume.
+- Live voice transcript/summary runs now prefer compiler-built Discord context packets over local files.
+- Local files under `voice_context/` remain only as a temporary transition fallback and for explicit offline overrides.
+- The current long-term direction remains: Discord messages and attachments are the durable context source of truth, runtime packets are compiled in memory, and context payloads are not stored in Supabase.
 
 ## Commands and Memory UX
 

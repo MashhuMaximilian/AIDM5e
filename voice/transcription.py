@@ -6,10 +6,17 @@ from pathlib import Path
 
 import discord
 
+from ai_services.context_compiler import compile_context_packet_from_category
 from .audio_utils import get_category_id_voice, probe_audio_duration, split_audio_file_for_offline
 from .context_support import load_voice_context
 from .orchestrator import VoiceSessionOrchestrator
-from config import AUDIO_CHUNK_SECONDS, AUDIO_FILES_PATH, TRANSCRIPT_MANIFEST_PATH, TRANSCRIPT_PATH
+from config import (
+    AUDIO_CHUNK_SECONDS,
+    AUDIO_FILES_PATH,
+    TRANSCRIPT_MANIFEST_PATH,
+    TRANSCRIPT_PATH,
+    VOICE_INCLUDE_DM_CONTEXT,
+)
 from discord_app.shared_functions import send_response_in_chunks
 from .summary_pipeline import AudioSummaryService
 from .transcript_manifest import TranscriptManifestStore
@@ -44,7 +51,7 @@ class VoiceRecorder:
             self.transcript_manifest_path,
             audio_files_path,
         )
-        self.context_block = load_voice_context()
+        self.context_block = None
         self.capture_service = VoiceCaptureService(audio_files_path)
         self.orchestrator = VoiceSessionOrchestrator()
 
@@ -93,6 +100,14 @@ class VoiceRecorder:
 
     async def build_final_summaries_from_windows(self, window_summaries: list[dict]) -> tuple[str | None, str | None]:
         return await self.summary_service.build_final_summaries_from_windows(window_summaries, self.context_block)
+
+    async def refresh_context_from_category(self, category: discord.CategoryChannel | None) -> None:
+        packet = await compile_context_packet_from_category(
+            category,
+            include_dm_context=VOICE_INCLUDE_DM_CONTEXT,
+            fallback_to_local_files=True,
+        )
+        self.context_block = packet.text_block
 
     async def process_existing_audio_files(
         self,
@@ -169,7 +184,7 @@ class VoiceRecorder:
             self.output_service.cleanup_offline_segments(segment_output_root)
 
     async def capture_audio(self, voice_client, duration=recording_duration):
-        self.context_block = load_voice_context()
+        await self.refresh_context_from_category(getattr(voice_client.channel, "category", None))
         await self.capture_service.capture_audio(self, voice_client, duration)
 
     async def process_final_transcription(self):
@@ -204,6 +219,8 @@ class VoiceRecorder:
         if not self.voice_client:
             logging.error("Voice client is not connected. Cannot summarize transcript.")
             return
+
+        await self.refresh_context_from_category(getattr(self.voice_client.channel, "category", None))
 
         guild = self.voice_client.guild
         summary_channel = discord.utils.get(guild.text_channels, name="session-summary", category_id=category_id)

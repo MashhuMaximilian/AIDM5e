@@ -1,5 +1,5 @@
-from pathlib import Path
 import re
+from pathlib import Path
 
 from config import (
     VOICE_CONTEXT_DIR,
@@ -10,7 +10,7 @@ from config import (
 )
 
 
-def _extract_roster_candidates(text: str) -> list[str]:
+def extract_roster_candidates(text: str) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
 
@@ -97,14 +97,21 @@ def load_voice_context(
     session_text = _read_optional_text(session_context_path or VOICE_SESSION_CONTEXT_PATH)
     dm_allowed = VOICE_INCLUDE_DM_CONTEXT if include_dm_context is None else include_dm_context
     dm_text = _read_optional_text(dm_context_path or VOICE_DM_CONTEXT_PATH) if dm_allowed else None
+    return build_context_block(public_text=public_text, session_text=session_text, dm_text=dm_text)
 
+
+def build_context_block(
+    public_text: str | None = None,
+    session_text: str | None = None,
+    dm_text: str | None = None,
+) -> str | None:
     sections = []
-    if public_text:
-        sections.append("Public evergreen context:\n" + public_text)
-    if session_text:
-        sections.append("Session-only context:\n" + session_text)
-    if dm_text:
-        sections.append("DM-private context:\n" + dm_text)
+    if public_text and public_text.strip():
+        sections.append("Public evergreen context:\n" + public_text.strip())
+    if session_text and session_text.strip():
+        sections.append("Session-only context:\n" + session_text.strip())
+    if dm_text and dm_text.strip():
+        sections.append("DM-private context:\n" + dm_text.strip())
 
     if not sections:
         return None
@@ -112,7 +119,7 @@ def load_voice_context(
     roster_candidates: list[str] = []
     for text in (public_text, session_text, dm_text):
         if text:
-            roster_candidates.extend(_extract_roster_candidates(text))
+            roster_candidates.extend(extract_roster_candidates(text))
 
     roster_block = ""
     if roster_candidates:
