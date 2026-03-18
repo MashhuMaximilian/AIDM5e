@@ -29,6 +29,22 @@ class TranscriptService:
             "unknown",
         }
 
+    def build_additional_transcription_instructions(
+        self,
+        manifest_store: TranscriptManifestStore,
+        chunk_info: dict,
+    ) -> str:
+        instructions: list[str] = [AUDIO_PROMPT]
+        prior_roster_context = manifest_store.build_roster_context(before_chunk_index=chunk_info["chunk_index"])
+        if prior_roster_context:
+            instructions.append(prior_roster_context)
+        if chunk_info.get("chunk_index") == 1:
+            instructions.append(
+                "This is the opening chunk. Pay special attention to introductions, self-identification, "
+                "and player-to-character mapping if they occur."
+            )
+        return "\n\n".join(part for part in instructions if part)
+
     def format_timestamp(self, total_seconds: int) -> str:
         hours, remainder = divmod(max(0, int(total_seconds)), 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -73,10 +89,17 @@ class TranscriptService:
             "IN CHARACTER": "IC",
             "META": "META",
             "UNCLEAR": "UNCLEAR",
-            "RULES": "OOC",
-            "COMBAT": "IC",
+            "RULES": "RULES",
+            "MECHANICS": "RULES",
+            "SYSTEM": "RULES",
+            "COMBAT": "COMBAT",
+            "TACTICAL": "COMBAT",
+            "TACTICS": "COMBAT",
         }
-        return aliases.get(normalized, normalized if normalized in {"IC", "OOC", "META", "UNCLEAR"} else "UNCLEAR")
+        return aliases.get(
+            normalized,
+            normalized if normalized in {"IC", "OOC", "META", "RULES", "COMBAT", "UNCLEAR"} else "UNCLEAR",
+        )
 
     def normalize_speaker(self, speaker: str | None) -> str:
         if not speaker:
@@ -116,6 +139,37 @@ class TranscriptService:
         if lowered in self._role_like_character_labels:
             return None
         return cleaned
+
+    def normalize_roster_hints(self, hints: list[dict] | None) -> list[dict]:
+        normalized_hints: list[dict] = []
+        if not hints:
+            return normalized_hints
+
+        seen: set[tuple[str | None, str | None, str | None]] = set()
+        for hint in hints:
+            if not isinstance(hint, dict):
+                continue
+            speaker = self.normalize_speaker(hint.get("speaker"))
+            if speaker == "Unknown":
+                speaker = None
+            character = self.normalize_character(hint.get("character"))
+            confidence = str(hint.get("confidence", "")).strip().lower()
+            if confidence not in {"explicit", "probable"}:
+                confidence = "probable"
+            evidence = str(hint.get("evidence", "")).strip()
+            key = (speaker, character, confidence)
+            if key in seen or not (speaker or character):
+                continue
+            seen.add(key)
+            normalized_hints.append(
+                {
+                    "speaker": speaker,
+                    "character": character,
+                    "confidence": confidence,
+                    "evidence": evidence,
+                }
+            )
+        return normalized_hints
 
     def normalize_segment(self, segment: dict) -> dict:
         normalized = dict(segment)
@@ -242,7 +296,7 @@ class TranscriptService:
                 chunk_info["chunk_index"],
                 chunk_info["start_offset_seconds"],
                 chunk_info["duration_seconds"],
-                AUDIO_PROMPT,
+                self.build_additional_transcription_instructions(manifest_store, chunk_info),
                 context_block,
             )
             transcript = await asyncio.to_thread(
@@ -252,6 +306,7 @@ class TranscriptService:
             )
             logger.info("Received transcription: %s", transcript[:100])
             payload = self.extract_json_payload(transcript)
+            normalized_roster_hints = self.normalize_roster_hints(payload.get("roster_hints", []))
             normalized_segments = self.normalize_segments(
                 payload.get("segments", []),
                 chunk_info["start_offset_seconds"],
@@ -261,6 +316,7 @@ class TranscriptService:
                 chunk_info["chunk_index"],
                 status="transcribed",
                 notes=payload.get("notes", []),
+                roster_hints=normalized_roster_hints,
                 segments=normalized_segments,
             )
         except Exception as exc:

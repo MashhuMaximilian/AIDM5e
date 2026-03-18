@@ -1,7 +1,7 @@
 DEFAULT_AUDIO_PROMPT = (
     "Transcribe this D&D session audio. The speakers may switch between Romanian and English, "
     "sometimes in the same exchange. Identify speakers if possible. Pay attention to whether the "
-    "speech appears to be in-game, out-of-game, mechanical discussion, joking, planning, or meta "
+    "speech appears to be in-game, out-of-game, rules discussion, tactical combat, joking, planning, or meta "
     "commentary. If speaker identity or mode is unclear, mark it as uncertain instead of guessing."
 )
 
@@ -23,7 +23,7 @@ def build_transcript_capture_prompt(
         "- identify speakers when possible\n"
         "- identify character names only when they are explicit or highly confident\n"
         "- if a character identity is plausible but not strong enough to state confidently, use the format MAYBE <name>\n"
-        "- tag each segment as one of: IC, OOC, META, UNCLEAR\n"
+        "- tag each segment as one of: IC, OOC, META, RULES, COMBAT, UNCLEAR\n"
         "- tag each segment language as one of: RO, EN, RO+EN\n"
         "- provide best-effort timestamps relative to the start of this audio chunk\n"
         "- IMPORTANT: offset_seconds must be chunk-local only, not session-global\n"
@@ -37,11 +37,16 @@ def build_transcript_capture_prompt(
         "- ignore obvious dead air, page flips, and filler unless they matter to understanding the moment\n\n"
         "Interpretation rules:\n"
         "- If the session begins with players saying their real names and character names, use that as a best-effort roster anchor for later speaker/character mapping.\n"
+        "- If this chunk contains self-introductions or explicit player-to-character mapping, add that information to roster_hints.\n"
         "- For in-person single-device recordings, use consistent recurring Unknown 1 / Unknown 2 style speaker labels when voices are distinguishable but not identifiable.\n"
         "- META should be used for explicit table-management talk, recap framing, planning about the session as a game, scheduling, recording consent, or similar out-of-fiction coordination.\n"
+        "- RULES should be used for explicit mechanics adjudication, spell/rule lookup talk, build/level-up talk, dice resolution discussion, or similar system-facing discussion.\n"
+        "- COMBAT should be used for tactical turn-taking, declared combat actions, initiative-order chatter, target selection, positioning, damage calls, or other encounter-facing play when the line is primarily about the active fight.\n"
         "- OOC should be used for general out-of-character play talk, mechanics discussion, or casual table conversation that is not clearly in-character.\n"
         "- IC should be used for speech or narration clearly happening inside the fiction.\n"
         "- If unsure between OOC and META, prefer OOC unless the line is clearly about the session as a session.\n"
+        "- If unsure between OOC and RULES, prefer RULES when the line is explicitly about how the game system works.\n"
+        "- If unsure between IC and COMBAT, prefer COMBAT when the line is mostly tactical/turn-resolution oriented.\n"
         "- Do not use kinship or role words like Father, Daughter, DM, player, narrator, or similar generic labels as character names unless the audio makes it explicit that this is the actual character name.\n"
         "- If character identity is only tentative, prefer MAYBE <name> over a hard assignment.\n\n"
         "Chunk metadata:\n"
@@ -54,13 +59,21 @@ def build_transcript_capture_prompt(
         '  "start_offset_seconds": number,\n'
         '  "duration_seconds": number,\n'
         '  "notes": [string],\n'
+        '  "roster_hints": [\n'
+        "    {\n"
+        '      "speaker": string or null,\n'
+        '      "character": string or null,\n'
+        '      "confidence": "explicit" | "probable",\n'
+        '      "evidence": string\n'
+        "    }\n"
+        "  ],\n"
         '  "segments": [\n'
         "    {\n"
         '      "offset_seconds": number,\n'
         '      "speaker": string,\n'
         '      "character": string or null,\n'
         '      "lang": "RO" | "EN" | "RO+EN",\n'
-        '      "mode": "IC" | "OOC" | "META" | "UNCLEAR",\n'
+        '      "mode": "IC" | "OOC" | "META" | "RULES" | "COMBAT" | "UNCLEAR",\n'
         '      "text": string\n'
         "    }\n"
         "  ]\n"
@@ -72,6 +85,7 @@ def build_transcript_capture_prompt(
         "- do not translate\n"
         "- do not invent dialogue\n"
         "- do not hallucinate speaker names\n"
+        "- roster_hints should only be populated when this chunk contains evidence of speaker/character mapping\n"
     )
     if context_block:
         prompt += f"\nReference context:\n{context_block}\n"

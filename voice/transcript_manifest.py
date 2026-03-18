@@ -49,6 +49,7 @@ class TranscriptManifestStore:
                 "duration_seconds": duration,
                 "status": "recorded",
                 "notes": [],
+                "roster_hints": [],
                 "segments": [],
             }
             self.chunk_manifest.append(chunk)
@@ -61,6 +62,7 @@ class TranscriptManifestStore:
         *,
         status: str,
         notes: list[str] | None = None,
+        roster_hints: list[dict] | None = None,
         segments: list[dict] | None = None,
         error: str | None = None,
     ) -> None:
@@ -71,6 +73,8 @@ class TranscriptManifestStore:
             chunk["status"] = status
             if notes is not None:
                 chunk["notes"] = notes
+            if roster_hints is not None:
+                chunk["roster_hints"] = roster_hints
             if segments is not None:
                 chunk["segments"] = segments
             if error:
@@ -85,6 +89,39 @@ class TranscriptManifestStore:
 
     def pending_recorded_chunks(self) -> list[dict]:
         return [chunk for chunk in self.chunk_manifest if chunk.get("status") == "recorded"]
+
+    def build_roster_context(self, *, before_chunk_index: int | None = None) -> str | None:
+        lines: list[str] = []
+        seen: set[tuple[str | None, str | None, str | None]] = set()
+        for chunk in self.sorted_chunks():
+            if before_chunk_index is not None and chunk["chunk_index"] >= before_chunk_index:
+                continue
+            for hint in chunk.get("roster_hints", []) or []:
+                speaker = hint.get("speaker")
+                character = hint.get("character")
+                confidence = hint.get("confidence")
+                key = (
+                    speaker.strip() if isinstance(speaker, str) and speaker.strip() else None,
+                    character.strip() if isinstance(character, str) and character.strip() else None,
+                    confidence.strip().lower() if isinstance(confidence, str) and confidence.strip() else None,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                details: list[str] = []
+                if key[0]:
+                    details.append(f"speaker={key[0]}")
+                if key[1]:
+                    details.append(f"character={key[1]}")
+                if key[2]:
+                    details.append(f"confidence={key[2]}")
+                if details:
+                    lines.append("- " + ", ".join(details))
+
+        if not lines:
+            return None
+        return "Previously observed roster hints from earlier chunks:\n" + "\n".join(lines)
 
     async def clear_transcript_artifacts(self) -> None:
         try:

@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from config import (
     VOICE_CONTEXT_DIR,
@@ -7,6 +8,37 @@ from config import (
     VOICE_PUBLIC_CONTEXT_PATH,
     VOICE_SESSION_CONTEXT_PATH,
 )
+
+
+def _extract_roster_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: str) -> None:
+        cleaned = candidate.strip()
+        if not cleaned or cleaned.lower() in seen:
+            return
+        seen.add(cleaned.lower())
+        candidates.append(cleaned)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip(" \t-*•")
+        if not line:
+            continue
+
+        playing_match = re.search(
+            r"(?i)\b([A-Za-z][A-Za-z0-9'_-]{1,40})\s+(?:is\s+)?(?:playing|plays|as)\s+([A-Za-z][A-Za-z0-9'_-]{1,40})\b",
+            line,
+        )
+        if playing_match:
+            add(f"Roster candidate: player/voice {playing_match.group(1)} is associated with character {playing_match.group(2)}.")
+
+        if ("class" in line.lower() or "race" in line.lower() or "background" in line.lower()) and "|" in line:
+            name = line.split("|", 1)[0].strip()
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9' _-]{1,40}", name):
+                add(f"Known character candidate from context: {name}.")
+
+    return candidates
 
 
 def _read_optional_text(path_value: str | None) -> str | None:
@@ -70,9 +102,26 @@ def load_voice_context(
     if not sections:
         return None
 
+    roster_candidates: list[str] = []
+    for text in (public_text, session_text, dm_text):
+        if text:
+            roster_candidates.extend(_extract_roster_candidates(text))
+
+    roster_block = ""
+    if roster_candidates:
+        deduped = []
+        seen = set()
+        for item in roster_candidates:
+            lowered = item.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            deduped.append(item)
+        roster_block = "\n\nDerived roster candidates:\n" + "\n".join(f"- {item}" for item in deduped)
+
     guidance = (
         "Reference context is provided below for names, spelling, character/campaign facts, and public continuity.\n"
         "Use it to improve identification and consistency, but do not invent events or dialogue that are unsupported by the audio.\n"
         "If context conflicts with the audio, prefer the audio and note the uncertainty.\n"
     )
-    return guidance + "\n\n" + "\n\n".join(sections)
+    return guidance + roster_block + "\n\n" + "\n\n".join(sections)
