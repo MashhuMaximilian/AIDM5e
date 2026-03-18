@@ -19,3 +19,4 @@ aidm.log
 scripts/import_legacy_category.py
 scripts/
 sources/
+CODEX_HANDOFF.md
