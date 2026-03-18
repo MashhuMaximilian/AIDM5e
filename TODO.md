@@ -41,6 +41,7 @@
   - [ ] deleting a category removes related threads
   - [ ] deleting a category removes channel/thread assignment rows
   - [ ] deleting the last campaign in a guild removes orphaned guild metadata
+  - [ ] deleting a category also removes its previously-created child channels from Discord instead of leaving them uncategorized
 
 ## Voice / Transcript Quality
 

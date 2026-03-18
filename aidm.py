@@ -12,6 +12,7 @@ from data_store.db_repository import (
     delete_channel_record,
     delete_thread_record,
     ensure_runtime_schema,
+    get_campaign_runtime_targets,
 )
 from data_store.utils import load_thread_data
 from discord_app import bot_commands, message_handlers
@@ -65,6 +66,37 @@ async def on_thread_delete(thread):
 async def on_guild_channel_delete(channel):
     try:
         if isinstance(channel, discord.CategoryChannel):
+            runtime_targets = await asyncio.to_thread(get_campaign_runtime_targets, channel.id)
+
+            for thread_id in runtime_targets["thread_ids"]:
+                try:
+                    thread = client.get_channel(thread_id)
+                    if thread is None:
+                        thread = await client.fetch_channel(thread_id)
+                    if thread is not None:
+                        await thread.delete(reason=f"Parent category '{channel.name}' was deleted.")
+                except discord.NotFound:
+                    pass
+                except Exception as exc:
+                    logging.warning("Failed to delete thread %s after category deletion %s: %s", thread_id, channel.id, exc)
+
+            for child_channel_id in runtime_targets["channel_ids"]:
+                try:
+                    child_channel = client.get_channel(child_channel_id)
+                    if child_channel is None:
+                        child_channel = await client.fetch_channel(child_channel_id)
+                    if child_channel is not None:
+                        await child_channel.delete(reason=f"Parent category '{channel.name}' was deleted.")
+                except discord.NotFound:
+                    pass
+                except Exception as exc:
+                    logging.warning(
+                        "Failed to delete channel %s after category deletion %s: %s",
+                        child_channel_id,
+                        channel.id,
+                        exc,
+                    )
+
             await asyncio.to_thread(delete_campaign_record, channel.id)
         elif isinstance(channel, discord.Thread):
             await asyncio.to_thread(delete_thread_record, channel.id)

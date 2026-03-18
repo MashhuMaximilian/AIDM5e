@@ -471,6 +471,52 @@ def delete_channel_record(discord_channel_id: int) -> None:
         conn.commit()
 
 
+def get_campaign_runtime_targets(discord_category_id: int) -> dict[str, list[int]]:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select id
+                from campaigns
+                where discord_category_id = %s
+                """,
+                (discord_category_id,),
+            )
+            campaign = cur.fetchone()
+            if not campaign:
+                return {"channel_ids": [], "thread_ids": []}
+
+            campaign_id = campaign["id"]
+
+            cur.execute(
+                """
+                select discord_channel_id
+                from channels
+                where campaign_id = %s
+                order by discord_channel_id
+                """,
+                (campaign_id,),
+            )
+            channel_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                select threads.discord_thread_id
+                from threads
+                join channels on channels.id = threads.channel_id
+                where channels.campaign_id = %s
+                order by threads.discord_thread_id
+                """,
+                (campaign_id,),
+            )
+            thread_rows = cur.fetchall()
+
+    return {
+        "channel_ids": [int(row["discord_channel_id"]) for row in channel_rows if row["discord_channel_id"] is not None],
+        "thread_ids": [int(row["discord_thread_id"]) for row in thread_rows if row["discord_thread_id"] is not None],
+    }
+
+
 def delete_campaign_record(discord_category_id: int) -> None:
     with _connect() as conn:
         with conn.cursor() as cur:

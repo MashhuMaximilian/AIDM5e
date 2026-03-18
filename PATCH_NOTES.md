@@ -134,6 +134,7 @@ The old transcript flow has been substantially refactored.
   - channels
   - threads
 - Orphaned guild rows are also cleaned up when the deleted category was the guild's last campaign.
+- Category deletion now also uses the stored campaign channel/thread IDs to delete leftover Discord child channels, so they do not remain uncategorized in the server UI.
 
 ## Docker / Deployment
 
