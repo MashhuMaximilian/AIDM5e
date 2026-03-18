@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from config import AUDIO_SUMMARY_WINDOW_CHUNKS, GEMINI_SUMMARY_MODEL
-from gemini_client import gemini_client
+from ai_services.gemini_client import gemini_client
 from prompts.transcription_prompts import (
     build_audio_narrative_summary_prompt,
     build_audio_objective_summary_prompt,

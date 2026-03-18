@@ -5,23 +5,22 @@ import logging
 
 import discord
 
-import bot_commands
-import message_handlers
-import transcription
-from assistant_interactions import get_assistant_response
+from ai_services.assistant_interactions import get_assistant_response
 from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, client, tree
-from db_repository import (
+from data_store.db_repository import (
     delete_campaign_record,
     delete_channel_record,
     delete_thread_record,
     ensure_runtime_schema,
 )
-from utils import load_thread_data
+from data_store.utils import load_thread_data
+from discord_app import bot_commands, message_handlers
+from voice.transcription import VoiceRecorder
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(message)s")
 
-recorder = transcription.VoiceRecorder()
+recorder = VoiceRecorder()
 
 
 @client.event

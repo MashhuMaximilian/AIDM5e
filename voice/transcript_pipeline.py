@@ -4,8 +4,8 @@ import logging
 import re
 from pathlib import Path
 
+from ai_services.gemini_client import gemini_client
 from config import AUDIO_PROMPT
-from gemini_client import gemini_client
 from prompts.transcription_prompts import build_transcript_capture_prompt
 from .transcript_manifest import TranscriptManifestStore
 

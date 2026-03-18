@@ -2,12 +2,13 @@ import aiohttp
 import discord
 import logging
 from config import client
-from assistant_interactions import get_assistant_response
-from memory_management import get_assigned_memory
-from shared_functions import check_always_on, send_response_in_chunks
 import PyPDF2
 import io
 from docx import Document
+
+from ai_services.assistant_interactions import get_assistant_response
+from data_store.memory_management import get_assigned_memory
+from .shared_functions import check_always_on, send_response_in_chunks
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

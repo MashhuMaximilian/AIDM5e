@@ -5,7 +5,9 @@ import discord
 from discord import app_commands
 
 from config import DM_ROLE_NAME
-from db_repository import (
+from discord_app.shared_functions import apply_always_on, send_interaction_message
+
+from .db_repository import (
     DEFAULT_CHANNEL_SPECS,
     DEFAULT_MEMORY_NAMES,
     assign_memory_to_channel,
@@ -25,7 +27,6 @@ from db_repository import (
     list_memory_names,
     set_default_memory as set_default_memory_record,
 )
-from shared_functions import apply_always_on, send_interaction_message
 
 
 logger = logging.getLogger(__name__)

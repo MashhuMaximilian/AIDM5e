@@ -5,7 +5,7 @@ import re
 import discord
 
 from config import client
-from db_repository import (
+from data_store.db_repository import (
     ensure_channel_for_category,
     ensure_thread_for_channel,
     get_or_create_campaign_context,

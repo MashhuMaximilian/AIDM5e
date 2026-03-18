@@ -1,6 +1,6 @@
 import logging
 
-from db_repository import build_thread_data_snapshot
+from .db_repository import build_thread_data_snapshot
 
 
 category_threads = {}

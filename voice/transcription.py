@@ -10,7 +10,7 @@ from .audio_utils import get_category_id_voice, probe_audio_duration, split_audi
 from .context_support import load_voice_context
 from .orchestrator import VoiceSessionOrchestrator
 from config import AUDIO_CHUNK_SECONDS, AUDIO_FILES_PATH, TRANSCRIPT_MANIFEST_PATH, TRANSCRIPT_PATH
-from shared_functions import send_response_in_chunks
+from discord_app.shared_functions import send_response_in_chunks
 from .summary_pipeline import AudioSummaryService
 from .transcript_manifest import TranscriptManifestStore
 from .transcript_outputs import TranscriptOutputService

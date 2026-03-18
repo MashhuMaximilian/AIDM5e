@@ -6,7 +6,8 @@ import logging
 import discord
 from discord import app_commands
 
-from assistant_interactions import get_assistant_response
+from ai_services.assistant_interactions import get_assistant_response
+from ai_services.gemini_client import gemini_client
 from config import GEMINI_SUMMARY_MODEL
 from content_retrieval import (
     extract_public_url_text,
@@ -14,14 +15,14 @@ from content_retrieval import (
     format_message_with_attachments,
     select_messages,
 )
-from db_repository import ensure_thread_for_channel, list_memory_names
-from gemini_client import gemini_client
-from memory_management import get_assigned_memory, assign_memory
+from data_store.db_repository import ensure_thread_for_channel, list_memory_names
+from data_store.memory_management import assign_memory, get_assigned_memory
 from prompts.reference_prompts import build_reference_prompt
 from prompts.query_prompts import construct_query_prompt
 from prompts.summary_prompts import build_summary_prompt
-from shared_functions import send_interaction_message, send_response
-from utils import category_threads, load_thread_data
+from data_store.utils import category_threads, load_thread_data
+
+from .shared_functions import send_interaction_message, send_response
 
 category_conversations = {}
 

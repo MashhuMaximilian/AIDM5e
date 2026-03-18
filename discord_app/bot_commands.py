@@ -1,18 +1,21 @@
 # bot_commands.py
 
+import asyncio
+import logging
+
 import discord
 from discord import app_commands
-from shared_functions import *
-from helper_functions import *
-import logging
-import asyncio
 from psycopg import errors as pg_errors
-from memory_management import *
+
 from config import DM_ROLE_NAME
-from db_repository import append_memory_message, build_thread_data_snapshot, fetch_memory_details
+from data_store.db_repository import append_memory_message, build_thread_data_snapshot, fetch_memory_details
+from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
-from shared_functions import apply_always_on, send_response_in_chunks
 from voice.context_support import clear_context_text, write_context_text
+
+from .helper_functions import *
+from .shared_functions import *
+from .shared_functions import apply_always_on, send_response_in_chunks
 
     # Set up logging (you can configure this as needed)
 logging.basicConfig(level=logging.INFO)

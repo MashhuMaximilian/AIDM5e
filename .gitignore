@@ -12,6 +12,7 @@ transcript_archive.txt
 transcript_archive copy.txt
 audio_files/
 offline_test_outputs/
+voice_context/
 aidm.log
 .DS_Store
 .vscode/

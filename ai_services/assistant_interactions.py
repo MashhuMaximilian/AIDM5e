@@ -4,9 +4,9 @@ import asyncio
 import logging
 
 from config import AIDM_PROMPT_PATH, client
-from db_repository import append_memory_message, fetch_memory_messages, get_memory_name
-from gemini_client import gemini_client
-from shared_functions import send_response_in_chunks
+from data_store.db_repository import append_memory_message, fetch_memory_messages, get_memory_name
+from discord_app.shared_functions import send_response_in_chunks
+from .gemini_client import gemini_client
 
 
 logger = logging.getLogger(__name__)
