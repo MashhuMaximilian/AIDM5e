@@ -1,0 +1,18 @@
+.git
+.gitignore
+.vscode
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+.env
+offline_test_outputs/
+audio_files/
+voice_context/
+transcript.txt
+transcript_manifest.json
+transcript_archive.txt
+transcript_archive copy.txt
+aidm.log
+CODEX_HANDOFF.md

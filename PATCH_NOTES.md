@@ -10,6 +10,7 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 - Discord remains the source of visible history, files, and channel structure.
 - Existing Discord attachments are read on demand; they are not blindly copied into long-term memory.
 - Local-only artifacts remain out of git and should not drive runtime behavior.
+- A first Docker runtime scaffold now exists for the bot.
 
 ## Default Campaign Layout
 
@@ -133,6 +134,22 @@ The old transcript flow has been substantially refactored.
   - channels
   - threads
 - Orphaned guild rows are also cleaned up when the deleted category was the guild's last campaign.
+
+## Docker / Deployment
+
+- Added:
+  - `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/Dockerfile`
+  - `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/.dockerignore`
+  - `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/docker-compose.yml`
+- The Docker image includes:
+  - Python 3.11
+  - `ffmpeg`
+  - voice-related native dependencies needed by the current bot stack
+- The compose setup mounts runtime artifacts from the project directory so transcripts, audio files, and context files survive container restarts.
+- The current Docker setup is suitable for:
+  - bot runtime
+  - offline audio processing
+- Live host-audio capture in Docker is still treated as a Linux-specific follow-up, not a solved macOS Docker Desktop workflow.
   - speaker
   - character when clear
   - `RO` / `EN` / `RO+EN`
@@ -192,6 +209,7 @@ These stay local and should not drive runtime behavior:
 - `aa07b92` `Harden chunk-local transcript timestamp repair`
 - `2465f18` `Add context channel mirroring and invite voice scaffold`
 - `4269575` `Stop tracking Codex handoff notes`
+- `f80cbf6` `Remove transcript row storage and tighten context cleanup`
 - `dc0c150` `Remove migration shims after package reorg`
 - `5bb2d65` `Normalize chunk-relative transcript timestamps`
 

@@ -31,6 +31,29 @@
    ```  
    AIDM should now be online in your Discord server!
 
+2.6. **Run with Docker**
+   Build and start the bot:
+   ```bash
+   docker compose up --build -d
+   ```
+
+   Stop it:
+   ```bash
+   docker compose down
+   ```
+
+   Notes:
+   - The Docker setup includes `ffmpeg`.
+   - Runtime artifacts are mounted from the project directory:
+     - `audio_files/`
+     - `voice_context/`
+     - `offline_test_outputs/`
+     - `transcript.txt`
+     - `transcript_manifest.json`
+     - `transcript_archive.txt`
+   - Docker is a good fit for bot runtime and offline audio processing.
+   - Live host-microphone capture from inside Docker is mainly a Linux setup problem. On macOS Docker Desktop, use Docker for bot/offline processing first; host audio capture will need a separate strategy.
+
 ---
 ## 3. Contribution Guidelines
 

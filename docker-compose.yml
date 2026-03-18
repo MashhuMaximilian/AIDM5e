@@ -1,0 +1,26 @@
+services:
+  aidm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aidm-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./audio_files:/app/audio_files
+      - ./voice_context:/app/voice_context
+      - ./offline_test_outputs:/app/offline_test_outputs
+      - ./transcript.txt:/app/transcript.txt
+      - ./transcript_manifest.json:/app/transcript_manifest.json
+      - ./transcript_archive.txt:/app/transcript_archive.txt
+    command: ["python", "aidm.py"]
+
+    # Live host-audio capture inside Docker is practical mainly on Linux.
+    # On macOS Docker Desktop, use Docker for bot/offline processing first,
+    # then decide separately how to handle host microphone capture.
+    #
+    # For Linux + PulseAudio/ALSA later, extend this service with the
+    # relevant device/socket mounts and set:
+    #   FFMPEG_INPUT_FORMAT
+    #   FFMPEG_INPUT_DEVICE
