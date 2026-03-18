@@ -144,14 +144,65 @@ class TranscriptService:
             return 0
         return offset
 
+    def _offset_candidates(self, raw_offset: int, chunk_start: int, chunk_duration: int) -> list[int]:
+        candidates: list[int] = []
+
+        def add(value: int | float | None) -> None:
+            if value is None:
+                return
+            try:
+                ivalue = int(value)
+            except (TypeError, ValueError):
+                return
+            if 0 <= ivalue <= max(0, chunk_duration):
+                candidates.append(ivalue)
+
+        add(raw_offset)
+        if chunk_start > 0:
+            add(raw_offset - chunk_start)
+
+        # Gemini sometimes leaks absolute or drifted timestamps. Modulo the
+        # chunk duration gives us a chunk-local fallback that often matches the
+        # intended offset much better than the raw value.
+        if chunk_duration > 0:
+            add(raw_offset % chunk_duration)
+
+        # Keep order stable while removing duplicates.
+        unique: list[int] = []
+        seen = set()
+        for candidate in candidates:
+            if candidate not in seen:
+                seen.add(candidate)
+                unique.append(candidate)
+        return unique
+
+    def _choose_best_offset(self, raw_offset: int, chunk_start: int, chunk_duration: int, previous_offset: int | None) -> int:
+        candidates = self._offset_candidates(raw_offset, chunk_start, chunk_duration)
+        if not candidates:
+            return 0 if previous_offset is None else previous_offset
+
+        if previous_offset is None:
+            return min(candidates)
+
+        forward = [candidate for candidate in candidates if candidate >= previous_offset]
+        if forward:
+            return min(forward, key=lambda candidate: (candidate - previous_offset, candidate))
+
+        # If every candidate goes backwards, preserve chronology conservatively.
+        return max(previous_offset, min(candidates, key=lambda candidate: abs(candidate - previous_offset)))
+
     def normalize_segments(self, segments: list[dict], chunk_start: int = 0, chunk_duration: int = 0) -> list[dict]:
         normalized = [self.normalize_segment(segment) for segment in segments]
+        previous_offset: int | None = None
         for segment in normalized:
-            segment["offset_seconds"] = self.normalize_offset_seconds(
+            raw_offset = self.normalize_offset_seconds(
                 segment.get("offset_seconds", 0),
                 chunk_start,
                 chunk_duration,
             )
+            chosen_offset = self._choose_best_offset(raw_offset, chunk_start, chunk_duration, previous_offset)
+            segment["offset_seconds"] = chosen_offset
+            previous_offset = chosen_offset
         speaker_values = [segment.get("speaker") for segment in normalized if segment.get("speaker")]
         has_numbered_unknown = any(re.fullmatch(r"Unknown \d+", speaker or "") for speaker in speaker_values)
         plain_unknown_count = sum(1 for speaker in speaker_values if speaker == "Unknown")
