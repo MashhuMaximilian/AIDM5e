@@ -67,8 +67,10 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
 - `#context` is the human-facing public/session authoring surface, while `#dm-planning` remains the DM-private surface.
 - `/context add` and `/context clear` now publish canonical managed context entries directly into those Discord channels.
 - `/context list` now shows the effective compiled context state so you can sanity-check what transcript/summary runs will consume.
-- Live voice transcript/summary runs now prefer compiler-built Discord context packets over local files.
-- Local files under `voice_context/` remain only as a temporary transition fallback and for explicit offline overrides.
+- Live voice transcript/summary runs now use compiler-built Discord context packets instead of falling back to local files.
+- Local files under `voice_context/` remain only for explicit offline override runs.
+- Session-only context now has an explicit lifecycle rule: it stays active until you replace it or clear it; it does not expire automatically.
+- Managed context entries can now preserve image attachment references from selected Discord messages, along with optional human-friendly tags.
 - The current long-term direction remains: Discord messages and attachments are the durable context source of truth, runtime packets are compiled in memory, and context payloads are not stored in Supabase.
 
 ## Commands and Memory UX

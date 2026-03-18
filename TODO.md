@@ -71,7 +71,7 @@
   - [x] Clarify `Public Evergreen` vs `Session Only` vs `DM Private` behavior in command UX
   - [x] Add clearer command entrypoints with `/context add`, `/context clear`, and `/context list`
   - [x] Keep `/context summary` as a compatibility alias during the transition
-  - [ ] Keep session context easy to replace/clear manually instead of guessing expiration dates
+  - [x] Keep session context easy to replace/clear manually instead of guessing expiration dates
   - [ ] Decide how long `/context summary` should remain as a compatibility alias before removal
 
 - [ ] Phase 2: Context compilation without DB payload storage
@@ -79,13 +79,15 @@
   - [x] Avoid storing context text/image payloads in Supabase
   - [x] Compile transcript context packets in memory from Discord-managed context entries
   - [x] Compile summary context packets in memory from Discord-managed context entries
-  - [ ] Fully remove the temporary local-file fallback under `voice_context/`
-  - [ ] Decide how session context gets selected for a run without relying on automatic date inference
+  - [x] Remove the live/runtime local-file fallback under `voice_context/`
+  - [x] Keep session context manual: it remains active until explicitly replaced or cleared
+  - [ ] Decide how much explicit offline file override support should remain long-term
 
 - [ ] Phase 3: Image-aware context
-  - [ ] Support image references from `#context` / `#dm-planning` in the compiled context flow
+  - [x] Support image references from `#context` / `#dm-planning` in the compiled context flow
   - [ ] Clarify how text descriptions and image references should be combined for later scene generation
-  - [ ] Define optional user-facing tags/examples without making them mandatory
+  - [x] Define optional user-facing tags/examples without making them mandatory
+  - [ ] Expose compiled image-aware context to the future scene/image generation pipeline
 
 - [ ] Keep DM-private context separate from public summary context
 - [ ] Decide whether and when to add `/context_link`

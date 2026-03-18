@@ -11,7 +11,7 @@ from ai_services.context_compiler import (
     build_context_entry_messages,
     compile_context_packet_from_category,
 )
-from content_retrieval import select_messages
+from content_retrieval import extract_attachment_text, format_message_text, select_messages
 from config import DM_ROLE_NAME
 from data_store.db_repository import build_thread_data_snapshot, fetch_memory_details
 from data_store.memory_management import *
@@ -48,6 +48,8 @@ CONTEXT_WRITE_ACTION_CHOICES = [
     app_commands.Choice(name="Append", value="append"),
 ]
 
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
 
 def _get_category_channel_mention(category: discord.CategoryChannel, channel_name: str, fallback_prefix: str = "#") -> str:
     channel = discord.utils.get(category.channels, name=channel_name)
@@ -78,15 +80,16 @@ def _build_help_text(topic: str) -> str:
             "• `/context summary`: legacy alias for `/context add`\n\n"
             "**Scopes**\n"
             "• `Public Evergreen`: long-lived campaign facts like roster, spellings, factions, locations.\n"
-            "• `Session Only`: current or next-session guidance. Replace or clear this manually when it goes stale.\n"
+            "• `Session Only`: current or next-session guidance. It stays active until you replace it or clear it; there is no automatic expiry.\n"
             f"• `DM Private`: DM-only context. Only members with the `{DM_ROLE_NAME}` role can edit it.\n\n"
             "**Good inputs**\n"
             "• Manual notes\n"
             "• `last_n` recent messages from a channel like `#gameplay`\n"
             "• specific `message_ids`\n"
-            "• clarifications, art refs, and later image references\n\n"
+            "• clarifications, art refs, and later image references\n"
+            "• optional human-friendly tags like `roster`, `npc`, `location`, `scene`, `style`\n\n"
             "**Examples**\n"
-            "• `/context add scope:Public Evergreen action:Append note:<party roster>`\n"
+            "• `/context add scope:Public Evergreen action:Append note:<party roster> tags:roster,spelling`\n"
             "• `/context add scope:Session Only action:Replace channel:#gameplay last_n:20`\n"
             "• `/context clear scope:Session Only`"
         )
@@ -156,7 +159,7 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
         "**Recommended first steps**\n"
         "• Run `/help topic:Context`\n"
         "• Add the party roster and naming/spelling clarifications with `/context add`\n"
-        "• Use `Session Only` context for next-session notes, then replace or clear it when it expires\n"
+        "• Use `Session Only` context for next-session notes, then replace or clear it manually when you are done with it\n"
         f"• Drop useful reference images into {context_mention} as the visual library grows"
     )
 
@@ -189,32 +192,106 @@ def _compiled_context_status(
     scope_value: str,
     text: str | None,
     source_label: str,
+    asset_count: int = 0,
 ) -> str:
     text = text.strip() if text else ""
     surface = _context_surface_label(category, scope_value)
     if not text:
-        return (
-            f"**{_scope_label(scope_value)}**\n"
-            f"• Runtime state: empty\n"
-            f"• Source: {source_label}\n"
-            f"• Discord surface: {surface}"
-        )
+        lines_out = [
+            f"**{_scope_label(scope_value)}**",
+            "• Runtime state: empty",
+            f"• Source: {source_label}",
+            f"• Discord surface: {surface}",
+        ]
+        if asset_count:
+            lines_out.append(f"• Assets: {asset_count}")
+        return "\n".join(lines_out)
 
     lines = len(text.splitlines())
     chars = len(text)
     preview = _preview_text(text)
-    return (
-        f"**{_scope_label(scope_value)}**\n"
-        f"• Runtime state: {chars} chars across {lines} lines\n"
-        f"• Source: {source_label}\n"
-        f"• Discord surface: {surface}\n"
-        f"• Preview: {preview}"
-    )
+    lines_out = [
+        f"**{_scope_label(scope_value)}**",
+        f"• Runtime state: {chars} chars across {lines} lines",
+        f"• Source: {source_label}",
+        f"• Discord surface: {surface}",
+    ]
+    if asset_count:
+        lines_out.append(f"• Assets: {asset_count}")
+    lines_out.append(f"• Preview: {preview}")
+    return "\n".join(lines_out)
 
 
 def _member_is_dm(interaction: discord.Interaction) -> bool:
     member_roles = getattr(interaction.user, "roles", [])
     return any(getattr(role, "name", None) == DM_ROLE_NAME for role in member_roles)
+
+
+def _parse_context_tags(tags: str | None) -> list[str]:
+    if not tags:
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in tags.split(","):
+        cleaned = raw.strip().lower()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+def _attachment_is_image(attachment: discord.Attachment) -> bool:
+    content_type = (attachment.content_type or "").lower()
+    if content_type.startswith("image/"):
+        return True
+    filename = attachment.filename.lower()
+    return any(filename.endswith(ext) for ext in IMAGE_EXTENSIONS)
+
+
+def _extract_context_assets(messages: list[discord.Message]) -> list[dict]:
+    assets: list[dict] = []
+    seen: set[tuple[str, int]] = set()
+    for message in messages:
+        for attachment in message.attachments:
+            key = (attachment.url, message.id)
+            if key in seen:
+                continue
+            seen.add(key)
+            assets.append(
+                {
+                    "filename": attachment.filename,
+                    "url": attachment.url,
+                    "content_type": attachment.content_type,
+                    "source_message_id": message.id,
+                    "source_channel_id": message.channel.id,
+                    "is_image": _attachment_is_image(attachment),
+                }
+            )
+    return assets
+
+
+async def _build_context_material_from_messages(messages: list[discord.Message]) -> list[str]:
+    rendered: list[str] = []
+    for message in messages:
+        parts = [format_message_text(message)]
+        for attachment in message.attachments:
+            if _attachment_is_image(attachment):
+                parts.append(f"[Image attachment preserved separately: {attachment.filename}]")
+                continue
+            try:
+                extracted = await extract_attachment_text(attachment)
+                parts.append(f"[Attachment: {attachment.filename}]\n{extracted}")
+            except Exception as exc:
+                logger.warning(
+                    "Failed to extract non-image attachment %s from message %s while building context: %s",
+                    attachment.filename,
+                    message.id,
+                    exc,
+                )
+                parts.append(f"[Attachment present but unreadable: {attachment.filename}. Reason: {exc}]")
+        rendered.append("\n\n".join(parts))
+    return rendered
 
 
 async def _resolve_context_source_target(
@@ -243,6 +320,7 @@ async def _update_context_scope(
     last_n: int | None,
     channel: str | None,
     thread: str | None,
+    tags: str | None,
 ) -> str:
     if scope_value == "dm" and not _member_is_dm(interaction):
         raise PermissionError(f"Only members with the `{DM_ROLE_NAME}` role can change DM-private summary context.")
@@ -254,6 +332,7 @@ async def _update_context_scope(
     selected_messages = []
     parts: list[str] = []
     source_mode = "manual_note"
+    parsed_tags = _parse_context_tags(tags)
     if action_value != "clear" and any(value is not None for value in (start, end, message_ids, last_n)):
         selected_messages, options_or_error = await select_messages(
             source_target,
@@ -264,7 +343,7 @@ async def _update_context_scope(
         )
         if isinstance(options_or_error, str):
             raise ValueError(options_or_error)
-        material = await build_history_from_messages(selected_messages, include_attachments=True)
+        material = await _build_context_material_from_messages(selected_messages)
         parts.append("\n\n".join(material))
         source_mode = "selected_messages"
 
@@ -287,6 +366,8 @@ async def _update_context_scope(
 
     stored_text = "\n\n".join(part for part in parts if part).strip()
     source_label = _describe_context_source(source_target) if source_target else "manual note"
+    source_message_ids = [message.id for message in selected_messages]
+    assets = _extract_context_assets(selected_messages)
     messages = build_context_entry_messages(
         scope=scope_value,
         action=action_value,
@@ -295,6 +376,10 @@ async def _update_context_scope(
         source_mode=source_mode if action_value != "clear" else "clear",
         actor_name=getattr(interaction.user, "mention", interaction.user.display_name),
         actor_id=getattr(interaction.user, "id", None),
+        source_channel_id=getattr(source_target, "id", None),
+        source_message_ids=source_message_ids,
+        tags=parsed_tags,
+        assets=assets,
     )
     for message in messages:
         await destination_channel.send(message)
@@ -311,7 +396,10 @@ async def _update_context_scope(
             f"Published to {destination_channel.mention}. "
             "DM context is only included when DM context is explicitly enabled for a run."
         )
-    return f"Updated `{scope_value}` summary context. Published to {destination_channel.mention}."
+    session_note = ""
+    if scope_value == "session":
+        session_note = " Session context stays active until you replace it or clear it; it does not expire automatically."
+    return f"Updated `{scope_value}` summary context. Published to {destination_channel.mention}.{session_note}"
 
 
 def _describe_context_source(source_target: discord.abc.GuildChannel | discord.Thread | None) -> str:
@@ -988,6 +1076,7 @@ def setup_commands(tree, get_assistant_response):
         scope="Which context bucket to update.",
         action="Whether to replace or append to that bucket.",
         note="Optional manual text to store as context.",
+        tags="Optional comma-separated tags such as roster, npc, location, scene, style.",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to include.",
@@ -1004,6 +1093,7 @@ def setup_commands(tree, get_assistant_response):
         scope: app_commands.Choice[str],
         action: app_commands.Choice[str],
         note: str = None,
+        tags: str = None,
         start: str = None,
         end: str = None,
         message_ids: str = None,
@@ -1019,6 +1109,7 @@ def setup_commands(tree, get_assistant_response):
                 scope_value=scope.value,
                 action_value=action.value,
                 note=note,
+                tags=tags,
                 start=start,
                 end=end,
                 message_ids=message_ids,
@@ -1055,6 +1146,7 @@ def setup_commands(tree, get_assistant_response):
                 scope_value=scope.value,
                 action_value="clear",
                 note=None,
+                tags=None,
                 start=None,
                 end=None,
                 message_ids=None,
@@ -1075,20 +1167,19 @@ def setup_commands(tree, get_assistant_response):
         packet = await compile_context_packet_from_category(
             category,
             include_dm_context=_member_is_dm(interaction),
-            fallback_to_local_files=True,
         )
         blocks = [
             f"**Context status for {category.mention if category else interaction.guild.name}**",
             "",
-            _compiled_context_status(category, "public", packet.public_text, packet.public_source),
+            _compiled_context_status(category, "public", packet.public_text, packet.public_source, len(packet.public_assets)),
             "",
-            _compiled_context_status(category, "session", packet.session_text, packet.session_source),
+            _compiled_context_status(category, "session", packet.session_text, packet.session_source, len(packet.session_assets)),
         ]
         if _member_is_dm(interaction):
             blocks.extend(
                 [
                     "",
-                    _compiled_context_status(category, "dm", packet.dm_text, packet.dm_source),
+                    _compiled_context_status(category, "dm", packet.dm_text, packet.dm_source, len(packet.dm_assets)),
                 ]
             )
         else:
@@ -1104,7 +1195,7 @@ def setup_commands(tree, get_assistant_response):
         blocks.extend(
             [
                 "",
-                "This reflects the effective compiled context used by the runtime. Discord-managed context entries are preferred, and local files only remain as a transition fallback for older runs.",
+                "This reflects the effective compiled context used by the runtime. Discord-managed context entries are the source of truth. `Session Only` stays active until you replace it or clear it.",
             ]
         )
         await send_interaction_message(interaction, "\n".join(blocks), ephemeral=True)
@@ -1114,6 +1205,7 @@ def setup_commands(tree, get_assistant_response):
         scope="Which context bucket to update.",
         action="Whether to replace or append to that bucket.",
         note="Optional manual text to store as context.",
+        tags="Optional comma-separated tags such as roster, npc, location, scene, style.",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to include.",
@@ -1130,6 +1222,7 @@ def setup_commands(tree, get_assistant_response):
         scope: app_commands.Choice[str],
         action: app_commands.Choice[str],
         note: str = None,
+        tags: str = None,
         start: str = None,
         end: str = None,
         message_ids: str = None,
@@ -1144,6 +1237,7 @@ def setup_commands(tree, get_assistant_response):
                 scope_value=scope.value,
                 action_value=action.value,
                 note=note,
+                tags=tags,
                 start=start,
                 end=end,
                 message_ids=message_ids,

@@ -105,7 +105,6 @@ class VoiceRecorder:
         packet = await compile_context_packet_from_category(
             category,
             include_dm_context=VOICE_INCLUDE_DM_CONTEXT,
-            fallback_to_local_files=True,
         )
         self.context_block = packet.text_block
 
