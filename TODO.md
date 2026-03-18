@@ -27,21 +27,21 @@
   - [ ] narrative summary posting
   - [ ] retention flag behavior with `KEEP_AUDIO_FILES` / `KEEP_TRANSCRIPT_FILES`
 
-- [ ] Validate context behavior in Discord:
+- [x] Validate context behavior in Discord:
   - [x] `/context summary` user response no longer exposes local file paths
-  - [ ] public/session updates visibly land in `#context`
-  - [ ] DM-private updates only mirror metadata in `#context`
-  - [ ] DM-private full content mirrors to `#dm-planning` when present
-  - [ ] context updates affect the next live voice run without restarting the bot
+  - [x] public/session updates visibly land in `#context`
+  - [x] DM-private updates only mirror metadata in `#context`
+  - [x] DM-private full content mirrors to `#dm-planning` when present
+  - [x] context updates affect the next live voice run without restarting the bot
 
-- [ ] Validate category deletion cleanup end-to-end:
-  - [ ] deleting a category removes its campaign row from Supabase
-  - [ ] deleting a category removes related memories
-  - [ ] deleting a category removes related channels
-  - [ ] deleting a category removes related threads
-  - [ ] deleting a category removes channel/thread assignment rows
-  - [ ] deleting the last campaign in a guild removes orphaned guild metadata
-  - [ ] deleting a category also removes its previously-created child channels from Discord instead of leaving them uncategorized
+- [x] Validate category deletion cleanup end-to-end:
+  - [x] deleting a category removes its campaign row from Supabase
+  - [x] deleting a category removes related memories
+  - [x] deleting a category removes related channels
+  - [x] deleting a category removes related threads
+  - [x] deleting a category removes channel/thread assignment rows
+  - [x] deleting the last campaign in a guild removes orphaned guild metadata
+  - [x] deleting a category also removes its previously-created child channels from Discord instead of leaving them uncategorized
 
 ## Voice / Transcript Quality
 
@@ -77,11 +77,11 @@
 
 ## Deployment / Platform
 
-- [ ] Smoke-test the new Docker setup:
-  - [ ] `docker compose up --build` starts the bot cleanly
-  - [ ] env loading works inside the container
-  - [ ] Discord login works from the container
-  - [ ] offline audio test works inside the container
+- [x] Smoke-test the new Docker setup:
+  - [x] `docker compose up --build` starts the bot cleanly
+  - [x] env loading works inside the container
+  - [x] Discord login works from the container
+  - [x] offline audio test works inside the container
 - [ ] Test Linux audio capture strategy
 - [ ] Test Windows audio capture strategy
 - [ ] Decide the Docker/device strategy for live voice capture
