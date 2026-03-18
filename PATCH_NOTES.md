@@ -59,11 +59,17 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - public evergreen
   - session-only
   - DM-private
+- Added clearer Phase 1 context commands:
+  - `/context add`
+  - `/context clear`
+  - `/context list`
+- `/context summary` remains available as a compatibility alias during the transition.
 - `#context` is the current human-facing context surface for public and session updates, while `#dm-planning` remains the DM-private surface.
 - Public and session context updates are mirrored into `#context` for visibility and auditability.
 - DM-private context is not mirrored publicly; only metadata is mirrored into `#context`, while private content can be mirrored into `#dm-planning`.
 - Runtime context is still loaded from local files under `voice_context/`, so Discord-visible context updates become durable inputs for offline and live voice runs.
 - The user-facing `/context summary` response now confirms the channel publication instead of exposing the local file path.
+- `/context list` now shows the current runtime view of each scope so you can sanity-check what transcript/summary runs will consume.
 - The current long-term design direction is to treat Discord messages and attachments as the durable context source of truth, compile runtime context packets in memory, and avoid storing context payloads in Supabase.
 
 ## Commands and Memory UX
@@ -73,6 +79,7 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - `/channel`
   - `/memory`
 - Added `/help` as a topic-based onboarding command for grouped commands, `/invite`, `/context summary`, and campaign setup flow.
+- `/help topic:Context` now reflects the Phase 1 `/context add|clear|list` workflow instead of only the older `/context summary` path.
 - Standalone commands remain:
   - `/reference`
   - `/feedback`

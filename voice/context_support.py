@@ -79,6 +79,13 @@ def clear_context_text(scope: str) -> Path:
     return path
 
 
+def read_context_text(scope: str) -> str:
+    path = get_context_file_path(scope)
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
 def load_voice_context(
     *,
     public_context_path: str | None = None,

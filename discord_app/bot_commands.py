@@ -11,7 +11,7 @@ from config import DM_ROLE_NAME
 from data_store.db_repository import build_thread_data_snapshot, fetch_memory_details
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
-from voice.context_support import clear_context_text, write_context_text
+from voice.context_support import clear_context_text, read_context_text, write_context_text
 
 from .helper_functions import *
 from .shared_functions import *
@@ -32,6 +32,17 @@ HELP_TOPICS = (
     ("reference", "Reference"),
     ("feedback", "Feedback"),
 )
+
+CONTEXT_SCOPE_CHOICES = [
+    app_commands.Choice(name="Public Evergreen", value="public"),
+    app_commands.Choice(name="Session Only", value="session"),
+    app_commands.Choice(name="DM Private", value="dm"),
+]
+
+CONTEXT_WRITE_ACTION_CHOICES = [
+    app_commands.Choice(name="Replace", value="replace"),
+    app_commands.Choice(name="Append", value="append"),
+]
 
 
 def _get_category_channel_mention(category: discord.CategoryChannel, channel_name: str, fallback_prefix: str = "#") -> str:
@@ -54,8 +65,13 @@ def _build_help_text(topic: str) -> str:
         )
     if topic == "context":
         return (
-            "**/context summary**\n"
+            "**/context**\n"
             "Use this to store context that later helps transcripts, summaries, and future visual tooling.\n\n"
+            "**Main commands**\n"
+            "• `/context add`: add or replace context from notes or selected messages\n"
+            "• `/context clear`: clear one scope\n"
+            "• `/context list`: inspect the current runtime view of each scope\n"
+            "• `/context summary`: legacy alias for `/context add`\n\n"
             "**Scopes**\n"
             "• `Public Evergreen`: long-lived campaign facts like roster, spellings, factions, locations.\n"
             "• `Session Only`: current or next-session guidance. Replace or clear this manually when it goes stale.\n"
@@ -66,9 +82,9 @@ def _build_help_text(topic: str) -> str:
             "• specific `message_ids`\n"
             "• clarifications, art refs, and later image references\n\n"
             "**Examples**\n"
-            "• `/context summary scope:Public Evergreen action:Append note:<party roster>`\n"
-            "• `/context summary scope:Session Only action:Replace channel:#gameplay last_n:20`\n"
-            "• `/context summary scope:Session Only action:Clear`"
+            "• `/context add scope:Public Evergreen action:Append note:<party roster>`\n"
+            "• `/context add scope:Session Only action:Replace channel:#gameplay last_n:20`\n"
+            "• `/context clear scope:Session Only`"
         )
     if topic == "ask":
         return (
@@ -135,10 +151,140 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
         f"• Session play/chat can happen in {gameplay_mention} and your other campaign channels.\n\n"
         "**Recommended first steps**\n"
         "• Run `/help topic:Context`\n"
-        "• Add the party roster and naming/spelling clarifications with `/context summary`\n"
+        "• Add the party roster and naming/spelling clarifications with `/context add`\n"
         "• Use `Session Only` context for next-session notes, then replace or clear it when it expires\n"
         f"• Drop useful reference images into {context_mention} as the visual library grows"
     )
+
+
+def _scope_label(scope_value: str) -> str:
+    return {
+        "public": "Public Evergreen",
+        "session": "Session Only",
+        "dm": "DM Private",
+    }.get(scope_value, scope_value.title())
+
+
+def _preview_text(text: str, limit: int = 320) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def _context_surface_label(category: discord.CategoryChannel | None, scope_value: str) -> str:
+    if not category:
+        return "#dm-planning" if scope_value == "dm" else "#context"
+    if scope_value == "dm":
+        return _get_category_channel_mention(category, "dm-planning")
+    return _get_category_channel_mention(category, "context")
+
+
+def _context_runtime_status(category: discord.CategoryChannel | None, scope_value: str) -> str:
+    text = read_context_text(scope_value)
+    surface = _context_surface_label(category, scope_value)
+    if not text:
+        return f"**{_scope_label(scope_value)}**\n• Runtime state: empty\n• Discord surface: {surface}"
+
+    lines = len(text.splitlines())
+    chars = len(text)
+    preview = _preview_text(text)
+    return (
+        f"**{_scope_label(scope_value)}**\n"
+        f"• Runtime state: {chars} chars across {lines} lines\n"
+        f"• Discord surface: {surface}\n"
+        f"• Preview: {preview}"
+    )
+
+
+def _member_is_dm(interaction: discord.Interaction) -> bool:
+    member_roles = getattr(interaction.user, "roles", [])
+    return any(getattr(role, "name", None) == DM_ROLE_NAME for role in member_roles)
+
+
+async def _resolve_context_source_target(
+    interaction: discord.Interaction,
+    *,
+    channel: str | None,
+    thread: str | None,
+) -> discord.abc.GuildChannel | discord.Thread | None:
+    source_target = interaction.channel
+    if channel:
+        source_target = interaction.guild.get_channel(int(channel))
+    if thread:
+        source_target = await interaction.guild.fetch_channel(int(thread))
+    return source_target
+
+
+async def _update_context_scope(
+    interaction: discord.Interaction,
+    *,
+    scope_value: str,
+    action_value: str,
+    note: str | None,
+    start: str | None,
+    end: str | None,
+    message_ids: str | None,
+    last_n: int | None,
+    channel: str | None,
+    thread: str | None,
+) -> str:
+    if scope_value == "dm" and not _member_is_dm(interaction):
+        raise PermissionError(f"Only members with the `{DM_ROLE_NAME}` role can change DM-private summary context.")
+
+    if action_value == "clear":
+        path = clear_context_text(scope_value)
+        logger.info("Cleared %s summary context at %s", scope_value, path)
+        destinations = await _mirror_context_update(
+            interaction,
+            scope_value=scope_value,
+            action_value=action_value,
+            stored_text=None,
+            source_target=interaction.channel,
+        )
+        published = f" Published to {', '.join(destinations)}." if destinations else ""
+        return f"Cleared `{scope_value}` summary context.{published}"
+
+    source_target = await _resolve_context_source_target(interaction, channel=channel, thread=thread)
+    if source_target is None:
+        raise ValueError("Source channel or thread not found.")
+
+    parts: list[str] = []
+    if any(value is not None for value in (start, end, message_ids, last_n)):
+        material, options_or_error = await fetch_reference_material(
+            source_target,
+            start,
+            end,
+            message_ids,
+            last_n,
+        )
+        if isinstance(options_or_error, str):
+            raise ValueError(options_or_error)
+        parts.append("\n\n".join(material))
+
+    if note:
+        parts.append(note.strip())
+
+    if not parts:
+        raise ValueError("Provide message selectors and/or a manual note, or use `/context clear`.")
+
+    stored_text = "\n\n".join(part for part in parts if part).strip()
+    path = write_context_text(scope_value, stored_text, action_value)
+    logger.info("Saved %s summary context to %s using %s", scope_value, path, action_value)
+    destinations = await _mirror_context_update(
+        interaction,
+        scope_value=scope_value,
+        action_value=action_value,
+        stored_text=stored_text,
+        source_target=source_target,
+    )
+    if scope_value == "dm":
+        return (
+            "Updated `dm` summary context. "
+            + (f"Published to {', '.join(destinations)}. " if destinations else "")
+            + "DM context is only included when DM context is explicitly enabled for a run."
+        )
+    return f"Updated `{scope_value}` summary context." + (f" Published to {', '.join(destinations)}." if destinations else "")
 
 
 def _describe_context_source(source_target: discord.abc.GuildChannel | discord.Thread | None) -> str:
@@ -862,10 +1008,10 @@ def setup_commands(tree, get_assistant_response):
         if hasattr(interaction.channel, "send"):
             await send_response_in_chunks(interaction.channel, _build_invite_onboarding_message(category))
 
-    @context_group.command(name="summary", description="Store public, session, or DM context for future transcript/summary runs.")
+    @context_group.command(name="add", description="Add or replace public, session, or DM context for future transcript/summary runs.")
     @app_commands.describe(
         scope="Which context bucket to update.",
-        action="Whether to replace, append, or clear that bucket.",
+        action="Whether to replace or append to that bucket.",
         note="Optional manual text to store as context.",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
@@ -875,16 +1021,124 @@ def setup_commands(tree, get_assistant_response):
         thread="Optional source thread. Overrides the source channel when set.",
     )
     @app_commands.choices(
-        scope=[
-            app_commands.Choice(name="Public Evergreen", value="public"),
-            app_commands.Choice(name="Session Only", value="session"),
-            app_commands.Choice(name="DM Private", value="dm"),
-        ],
-        action=[
-            app_commands.Choice(name="Replace", value="replace"),
-            app_commands.Choice(name="Append", value="append"),
-            app_commands.Choice(name="Clear", value="clear"),
-        ],
+        scope=CONTEXT_SCOPE_CHOICES,
+        action=CONTEXT_WRITE_ACTION_CHOICES,
+    )
+    async def context_add(
+        interaction: discord.Interaction,
+        scope: app_commands.Choice[str],
+        action: app_commands.Choice[str],
+        note: str = None,
+        start: str = None,
+        end: str = None,
+        message_ids: str = None,
+        last_n: int = None,
+        channel: str = None,
+        thread: str = None,
+    ):
+        await send_command_ack(interaction, "Updating context...")
+
+        try:
+            response_text = await _update_context_scope(
+                interaction,
+                scope_value=scope.value,
+                action_value=action.value,
+                note=note,
+                start=start,
+                end=end,
+                message_ids=message_ids,
+                last_n=last_n,
+                channel=channel,
+                thread=thread,
+            )
+            await send_interaction_message(interaction, response_text, ephemeral=True)
+        except PermissionError as exc:
+            await send_interaction_message(interaction, str(exc), ephemeral=True)
+        except Exception as exc:
+            logger.exception("Error updating context: %s", exc)
+            await send_interaction_message(interaction, f"Could not update context: {exc}", ephemeral=True)
+
+    @context_add.autocomplete('channel')
+    async def context_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @context_add.autocomplete('thread')
+    async def context_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
+
+    @context_group.command(name="clear", description="Clear one public, session, or DM context scope.")
+    @app_commands.describe(scope="Which context bucket to clear.")
+    @app_commands.choices(scope=CONTEXT_SCOPE_CHOICES)
+    async def context_clear(
+        interaction: discord.Interaction,
+        scope: app_commands.Choice[str],
+    ):
+        await send_command_ack(interaction, "Clearing context...")
+        try:
+            response_text = await _update_context_scope(
+                interaction,
+                scope_value=scope.value,
+                action_value="clear",
+                note=None,
+                start=None,
+                end=None,
+                message_ids=None,
+                last_n=None,
+                channel=None,
+                thread=None,
+            )
+            await send_interaction_message(interaction, response_text, ephemeral=True)
+        except PermissionError as exc:
+            await send_interaction_message(interaction, str(exc), ephemeral=True)
+        except Exception as exc:
+            logger.exception("Error clearing context: %s", exc)
+            await send_interaction_message(interaction, f"Could not clear context: {exc}", ephemeral=True)
+
+    @context_group.command(name="list", description="Show the current runtime state of public, session, and DM context.")
+    async def context_list(interaction: discord.Interaction):
+        category = interaction.channel.category
+        blocks = [
+            f"**Context status for {category.mention if category else interaction.guild.name}**",
+            "",
+            _context_runtime_status(category, "public"),
+            "",
+            _context_runtime_status(category, "session"),
+        ]
+        if _member_is_dm(interaction):
+            blocks.extend(["", _context_runtime_status(category, "dm")])
+        else:
+            blocks.extend(
+                [
+                    "",
+                    "**DM Private**\n"
+                    f"• Runtime state: hidden\n"
+                    f"• Discord surface: {_context_surface_label(category, 'dm')}\n"
+                    f"• Edit access requires the `{DM_ROLE_NAME}` role",
+                ]
+            )
+        blocks.extend(
+            [
+                "",
+                "This reflects the current runtime cache. In Phase 2 we will move toward compiling this directly from Discord context messages and attachments instead of depending on local files.",
+            ]
+        )
+        await send_interaction_message(interaction, "\n".join(blocks), ephemeral=True)
+
+    @context_group.command(name="summary", description="Legacy alias for `/context add`.")
+    @app_commands.describe(
+        scope="Which context bucket to update.",
+        action="Whether to replace or append to that bucket.",
+        note="Optional manual text to store as context.",
+        start="Message ID to start from (if applicable).",
+        end="Message ID to end at (if applicable).",
+        message_ids="Individual message IDs to include.",
+        last_n="Use the last 'n' messages from the source target.",
+        channel="Optional source channel. Defaults to this channel.",
+        thread="Optional source thread. Overrides the source channel when set.",
+    )
+    @app_commands.choices(
+        scope=CONTEXT_SCOPE_CHOICES,
+        action=CONTEXT_WRITE_ACTION_CHOICES,
     )
     async def context_summary(
         interaction: discord.Interaction,
@@ -898,109 +1152,33 @@ def setup_commands(tree, get_assistant_response):
         channel: str = None,
         thread: str = None,
     ):
-        await send_command_ack(interaction, "Updating summary context...")
-
+        await send_command_ack(interaction, "Updating context...")
         try:
-            if scope.value == "dm":
-                member_roles = getattr(interaction.user, "roles", [])
-                is_dm = any(getattr(role, "name", None) == DM_ROLE_NAME for role in member_roles)
-                if not is_dm:
-                    await send_interaction_message(
-                        interaction,
-                        f"Only members with the `{DM_ROLE_NAME}` role can change DM-private summary context.",
-                        ephemeral=True,
-                    )
-                    return
-
-            if action.value == "clear":
-                path = clear_context_text(scope.value)
-                logger.info("Cleared %s summary context at %s", scope.value, path)
-                destinations = await _mirror_context_update(
-                    interaction,
-                    scope_value=scope.value,
-                    action_value=action.value,
-                    stored_text=None,
-                    source_target=interaction.channel,
-                )
-                published = f" Published to {', '.join(destinations)}." if destinations else ""
-                await send_interaction_message(
-                    interaction,
-                    f"Cleared `{scope.value}` summary context.{published}",
-                    ephemeral=True,
-                )
-                return
-
-            source_target = interaction.channel
-            if channel:
-                source_target = interaction.guild.get_channel(int(channel))
-            if thread:
-                source_target = await interaction.guild.fetch_channel(int(thread))
-
-            if source_target is None:
-                await send_interaction_message(interaction, "Source channel or thread not found.", ephemeral=True)
-                return
-
-            parts: list[str] = []
-            if any(value is not None for value in (start, end, message_ids, last_n)):
-                material, options_or_error = await fetch_reference_material(
-                    source_target,
-                    start,
-                    end,
-                    message_ids,
-                    last_n,
-                )
-                if isinstance(options_or_error, str):
-                    await send_interaction_message(interaction, options_or_error, ephemeral=True)
-                    return
-                parts.append("\n\n".join(material))
-
-            if note:
-                parts.append(note.strip())
-
-            if not parts:
-                await send_interaction_message(
-                    interaction,
-                    "Provide message selectors and/or a manual note, or use action `Clear`.",
-                    ephemeral=True,
-                )
-                return
-
-            stored_text = "\n\n".join(part for part in parts if part).strip()
-            path = write_context_text(scope.value, stored_text, action.value)
-            logger.info("Saved %s summary context to %s using %s", scope.value, path, action.value)
-            destinations = await _mirror_context_update(
+            response_text = await _update_context_scope(
                 interaction,
                 scope_value=scope.value,
                 action_value=action.value,
-                stored_text=stored_text,
-                source_target=source_target,
+                note=note,
+                start=start,
+                end=end,
+                message_ids=message_ids,
+                last_n=last_n,
+                channel=channel,
+                thread=thread,
             )
-            if scope.value == "dm":
-                response_text = (
-                    "Updated `dm` summary context. "
-                    + (f"Published to {', '.join(destinations)}. " if destinations else "")
-                    + "DM context is only included when DM context is explicitly enabled for a run."
-                )
-            else:
-                response_text = (
-                    f"Updated `{scope.value}` summary context."
-                    + (f" Published to {', '.join(destinations)}." if destinations else "")
-                )
-            await send_interaction_message(
-                interaction,
-                response_text,
-                ephemeral=True,
-            )
+            await send_interaction_message(interaction, response_text, ephemeral=True)
+        except PermissionError as exc:
+            await send_interaction_message(interaction, str(exc), ephemeral=True)
         except Exception as exc:
-            logger.exception("Error updating summary context: %s", exc)
+            logger.exception("Error updating legacy summary context: %s", exc)
             await send_interaction_message(interaction, f"Could not update context: {exc}", ephemeral=True)
 
     @context_summary.autocomplete('channel')
-    async def context_channel_autocomplete(interaction: discord.Interaction, current: str):
+    async def context_summary_channel_autocomplete(interaction: discord.Interaction, current: str):
         return await channel_autocomplete(interaction, current)
 
     @context_summary.autocomplete('thread')
-    async def context_thread_autocomplete(interaction: discord.Interaction, current: str):
+    async def context_summary_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
 
 

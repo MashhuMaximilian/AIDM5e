@@ -66,11 +66,13 @@
   - [x] `/invite` posts campaign onboarding in the invoking channel
 
 - [ ] Phase 1: Discord-native context workflow
-  - [ ] Treat `#context` as the main human authoring surface
-  - [ ] Treat `#dm-planning` as the DM-private authoring surface
-  - [ ] Clarify `Public Evergreen` vs `Session Only` vs `DM Private` behavior in command UX
+  - [x] Treat `#context` as the main human authoring surface
+  - [x] Treat `#dm-planning` as the DM-private authoring surface
+  - [x] Clarify `Public Evergreen` vs `Session Only` vs `DM Private` behavior in command UX
+  - [x] Add clearer command entrypoints with `/context add`, `/context clear`, and `/context list`
+  - [x] Keep `/context summary` as a compatibility alias during the transition
   - [ ] Keep session context easy to replace/clear manually instead of guessing expiration dates
-  - [ ] Decide whether `/context summary` remains the only entrypoint or whether `/context add|list|clear` should exist
+  - [ ] Decide how long `/context summary` should remain as a compatibility alias before removal
 
 - [ ] Phase 2: Context compilation without DB payload storage
   - [ ] Stop treating local files under `voice_context/` as the long-term context source
