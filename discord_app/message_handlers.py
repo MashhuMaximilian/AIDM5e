@@ -6,9 +6,15 @@ import PyPDF2
 import io
 from docx import Document
 
-from ai_services.assistant_interactions import get_assistant_response
+from ai_services.assistant_interactions import get_assistant_response, stream_assistant_response
 from data_store.memory_management import get_assigned_memory
-from .shared_functions import check_always_on, send_response_in_chunks
+from .shared_functions import (
+    build_stream_preview,
+    check_always_on,
+    finalize_streamed_message,
+    maybe_update_stream_preview,
+    send_response_in_chunks,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,35 +42,49 @@ async def on_message(message):
     response_sent = False
     channel_always_on = await check_always_on(channel_id, category_id, thread_id)
 
-    async def send_response(response):
-        if response:
-            await send_response_in_chunks(message.channel, response)
-            return True
-        return False
+    async def stream_response_for_prompt(prompt_text: str) -> bool:
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+        if not assigned_memory:
+            logging.error("Assigned memory ID is invalid or empty.")
+            return False
+
+        placeholder = await message.channel.send(
+            build_stream_preview(
+                "",
+                prefix=f"AIDM is replying to {message.author.display_name}...",
+                suffix="Working...",
+            )
+        )
+        preview_state: dict = {}
+
+        async def edit_callback(content: str) -> None:
+            await placeholder.edit(content=content)
+
+        response = await stream_assistant_response(
+            prompt_text,
+            channel_id,
+            category_id,
+            thread_id,
+            assigned_memory=assigned_memory,
+            on_update=lambda text: maybe_update_stream_preview(
+                edit_callback,
+                text,
+                preview_state,
+                prefix=f"AIDM is replying to {message.author.display_name}...",
+                suffix="Working...",
+            ),
+        )
+        await finalize_streamed_message(placeholder, response)
+        return bool(response)
 
     if channel_always_on:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
+        response_sent = await stream_response_for_prompt(user_message)
 
     if channel_name == "telldm" and not response_sent:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
+        response_sent = await stream_response_for_prompt(user_message)
 
     if client.user in message.mentions and not response_sent:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
+        response_sent = await stream_response_for_prompt(user_message)
 
     if message.attachments and not response_sent:
         for attachment in message.attachments:

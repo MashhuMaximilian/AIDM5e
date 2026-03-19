@@ -6,9 +6,9 @@ import logging
 import discord
 from discord import app_commands
 
-from ai_services.assistant_interactions import get_assistant_response
+from ai_services.assistant_interactions import get_assistant_response, stream_assistant_response
 from ai_services.gemini_client import gemini_client
-from config import GEMINI_SUMMARY_MODEL
+from config import GEMINI_SUMMARY_MODEL, client
 from content_retrieval import (
     extract_public_url_text,
     format_message_text,
@@ -22,7 +22,14 @@ from prompts.query_prompts import construct_query_prompt
 from prompts.summary_prompts import build_summary_prompt
 from data_store.utils import category_threads, load_thread_data
 
-from .shared_functions import send_interaction_message, send_response
+from .shared_functions import (
+    build_stream_preview,
+    finalize_streamed_interaction,
+    maybe_update_stream_preview,
+    send_interaction_message,
+    send_response,
+    send_response_in_chunks,
+)
 
 category_conversations = {}
 
@@ -49,6 +56,18 @@ async def build_history_from_messages(messages: list[discord.Message], include_a
     return history
 
 async def summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory):
+    prompt = build_summary_from_history_prompt(conversation_history, options, query)
+    response = await get_assistant_response(
+        prompt,
+        channel_id,
+        thread_id=thread_id,
+        assigned_memory=assigned_memory,
+        model_name=GEMINI_SUMMARY_MODEL,
+    )
+    return response
+
+
+def build_summary_from_history_prompt(conversation_history, options, query):
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)
     elif options['type'] == 'from':
@@ -65,17 +84,7 @@ async def summarize_conversation(interaction, conversation_history, options, que
         logging.error("Invalid options for summarization.")
         return "Invalid options for summarization."
 
-    prompt = build_summary_prompt(history, query)
-
-    # Call get_assistant_response with channel_id, thread_id, and assigned_memory
-    response = await get_assistant_response(
-        prompt,
-        channel_id,
-        thread_id=thread_id,
-        assigned_memory=assigned_memory,
-        model_name=GEMINI_SUMMARY_MODEL,
-    )
-    return response
+    return build_summary_prompt(history, query)
 
 async def fetch_conversation_history(channel, start=None, end=None, message_ids=None, last_n=None):
     messages, options_or_error = await select_messages(channel, start, end, message_ids, last_n)
@@ -101,8 +110,16 @@ async def answer_from_references(
     thread_id: int | None = None,
     url: str | None = None,
 ):
-    prompt = build_reference_prompt("\n\n".join(reference_material), query, url)
+    prompt = build_reference_answer_prompt(query, reference_material, url)
     return await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+
+
+def build_reference_answer_prompt(
+    query: str,
+    reference_material: list[str],
+    url: str | None = None,
+):
+    return build_reference_prompt("\n\n".join(reference_material), query, url)
 
 
 async def answer_from_public_url(
@@ -132,6 +149,52 @@ async def answer_from_public_url(
         if not response:
             raise
         return response
+
+
+async def stream_answer_from_public_url(
+    *,
+    query: str,
+    url: str,
+    edit_callback,
+    preview_prefix: str,
+):
+    loop = asyncio.get_running_loop()
+    state: dict = {}
+    chunks: list[str] = []
+
+    def stream_worker(prompt: str, use_url_context: bool) -> str:
+        if use_url_context:
+            iterator = gemini_client.generate_text_with_url_context_stream(prompt, [url], None)
+        else:
+            iterator = gemini_client.generate_text_stream(prompt)
+
+        for chunk in iterator:
+            chunks.append(chunk)
+            asyncio.run_coroutine_threadsafe(
+                maybe_update_stream_preview(
+                    edit_callback,
+                    "".join(chunks),
+                    state,
+                    prefix=preview_prefix,
+                    suffix="Working...",
+                ),
+                loop,
+            )
+        return "".join(chunks)
+
+    try:
+        extracted_text = await extract_public_url_text(url)
+        prompt = build_reference_prompt(extracted_text, query, url)
+        return await asyncio.to_thread(stream_worker, prompt, False)
+    except Exception as exc:
+        logging.warning("Direct URL fetch failed for %s during streaming, falling back to Gemini URL Context: %s", url, exc)
+
+    prompt = build_reference_prompt(
+        "Direct fetch was unavailable. Use the provided public URL as the primary source.",
+        query,
+        url,
+    )
+    return await asyncio.to_thread(stream_worker, prompt, True)
 
 async def handle_channel_creation(channel: str, channel_name: str, guild: discord.Guild, category: discord.CategoryChannel, interaction: discord.Interaction):
     if channel == "NEW CHANNEL":
@@ -299,24 +362,17 @@ async def memory_autocomplete(interaction: discord.Interaction, current: str):
 
 async def process_query_command(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, backup_channel_name: str, channel: str = None, thread: str = None):
     await interaction.response.defer()  # Defer response while processing
-    
-    # Construct the prompt
+    await interaction.edit_original_response(content="Checking the target and assigned memory...")
+
     prompt = construct_query_prompt(query_type.value, query)
-
-    # Determine category ID from the interaction's category
     category_id = interaction.channel.category.id if interaction.channel.category else None
-
-    # Initialize channel_id and thread_id with None
     channel_id = None
     thread_id = None
 
-    # Determine where to send the response if no channel or thread is specified
     if not channel and not thread:
-        # Find the backup channel in the current category
         target_channel = discord.utils.get(interaction.guild.channels, name=backup_channel_name, category=interaction.channel.category)
-        channel_id = target_channel.id if target_channel else None
+        channel_id = target_channel.id if target_channel else interaction.channel.id
     else:
-        # Set channel_id and thread_id if provided in the command
         channel_id = int(channel) if channel else None
         thread_id = int(thread) if thread else None
 
@@ -327,21 +383,94 @@ async def process_query_command(interaction: discord.Interaction, query_type: ap
         await interaction.followup.send("No memory found for the specified parameters.")
         return
 
-    # Get the assistant's response without sending it directly
-    response = await get_assistant_response(
-        prompt, 
-        channel_id, 
-        category_id, 
-        thread_id, 
+    await stream_prompt_to_interaction(
+        interaction,
+        prompt=prompt,
+        channel_id=channel_id,
+        category_id=category_id,
+        thread_id=thread_id,
         assigned_memory=assigned_memory,
-        send_message=False  # Crucial change: prevent auto-sending
+        backup_channel_name=backup_channel_name,
+        preview_prefix="AIDM is drafting a response...",
     )
 
-    # Send the response through the proper interaction flow
-    await send_response(
-        interaction, 
-        response, 
-        channel_id=channel_id, 
-        thread_id=thread_id, 
-        backup_channel_name=backup_channel_name
+
+def resolve_interaction_target_channel(
+    interaction: discord.Interaction,
+    *,
+    channel_id: int | None = None,
+    thread_id: int | None = None,
+    backup_channel_name: str | None = None,
+):
+    if channel_id and thread_id is None:
+        return client.get_channel(channel_id)
+    if thread_id:
+        return client.get_channel(thread_id)
+    category = interaction.channel.category
+    if category:
+        return discord.utils.get(category.text_channels, name=backup_channel_name) or interaction.channel
+    return interaction.channel
+
+
+async def stream_prompt_to_interaction(
+    interaction: discord.Interaction,
+    *,
+    prompt: str,
+    channel_id: int,
+    category_id: int | None,
+    thread_id: int | None,
+    assigned_memory: str,
+    backup_channel_name: str | None = None,
+    preview_prefix: str,
+    model_name: str | None = None,
+):
+    target_channel = resolve_interaction_target_channel(
+        interaction,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        backup_channel_name=backup_channel_name,
     )
+    if not target_channel:
+        await interaction.edit_original_response(content="Error: Could not determine target channel.")
+        return "Error: Could not determine target channel."
+
+    preview_state: dict = {}
+
+    async def edit_callback(content: str) -> None:
+        await interaction.edit_original_response(content=content)
+
+    await interaction.edit_original_response(content=f"{preview_prefix}\n\n_Starting..._")
+    response = await stream_assistant_response(
+        prompt,
+        channel_id,
+        category_id,
+        thread_id,
+        assigned_memory=assigned_memory,
+        model_name=model_name,
+        on_update=lambda text: maybe_update_stream_preview(
+            edit_callback,
+            text,
+            preview_state,
+            prefix=preview_prefix,
+            suffix="Working...",
+        ),
+    )
+
+    same_surface = target_channel.id == interaction.channel.id
+    if same_surface:
+        await finalize_streamed_interaction(interaction, response)
+        return response
+
+    if response.startswith("Error"):
+        await interaction.edit_original_response(content=response)
+        return response
+
+    await send_response_in_chunks(target_channel, response)
+    await interaction.edit_original_response(
+        content=build_stream_preview(
+            response,
+            prefix=preview_prefix,
+            suffix=f"Full response sent to <#{target_channel.id}>.",
+        )
+    )
+    return response

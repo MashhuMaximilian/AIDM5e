@@ -40,6 +40,14 @@ class GeminiClient:
     ) -> str:
         return self._generate_text_with_model(model_name or GEMINI_CHAT_MODEL, prompt, system_instruction)
 
+    def generate_text_stream(
+        self,
+        prompt: str,
+        system_instruction: str | None = None,
+        model_name: str | None = None,
+    ):
+        yield from self._generate_text_stream_with_model(model_name or GEMINI_CHAT_MODEL, prompt, system_instruction)
+
     def generate_summary_text(
         self,
         prompt: str,
@@ -113,6 +121,24 @@ class GeminiClient:
         )
         return self._generate_with_config(GEMINI_CHAT_MODEL, contextual_prompt, config)
 
+    def generate_text_with_url_context_stream(
+        self,
+        prompt: str,
+        urls: list[str],
+        system_instruction: str | None = None,
+    ):
+        joined_urls = "\n".join(f"- {url}" for url in urls)
+        contextual_prompt = f"{prompt}\n\nRelevant public URLs:\n{joined_urls}"
+        config = types.GenerateContentConfig(
+            temperature=GEMINI_TEMPERATURE,
+            top_p=GEMINI_TOP_P,
+            top_k=GEMINI_TOP_K,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            system_instruction=system_instruction,
+            tools=[types.Tool(url_context=types.UrlContext())],
+        )
+        yield from self._generate_stream_with_config(GEMINI_CHAT_MODEL, contextual_prompt, config)
+
     def _generate_text_with_model(self, model_name: str, prompt: str, system_instruction: str | None = None) -> str:
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
@@ -122,6 +148,16 @@ class GeminiClient:
             system_instruction=system_instruction,
         )
         return self._generate_with_config(model_name, prompt, config)
+
+    def _generate_text_stream_with_model(self, model_name: str, prompt: str, system_instruction: str | None = None):
+        config = types.GenerateContentConfig(
+            temperature=GEMINI_TEMPERATURE,
+            top_p=GEMINI_TOP_P,
+            top_k=GEMINI_TOP_K,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            system_instruction=system_instruction,
+        )
+        yield from self._generate_stream_with_config(model_name, prompt, config)
 
     def _generate_with_config(self, model_name: str, prompt: str, config: types.GenerateContentConfig) -> str:
         try:
@@ -142,6 +178,43 @@ class GeminiClient:
             else:
                 raise
         return (response.text or "").strip()
+
+    def _generate_stream_with_config(self, model_name: str, prompt: str, config: types.GenerateContentConfig):
+        try:
+            stream = self.client.models.generate_content_stream(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            )
+            yield from self._yield_stream_text(stream)
+        except ClientError as exc:
+            status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            if status_code == 404 and model_name != GEMINI_FALLBACK_MODEL:
+                logger.warning("Gemini model %s unavailable for streaming; retrying with %s", model_name, GEMINI_FALLBACK_MODEL)
+                stream = self.client.models.generate_content_stream(
+                    model=GEMINI_FALLBACK_MODEL,
+                    contents=prompt,
+                    config=config,
+                )
+                yield from self._yield_stream_text(stream)
+            else:
+                raise
+
+    @staticmethod
+    def _yield_stream_text(stream):
+        accumulated = ""
+        for chunk in stream:
+            text = (getattr(chunk, "text", None) or "").strip()
+            if not text:
+                continue
+            if accumulated and text.startswith(accumulated):
+                delta = text[len(accumulated):]
+                accumulated = text
+            else:
+                delta = text
+                accumulated += text
+            if delta:
+                yield delta
 
     def transcribe_audio(self, audio_file_path: str, prompt: str, model_name: str | None = None) -> str:
         uploaded = self.client.files.upload(file=Path(audio_file_path))
