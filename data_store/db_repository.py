@@ -43,6 +43,15 @@ class CampaignContext:
     campaign_id: str
 
 
+@dataclass
+class CampaignImageSettings:
+    session_image_mode: str = "off"
+    session_image_quality: str = "auto"
+    session_image_max_scenes: int | None = None
+    session_image_include_dm_context: bool = False
+    session_image_post_channel_id: int | None = None
+
+
 def _connect() -> psycopg.Connection:
     if SUPABASE_DB_HOST and SUPABASE_DB_USER and SUPABASE_DB_PASSWORD:
         return psycopg.connect(
@@ -103,6 +112,13 @@ def ensure_runtime_schema() -> None:
         with conn.cursor() as cur:
             cur.execute("create extension if not exists pgcrypto")
             cur.execute("drop table if exists memory_messages")
+            cur.execute("alter table campaigns add column if not exists session_image_mode text not null default 'off'")
+            cur.execute("alter table campaigns add column if not exists session_image_quality text not null default 'auto'")
+            cur.execute("alter table campaigns add column if not exists session_image_max_scenes integer")
+            cur.execute(
+                "alter table campaigns add column if not exists session_image_include_dm_context boolean not null default false"
+            )
+            cur.execute("alter table campaigns add column if not exists session_image_post_channel_id bigint")
         conn.commit()
 
 
@@ -168,6 +184,84 @@ def get_campaign_context_by_category(discord_category_id: int) -> CampaignContex
     if not row:
         return None
     return CampaignContext(guild_id=str(row["guild_id"]), campaign_id=str(row["campaign_id"]))
+
+
+def get_campaign_image_settings(discord_category_id: int) -> CampaignImageSettings:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                  session_image_mode,
+                  session_image_quality,
+                  session_image_max_scenes,
+                  session_image_include_dm_context,
+                  session_image_post_channel_id
+                from campaigns
+                where discord_category_id = %s
+                """,
+                (discord_category_id,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return CampaignImageSettings()
+    return CampaignImageSettings(
+        session_image_mode=row["session_image_mode"] or "off",
+        session_image_quality=row["session_image_quality"] or "auto",
+        session_image_max_scenes=row["session_image_max_scenes"],
+        session_image_include_dm_context=bool(row["session_image_include_dm_context"]),
+        session_image_post_channel_id=int(row["session_image_post_channel_id"]) if row["session_image_post_channel_id"] else None,
+    )
+
+
+def update_campaign_image_settings(
+    discord_category_id: int,
+    *,
+    session_image_mode: str | None = None,
+    session_image_quality: str | None = None,
+    session_image_max_scenes: int | None = None,
+    session_image_include_dm_context: bool | None = None,
+    session_image_post_channel_id: int | None = None,
+) -> CampaignImageSettings:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update campaigns
+                set
+                  session_image_mode = coalesce(%s, session_image_mode),
+                  session_image_quality = coalesce(%s, session_image_quality),
+                  session_image_max_scenes = %s,
+                  session_image_include_dm_context = coalesce(%s, session_image_include_dm_context),
+                  session_image_post_channel_id = %s
+                where discord_category_id = %s
+                returning
+                  session_image_mode,
+                  session_image_quality,
+                  session_image_max_scenes,
+                  session_image_include_dm_context,
+                  session_image_post_channel_id
+                """,
+                (
+                    session_image_mode,
+                    session_image_quality,
+                    session_image_max_scenes,
+                    session_image_include_dm_context,
+                    session_image_post_channel_id,
+                    discord_category_id,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    if not row:
+        return CampaignImageSettings()
+    return CampaignImageSettings(
+        session_image_mode=row["session_image_mode"] or "off",
+        session_image_quality=row["session_image_quality"] or "auto",
+        session_image_max_scenes=row["session_image_max_scenes"],
+        session_image_include_dm_context=bool(row["session_image_include_dm_context"]),
+        session_image_post_channel_id=int(row["session_image_post_channel_id"]) if row["session_image_post_channel_id"] else None,
+    )
 
 
 def ensure_memory(campaign_id: str, memory_name: str, provider: str = "gemini", provider_ref: str | None = None) -> str:

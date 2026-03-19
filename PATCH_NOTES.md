@@ -105,6 +105,9 @@ The codebase now supports separate Gemini model roles:
 - `GEMINI_TRANSCRIBE_MODEL`
 - `GEMINI_SUMMARY_MODEL`
 - `GEMINI_TTS_MODEL`
+- `GEMINI_IMAGE_MODEL`
+- `GEMINI_IMAGE_HQ_MODEL`
+- `GEMINI_IMAGE_DEFAULT_ASPECT_RATIO`
 
 Current intended configuration:
 
@@ -112,6 +115,8 @@ Current intended configuration:
 - transcript: `gemini-3.1-flash-lite-preview`
 - summary: `gemini-3-flash-preview`
 - future TTS: `gemini-2.5-flash-preview-tts`
+- default image: `gemini-3.1-flash-image-preview`
+- optional HQ image: `gemini-3-pro-image-preview`
 
 ## Voice / Transcript Pipeline
 
@@ -186,6 +191,40 @@ The old transcript flow has been substantially refactored.
   - objective summary
   - narrative summary
 
+### Session Image Flow
+
+- Added a product-phase image pipeline that works without storing scenes in Supabase.
+- Scene candidates are derived in memory from:
+  - objective summary
+  - narrative summary
+  - compiled Discord context packet
+- The number of generated scenes is dynamic rather than fixed.
+- Final image prompts are built from:
+  - a reusable D&D-style house block
+  - optional campaign style shift from context
+  - scene-specific visual instructions
+- Image generation now supports:
+  - automated post-session generation after summaries
+  - manual `/generate image`
+- `/settings images` controls per-campaign automated behavior:
+  - `mode`
+  - `quality`
+  - `max_scenes`
+  - `include_dm_context`
+  - `post_channel`
+- `/generate image` supports:
+  - latest summary
+  - selected message IDs
+  - last N messages
+  - custom prompt
+  - extra `directives`
+  - quality and aspect-ratio overrides
+- Quality routing is app-controlled:
+  - `fast` -> Flash image model
+  - `hq` -> Pro image model
+  - `auto` -> policy-based selection
+- Aspect ratio is chosen per scene, with `GEMINI_IMAGE_DEFAULT_ASPECT_RATIO` as the fallback.
+
 ### Transcript Outputs
 
 - transcript file is posted to `#session-summary`
@@ -205,6 +244,15 @@ The old transcript flow has been substantially refactored.
   - objective summary
   - narrative summary
   - manifest JSON
+- it can now also optionally run the image pipeline after summaries via:
+  - `--generate-images`
+  - `--image-quality`
+  - `--image-aspect-ratio`
+  - `--image-max-scenes`
+  - `--image-ref`
+- added a dedicated offline image runner:
+  - `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/offline_image_test.py`
+  - this can test summary -> scene -> image flow without rerunning transcription
 
 ## Local-Only Artifacts
 

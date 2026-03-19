@@ -54,6 +54,9 @@ GEMINI_CHAT_MODEL=gemini-3-flash-preview
 GEMINI_TRANSCRIBE_MODEL=gemini-3.1-flash-lite-preview
 GEMINI_SUMMARY_MODEL=gemini-3-flash-preview
 GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
+GEMINI_IMAGE_HQ_MODEL=gemini-3-pro-image-preview
+GEMINI_IMAGE_DEFAULT_ASPECT_RATIO=4:3
 
 DIRECT_CONNECTION_STRING=
 # or the SUPABASE_DB_* variables instead
@@ -123,6 +126,8 @@ Grouped commands:
 - `/channel`
 - `/memory`
 - `/context`
+- `/settings`
+- `/generate`
 
 Standalone commands:
 
@@ -135,6 +140,7 @@ Use `/help` with a topic for the current workflow. The most important topics are
 
 - `/help topic:Invite`
 - `/help topic:Context`
+- `/help topic:Settings`
 - `/help topic:Ask`
 
 ## Context Model
@@ -199,6 +205,46 @@ Good starter tags:
 
 Tags are optional. They help later scene/image workflows, but basic usage should not depend on them.
 
+## Image Generation
+
+There are now two image-generation paths:
+
+- automated post-session image generation after voice summaries
+- manual `/generate image` runs
+
+### Automated campaign image settings
+
+Use `/settings images` per campaign/category to control:
+
+- `mode`: `off` or `auto`
+- `quality`: `auto`, `fast`, or `hq`
+- `max_scenes`: optional cap for automatic image count
+- `include_dm_context`: whether DM-private context can influence automatic images
+- `post_channel`: where the generated images are posted
+
+Creative style should stay in `#context` / `#dm-planning`, not in `/settings`.
+
+### Manual image generation
+
+`/generate image` supports:
+
+- `source_mode: latest_summary`
+- `source_mode: message_ids`
+- `source_mode: last_n`
+- `source_mode: custom_prompt`
+- optional `directives`
+- optional `quality`
+- optional `aspect_ratio`
+- optional message/image references from selected Discord messages
+
+For manual generation, `quality` controls model policy:
+
+- `fast` -> `GEMINI_IMAGE_MODEL`
+- `hq` -> `GEMINI_IMAGE_HQ_MODEL`
+- `auto` -> app decides based on scene/reference complexity
+
+For automated generation, aspect ratio is chosen per scene, with `GEMINI_IMAGE_DEFAULT_ASPECT_RATIO` used as a fallback.
+
 ## Voice Pipeline
 
 The voice pipeline currently does this:
@@ -240,6 +286,27 @@ python3 offline_audio_test.py "/absolute/path/to/session.mp3" \
   --session-context "/absolute/path/to/session.txt" \
   --dm-context "/absolute/path/to/dm.txt" \
   --include-dm-context
+```
+
+### Offline image testing
+
+You can test scene extraction and image generation directly from existing summaries:
+
+```bash
+python3 offline_image_test.py \
+  "/absolute/path/to/objective_summary.md" \
+  "/absolute/path/to/narrative_summary.md" \
+  --output-dir "/absolute/path/to/output" \
+  --quality auto
+```
+
+To test the full offline audio -> summary -> image path in one run:
+
+```bash
+python3 offline_audio_test.py "/absolute/path/to/session.mp3" \
+  --output-dir "/absolute/path/to/output" \
+  --generate-images \
+  --image-quality auto
 ```
 
 These file overrides are for explicit offline runs only. Live runtime context now comes from compiled Discord-managed context entries.

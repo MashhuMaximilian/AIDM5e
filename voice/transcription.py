@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import logging
 from datetime import datetime
@@ -6,9 +7,15 @@ from pathlib import Path
 
 import discord
 
-from ai_services.context_compiler import compile_context_packet_from_category
+from ai_services.context_compiler import (
+    CompiledContextPacket,
+    compile_context_packet_from_category,
+    compile_context_packet_from_category_id,
+)
+from ai_services.gemini_client import gemini_client
+from ai_services.scene_pipeline import scene_pipeline
 from .audio_utils import get_category_id_voice, probe_audio_duration, split_audio_file_for_offline
-from .context_support import load_voice_context
+from .context_support import build_context_block
 from .orchestrator import VoiceSessionOrchestrator
 from config import (
     AUDIO_CHUNK_SECONDS,
@@ -17,6 +24,7 @@ from config import (
     TRANSCRIPT_PATH,
     VOICE_INCLUDE_DM_CONTEXT,
 )
+from data_store.db_repository import get_campaign_image_settings
 from discord_app.shared_functions import send_response_in_chunks
 from .summary_pipeline import AudioSummaryService
 from .transcript_manifest import TranscriptManifestStore
@@ -52,6 +60,7 @@ class VoiceRecorder:
             audio_files_path,
         )
         self.context_block = None
+        self.context_packet = None
         self.capture_service = VoiceCaptureService(audio_files_path)
         self.orchestrator = VoiceSessionOrchestrator()
 
@@ -106,7 +115,86 @@ class VoiceRecorder:
             category,
             include_dm_context=VOICE_INCLUDE_DM_CONTEXT,
         )
+        self.context_packet = packet
         self.context_block = packet.text_block
+
+    async def _generate_and_post_session_images(
+        self,
+        *,
+        category: discord.CategoryChannel | None,
+        objective_summary: str | None,
+        narrative_summary: str | None,
+        default_channel: discord.TextChannel | None,
+    ) -> None:
+        if category is None:
+            return
+
+        settings = await asyncio.to_thread(get_campaign_image_settings, category.id)
+        if settings.session_image_mode != "auto":
+            return
+
+        if not objective_summary and not narrative_summary:
+            logging.info("Skipping session image generation because no summaries were available.")
+            return
+
+        context_packet = await compile_context_packet_from_category(
+            category,
+            include_dm_context=settings.session_image_include_dm_context,
+        )
+
+        target_channel = default_channel
+        if settings.session_image_post_channel_id:
+            resolved = category.guild.get_channel(settings.session_image_post_channel_id)
+            if isinstance(resolved, discord.TextChannel):
+                target_channel = resolved
+        if target_channel is None:
+            logging.warning("No target channel available for session image generation in category %s.", category.id)
+            return
+
+        await target_channel.send("Generating session images from the summaries...")
+        candidates = await scene_pipeline.extract_scene_candidates(
+            objective_summary=objective_summary or "",
+            narrative_summary=narrative_summary or "",
+            context_packet=context_packet,
+            max_scenes_cap=settings.session_image_max_scenes,
+        )
+        selected_scenes, rationale = await scene_pipeline.select_final_scenes(
+            candidates,
+            context_packet=context_packet,
+            max_scenes_cap=settings.session_image_max_scenes,
+        )
+
+        if rationale:
+            await send_response_in_chunks(target_channel, f"**Scene selection rationale**\n{rationale}")
+
+        for index, scene in enumerate(selected_scenes, start=1):
+            request = scene_pipeline.prepare_scene_image_request(
+                scene,
+                context_packet=context_packet,
+                quality_mode=settings.session_image_quality,
+            )
+            images = gemini_client.generate_image(
+                request.prompt,
+                model_name=request.model_name,
+                aspect_ratio=request.aspect_ratio,
+                reference_images=request.reference_assets,
+            )
+            if not images:
+                await target_channel.send(f"Skipping `{scene.title}` because Gemini returned no image.")
+                continue
+
+            image = images[0]
+            extension = ".png" if image["mime_type"] == "image/png" else ".jpg"
+            filename = f"session_scene_{index:02d}{extension}"
+            file = discord.File(io.BytesIO(image["image_bytes"]), filename=filename)
+            caption = (
+                f"**{scene.title}**\n"
+                f"• Focus: {scene.subject_focus or 'mixed'}\n"
+                f"• Location: {scene.location or 'unspecified'}\n"
+                f"• Aspect ratio: `{request.aspect_ratio}`\n"
+                f"• Model: `{request.model_name}`"
+            )
+            await target_channel.send(caption, file=file)
 
     async def process_existing_audio_files(
         self,
@@ -117,17 +205,46 @@ class VoiceRecorder:
         session_context_path: str | None = None,
         dm_context_path: str | None = None,
         include_dm_context: bool | None = None,
+        discord_category_id: int | None = None,
+        generate_images: bool = False,
+        image_quality: str = "auto",
+        image_aspect_ratio: str | None = None,
+        image_max_scenes: int | None = None,
+        image_reference_paths: list[str] | None = None,
     ) -> dict:
         resolved_paths = [Path(path).expanduser() for path in file_paths]
         for path in resolved_paths:
             if not path.exists():
                 raise FileNotFoundError(f"Audio file not found: {path}")
-        self.context_block = load_voice_context(
-            public_context_path=public_context_path,
-            session_context_path=session_context_path,
-            dm_context_path=dm_context_path,
-            include_dm_context=include_dm_context,
+        offline_context_packet = (
+            await compile_context_packet_from_category_id(discord_category_id, include_dm_context=bool(include_dm_context))
+            if discord_category_id
+            else CompiledContextPacket()
         )
+        if public_context_path:
+            public_text = Path(public_context_path).expanduser().read_text(encoding="utf-8").strip()
+            if public_text:
+                offline_context_packet.public_text = "\n\n".join(
+                    part for part in [offline_context_packet.public_text, public_text] if part
+                )
+        if session_context_path:
+            session_text = Path(session_context_path).expanduser().read_text(encoding="utf-8").strip()
+            if session_text:
+                offline_context_packet.session_text = "\n\n".join(
+                    part for part in [offline_context_packet.session_text, session_text] if part
+                )
+        if dm_context_path and include_dm_context:
+            dm_text = Path(dm_context_path).expanduser().read_text(encoding="utf-8").strip()
+            if dm_text:
+                offline_context_packet.dm_text = "\n\n".join(
+                    part for part in [offline_context_packet.dm_text, dm_text] if part
+                )
+        offline_context_packet.text_block = build_context_block(
+            public_text=offline_context_packet.public_text,
+            session_text=offline_context_packet.session_text,
+            dm_text=offline_context_packet.dm_text,
+        )
+        self.context_block = offline_context_packet.text_block
 
         output_root = Path(output_dir).expanduser() if output_dir else Path(__file__).parent / "offline_test_outputs"
         output_root.mkdir(parents=True, exist_ok=True)
@@ -172,12 +289,62 @@ class VoiceRecorder:
             if narrative_summary:
                 narrative_output_path.write_text(narrative_summary, encoding="utf-8")
 
+            image_outputs: list[str] = []
+            scene_manifest_output_path = None
+            if generate_images and (objective_summary or narrative_summary):
+                candidates = await scene_pipeline.extract_scene_candidates(
+                    objective_summary=objective_summary or "",
+                    narrative_summary=narrative_summary or "",
+                    context_packet=offline_context_packet,
+                    max_scenes_cap=image_max_scenes,
+                )
+                selected_scenes, rationale = await scene_pipeline.select_final_scenes(
+                    candidates,
+                    context_packet=offline_context_packet,
+                    max_scenes_cap=image_max_scenes,
+                )
+                scene_manifest_output_path = output_root / f"scene_manifest_{session_label}.json"
+                scene_manifest_output_path.write_text(
+                    json.dumps(
+                        {
+                            "selection_rationale": rationale,
+                            "selected_scenes": [scene.__dict__ for scene in selected_scenes],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                for index, scene in enumerate(selected_scenes, start=1):
+                    request = scene_pipeline.prepare_scene_image_request(
+                        scene,
+                        context_packet=offline_context_packet,
+                        quality_mode=image_quality,
+                        aspect_ratio_override=image_aspect_ratio,
+                    )
+                    images = gemini_client.generate_image(
+                        request.prompt,
+                        model_name=request.model_name,
+                        aspect_ratio=request.aspect_ratio,
+                        reference_images=[
+                            *[asset for asset in request.reference_assets if asset.is_image],
+                            *[Path(path).expanduser() for path in (image_reference_paths or [])],
+                        ],
+                    )
+                    for image_index, image in enumerate(images, start=1):
+                        extension = ".png" if image["mime_type"] == "image/png" else ".jpg"
+                        image_path = output_root / f"scene_{index:02d}_image_{image_index:02d}{extension}"
+                        image_path.write_bytes(image["image_bytes"])
+                        image_outputs.append(str(image_path))
+
             return {
                 "transcript_path": str(transcript_output_path),
                 "objective_summary_path": str(objective_output_path),
                 "narrative_summary_path": str(narrative_output_path),
                 "manifest_path": str(manifest_output_path),
                 "segment_dir": str(segment_output_root),
+                "scene_manifest_path": str(scene_manifest_output_path) if scene_manifest_output_path else None,
+                "image_paths": image_outputs,
             }
         finally:
             self.output_service.cleanup_offline_segments(segment_output_root)
@@ -253,5 +420,16 @@ class VoiceRecorder:
         except Exception as exc:
             logging.error("Error generating narrative session summary: %s", exc)
             await summary_channel.send(f"Error generating narrative session summary: {exc}")
+
+        try:
+            await self._generate_and_post_session_images(
+                category=getattr(self.voice_client.channel, "category", None),
+                objective_summary=objective_summary,
+                narrative_summary=narrative_summary,
+                default_channel=summary_channel,
+            )
+        except Exception as exc:
+            logging.error("Error generating session images: %s", exc)
+            await summary_channel.send(f"Error generating session images: {exc}")
 
         logging.info("Audio-native transcript summarization completed.")

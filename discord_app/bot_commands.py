@@ -1,19 +1,28 @@
 # bot_commands.py
 
 import asyncio
+import io
 import logging
 
 import discord
 from discord import app_commands
 from psycopg import errors as pg_errors
 
+from ai_services.gemini_client import gemini_client
+from ai_services.scene_pipeline import scene_pipeline
 from ai_services.context_compiler import (
+    ContextAsset,
     build_context_entry_messages,
     compile_context_packet_from_category,
 )
 from content_retrieval import extract_attachment_text, format_message_text, select_messages
 from config import DM_ROLE_NAME
-from data_store.db_repository import build_thread_data_snapshot, fetch_memory_details
+from data_store.db_repository import (
+    build_thread_data_snapshot,
+    fetch_memory_details,
+    get_campaign_image_settings,
+    update_campaign_image_settings,
+)
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
 
@@ -30,6 +39,7 @@ HELP_TOPICS = (
     ("overview", "Overview"),
     ("invite", "Invite"),
     ("context", "Context"),
+    ("settings", "Settings"),
     ("ask", "Ask"),
     ("channel", "Channel"),
     ("memory", "Memory"),
@@ -46,6 +56,33 @@ CONTEXT_SCOPE_CHOICES = [
 CONTEXT_WRITE_ACTION_CHOICES = [
     app_commands.Choice(name="Replace", value="replace"),
     app_commands.Choice(name="Append", value="append"),
+]
+
+IMAGE_MODE_CHOICES = [
+    app_commands.Choice(name="Off", value="off"),
+    app_commands.Choice(name="Auto", value="auto"),
+]
+
+IMAGE_QUALITY_CHOICES = [
+    app_commands.Choice(name="Auto", value="auto"),
+    app_commands.Choice(name="Fast", value="fast"),
+    app_commands.Choice(name="HQ", value="hq"),
+]
+
+IMAGE_SOURCE_MODE_CHOICES = [
+    app_commands.Choice(name="Latest Summary", value="latest_summary"),
+    app_commands.Choice(name="Message IDs", value="message_ids"),
+    app_commands.Choice(name="Last N Messages", value="last_n"),
+    app_commands.Choice(name="Custom Prompt", value="custom_prompt"),
+]
+
+IMAGE_ASPECT_RATIO_CHOICES = [
+    app_commands.Choice(name="Auto", value="auto"),
+    app_commands.Choice(name="1:1", value="1:1"),
+    app_commands.Choice(name="3:4", value="3:4"),
+    app_commands.Choice(name="4:3", value="4:3"),
+    app_commands.Choice(name="9:16", value="9:16"),
+    app_commands.Choice(name="16:9", value="16:9"),
 ]
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -93,6 +130,18 @@ def _build_help_text(topic: str) -> str:
             "• `/context add scope:Session Only action:Replace channel:#gameplay last_n:20`\n"
             "• `/context clear scope:Session Only`"
         )
+    if topic == "settings":
+        return (
+            "**/settings**\n"
+            "Use `/settings images` to control automatic post-session image generation for this campaign.\n\n"
+            "**Current image settings**\n"
+            "• `mode`: `off` or `auto`\n"
+            "• `quality`: `auto`, `fast`, or `hq`\n"
+            "• `max_scenes`: optional safety cap for auto-generated scenes\n"
+            "• `include_dm_context`: whether DM-private context can inform automated images\n"
+            "• `post_channel`: where automated images should be posted\n\n"
+            "Creative style still belongs in `#context` or `#dm-planning`, not in `/settings`."
+        )
     if topic == "ask":
         return (
             "**/ask**\n"
@@ -134,6 +183,7 @@ def _build_help_text(topic: str) -> str:
         "**Topics**\n"
         "• `Invite`: scaffold a campaign category and get started\n"
         "• `Context`: public/session/DM guidance for transcript and summary runs\n"
+        "• `Settings`: campaign-level image automation settings\n"
         "• `Ask`: rules or campaign questions\n"
         "• `Channel`: summarization and routing tools\n"
         "• `Memory`: inspect and assign memory behavior\n"
@@ -160,7 +210,9 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
         "• Run `/help topic:Context`\n"
         "• Add the party roster and naming/spelling clarifications with `/context add`\n"
         "• Use `Session Only` context for next-session notes, then replace or clear it manually when you are done with it\n"
-        f"• Drop useful reference images into {context_mention} as the visual library grows"
+        f"• Drop useful reference images into {context_mention} as the visual library grows\n"
+        "• Use `/settings images` when you want automatic post-session image generation\n"
+        "• Use `/generate image` for one-off manual image generation"
     )
 
 
@@ -225,6 +277,25 @@ def _compiled_context_status(
 def _member_is_dm(interaction: discord.Interaction) -> bool:
     member_roles = getattr(interaction.user, "roles", [])
     return any(getattr(role, "name", None) == DM_ROLE_NAME for role in member_roles)
+
+
+def _context_asset_from_raw(asset: dict) -> ContextAsset:
+    return ContextAsset(
+        filename=str(asset.get("filename", "")),
+        url=str(asset.get("url", "")),
+        proxy_url=asset.get("proxy_url"),
+        content_type=asset.get("content_type"),
+        source_message_id=asset.get("source_message_id"),
+        source_channel_id=asset.get("source_channel_id"),
+        is_image=bool(asset.get("is_image")),
+        image_bytes=asset.get("image_bytes"),
+    )
+
+
+def _normalize_image_aspect_ratio(value: str | None) -> str | None:
+    if not value or value == "auto":
+        return None
+    return value
 
 
 def _parse_context_tags(tags: str | None) -> list[str]:
@@ -306,6 +377,62 @@ async def _resolve_context_source_target(
     if thread:
         source_target = await interaction.guild.fetch_channel(int(thread))
     return source_target
+
+
+async def _collect_latest_session_summaries(category: discord.CategoryChannel | None) -> tuple[str | None, str | None]:
+    if category is None:
+        return None, None
+    summary_channel = discord.utils.get(category.text_channels, name="session-summary")
+    if summary_channel is None:
+        return None, None
+
+    objective_lines: list[str] = []
+    narrative_lines: list[str] = []
+    current_section: str | None = None
+
+    messages = [message async for message in summary_channel.history(limit=80)]
+    messages.reverse()
+    for message in messages:
+        content = (message.content or "").strip()
+        if not content:
+            continue
+        if content == "**Objective Summary**":
+            objective_lines = []
+            current_section = "objective"
+            continue
+        if content == "**Narrative Summary**":
+            narrative_lines = []
+            current_section = "narrative"
+            continue
+        if content.startswith("**") and content.endswith("**"):
+            current_section = None
+            continue
+        if current_section == "objective":
+            objective_lines.append(content)
+        elif current_section == "narrative":
+            narrative_lines.append(content)
+
+    objective = "\n".join(objective_lines).strip() or None
+    narrative = "\n".join(narrative_lines).strip() or None
+    return objective, narrative
+
+
+async def _send_generated_image_message(
+    destination: discord.abc.Messageable,
+    *,
+    title: str,
+    subtitle_lines: list[str],
+    image_bytes: bytes,
+    mime_type: str,
+    index: int = 1,
+) -> None:
+    extension = ".png" if mime_type == "image/png" else ".jpg"
+    filename = f"generated_image_{index:02d}{extension}"
+    file = discord.File(io.BytesIO(image_bytes), filename=filename)
+    message = f"**{title}**"
+    if subtitle_lines:
+        message += "\n" + "\n".join(subtitle_lines)
+    await destination.send(message, file=file)
 
 
 async def _update_context_scope(
@@ -417,6 +544,8 @@ def setup_commands(tree, get_assistant_response):
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
     memory_group = app_commands.Group(name="memory", description="Memory management commands.")
     context_group = app_commands.Group(name="context", description="Context helpers for summaries and transcripts.")
+    settings_group = app_commands.Group(name="settings", description="Campaign settings commands.")
+    generate_group = app_commands.Group(name="generate", description="Image and media generation commands.")
 
     @tree.command(name="help", description="Show command help and campaign onboarding guidance.")
     @app_commands.describe(topic="Optional topic to explain in more detail.")
@@ -1071,6 +1200,83 @@ def setup_commands(tree, get_assistant_response):
         if hasattr(interaction.channel, "send"):
             await send_response_in_chunks(interaction.channel, _build_invite_onboarding_message(category))
 
+    @settings_group.command(name="images", description="Configure automatic post-session image generation for this campaign.")
+    @app_commands.describe(
+        mode="Whether images are generated automatically after summaries.",
+        quality="Default quality policy for automatic session images.",
+        max_scenes="Optional cap for how many scenes can be generated automatically. Use 0 to clear the cap.",
+        include_dm_context="Whether automatic images can consume DM-private context.",
+        post_channel="Optional post target. Defaults to #session-summary when unset.",
+    )
+    @app_commands.choices(mode=IMAGE_MODE_CHOICES, quality=IMAGE_QUALITY_CHOICES)
+    async def settings_images(
+        interaction: discord.Interaction,
+        mode: app_commands.Choice[str] | None = None,
+        quality: app_commands.Choice[str] | None = None,
+        max_scenes: int | None = None,
+        include_dm_context: bool | None = None,
+        post_channel: str | None = None,
+    ):
+        if not _member_is_dm(interaction):
+            await send_interaction_message(
+                interaction,
+                f"Only members with the `{DM_ROLE_NAME}` role can update campaign image settings.",
+                ephemeral=True,
+            )
+            return
+
+        category = interaction.channel.category
+        if category is None:
+            await send_interaction_message(interaction, "This command must be used inside a campaign category.", ephemeral=True)
+            return
+
+        current = await asyncio.to_thread(get_campaign_image_settings, category.id)
+        new_max_scenes = current.session_image_max_scenes
+        if max_scenes is not None:
+            new_max_scenes = None if max_scenes <= 0 else max_scenes
+
+        new_post_channel_id = current.session_image_post_channel_id
+        if post_channel is not None:
+            resolved_channel = interaction.guild.get_channel(int(post_channel))
+            if not isinstance(resolved_channel, discord.TextChannel) or resolved_channel.category_id != category.id:
+                await send_interaction_message(
+                    interaction,
+                    "The post channel must be a text channel inside this campaign category.",
+                    ephemeral=True,
+                )
+                return
+            new_post_channel_id = int(post_channel)
+
+        updated = await asyncio.to_thread(
+            update_campaign_image_settings,
+            category.id,
+            session_image_mode=mode.value if mode else current.session_image_mode,
+            session_image_quality=quality.value if quality else current.session_image_quality,
+            session_image_max_scenes=new_max_scenes,
+            session_image_include_dm_context=include_dm_context if include_dm_context is not None else current.session_image_include_dm_context,
+            session_image_post_channel_id=new_post_channel_id,
+        )
+
+        post_target = interaction.guild.get_channel(updated.session_image_post_channel_id) if updated.session_image_post_channel_id else discord.utils.get(category.text_channels, name="session-summary")
+        post_label = post_target.mention if isinstance(post_target, discord.TextChannel) else "#session-summary"
+        max_scenes_label = updated.session_image_max_scenes if updated.session_image_max_scenes is not None else "no cap"
+        await send_interaction_message(
+            interaction,
+            (
+                f"**Image settings for {category.mention}**\n"
+                f"• mode: `{updated.session_image_mode}`\n"
+                f"• quality: `{updated.session_image_quality}`\n"
+                f"• max_scenes: `{max_scenes_label}`\n"
+                f"• include_dm_context: `{updated.session_image_include_dm_context}`\n"
+                f"• post_channel: {post_label}"
+            ),
+            ephemeral=True,
+        )
+
+    @settings_images.autocomplete("post_channel")
+    async def settings_images_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
     @context_group.command(name="add", description="Add or replace public, session, or DM context for future transcript/summary runs.")
     @app_commands.describe(
         scope="Which context bucket to update.",
@@ -1258,6 +1464,196 @@ def setup_commands(tree, get_assistant_response):
 
     @context_summary.autocomplete('thread')
     async def context_summary_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
+
+    @generate_group.command(name="image", description="Generate images from the latest summary, selected messages, or a custom prompt.")
+    @app_commands.describe(
+        source_mode="Where the image instructions should come from.",
+        prompt="Required for custom prompt mode. Optional extra source text for message-based modes.",
+        directives="Optional extra instructions layered on top of the source material.",
+        quality="Image generation quality policy.",
+        aspect_ratio="Optional override. Leave on Auto to let the scene decide.",
+        include_dm_context="Whether DM-private context can be included for this generation run.",
+        message_ids="Comma-separated message IDs for message-based generation.",
+        last_n="Use the last N messages from the chosen source target.",
+        channel="Optional source channel for message-based generation.",
+        thread="Optional source thread for message-based generation.",
+    )
+    @app_commands.choices(
+        source_mode=IMAGE_SOURCE_MODE_CHOICES,
+        quality=IMAGE_QUALITY_CHOICES,
+        aspect_ratio=IMAGE_ASPECT_RATIO_CHOICES,
+    )
+    async def generate_image(
+        interaction: discord.Interaction,
+        source_mode: app_commands.Choice[str],
+        prompt: str = None,
+        directives: str = None,
+        quality: app_commands.Choice[str] | None = None,
+        aspect_ratio: app_commands.Choice[str] | None = None,
+        include_dm_context: bool | None = None,
+        message_ids: str = None,
+        last_n: int | None = None,
+        channel: str = None,
+        thread: str = None,
+    ):
+        await send_command_ack(interaction, "Generating images...")
+
+        category = getattr(interaction.channel, "category", None)
+        if category is None and isinstance(interaction.channel, discord.Thread):
+            category = getattr(interaction.channel.parent, "category", None)
+        if category is None:
+            await send_interaction_message(interaction, "This command must be used inside a campaign category.", ephemeral=True)
+            return
+
+        settings = await asyncio.to_thread(get_campaign_image_settings, category.id)
+        selected_quality = quality.value if quality else settings.session_image_quality
+        allow_dm_context = include_dm_context if include_dm_context is not None else settings.session_image_include_dm_context
+        aspect_ratio_override = _normalize_image_aspect_ratio(aspect_ratio.value if aspect_ratio else None)
+        context_packet = await compile_context_packet_from_category(category, include_dm_context=allow_dm_context)
+
+        target_channel = interaction.channel
+        source_value = source_mode.value
+        if source_value == "latest_summary":
+            objective_summary, narrative_summary = await _collect_latest_session_summaries(category)
+            if not objective_summary and not narrative_summary:
+                await send_interaction_message(interaction, "Could not find a recent objective or narrative summary in #session-summary.", ephemeral=True)
+                return
+
+            candidates = await scene_pipeline.extract_scene_candidates(
+                objective_summary=objective_summary or "",
+                narrative_summary=narrative_summary or "",
+                context_packet=context_packet,
+                max_scenes_cap=settings.session_image_max_scenes,
+            )
+            selected_scenes, rationale = await scene_pipeline.select_final_scenes(
+                candidates,
+                context_packet=context_packet,
+                max_scenes_cap=settings.session_image_max_scenes,
+            )
+            if rationale:
+                await send_response_in_chunks(target_channel, f"**Image scene selection**\n{rationale}")
+            for index, scene in enumerate(selected_scenes, start=1):
+                request = scene_pipeline.prepare_scene_image_request(
+                    scene,
+                    context_packet=context_packet,
+                    quality_mode=selected_quality,
+                    directives=directives,
+                    aspect_ratio_override=aspect_ratio_override,
+                )
+                images = gemini_client.generate_image(
+                    request.prompt,
+                    model_name=request.model_name,
+                    aspect_ratio=request.aspect_ratio,
+                    reference_images=request.reference_assets,
+                )
+                if not images:
+                    await target_channel.send(f"Skipping `{scene.title}` because Gemini returned no image.")
+                    continue
+                await _send_generated_image_message(
+                    target_channel,
+                    title=scene.title,
+                    subtitle_lines=[
+                        f"• Focus: {scene.subject_focus or 'mixed'}",
+                        f"• Aspect ratio: `{request.aspect_ratio}`",
+                        f"• Model: `{request.model_name}`",
+                    ],
+                    image_bytes=images[0]["image_bytes"],
+                    mime_type=images[0]["mime_type"],
+                    index=index,
+                )
+            await send_interaction_message(interaction, "Generated image set in this channel.", ephemeral=True)
+            return
+
+        selected_messages: list[discord.Message] = []
+        raw_assets: list[dict] = []
+        source_parts: list[str] = []
+        if source_value in {"message_ids", "last_n"}:
+            source_target = await _resolve_context_source_target(interaction, channel=channel, thread=thread)
+            if source_target is None:
+                await send_interaction_message(interaction, "Could not resolve the source channel or thread.", ephemeral=True)
+                return
+            selected_messages, options_or_error = await select_messages(
+                source_target,
+                None,
+                None,
+                message_ids if source_value == "message_ids" else None,
+                last_n if source_value == "last_n" else None,
+            )
+            if isinstance(options_or_error, str):
+                await send_interaction_message(interaction, options_or_error, ephemeral=True)
+                return
+            if not selected_messages:
+                await send_interaction_message(interaction, "No source messages were selected.", ephemeral=True)
+                return
+            source_material = await _build_context_material_from_messages(selected_messages)
+            source_parts.append("\n\n".join(source_material))
+            raw_assets = _extract_context_assets(selected_messages)
+
+        if source_value == "custom_prompt":
+            if not prompt:
+                await send_interaction_message(interaction, "Custom prompt mode requires `prompt`.", ephemeral=True)
+                return
+            source_parts.append(prompt.strip())
+        elif prompt:
+            source_parts.append(prompt.strip())
+
+        if not source_parts:
+            await send_interaction_message(interaction, "Provide source messages or a prompt for image generation.", ephemeral=True)
+            return
+
+        brief = await scene_pipeline.build_direct_image_brief(
+            source_material="\n\n".join(part for part in source_parts if part).strip(),
+            directives=directives,
+            context_packet=context_packet,
+        )
+        selected_asset_objects = [_context_asset_from_raw(asset) for asset in raw_assets if asset.get("is_image")]
+        request = scene_pipeline.prepare_direct_image_request(
+            brief,
+            context_packet=context_packet,
+            quality_mode=selected_quality,
+            directives=directives,
+            aspect_ratio_override=aspect_ratio_override,
+        )
+        combined_reference_assets: list = []
+        seen_refs: set[tuple[str, int | None]] = set()
+        for asset in [*request.reference_assets, *selected_asset_objects]:
+            key = (asset.url, asset.source_message_id)
+            if key in seen_refs:
+                continue
+            seen_refs.add(key)
+            combined_reference_assets.append(asset)
+
+        images = gemini_client.generate_image(
+            request.prompt,
+            model_name=request.model_name,
+            aspect_ratio=request.aspect_ratio,
+            reference_images=combined_reference_assets,
+        )
+        if not images:
+            await send_interaction_message(interaction, "Gemini returned no image for this request.", ephemeral=True)
+            return
+
+        await _send_generated_image_message(
+            target_channel,
+            title=brief.title,
+            subtitle_lines=[
+                f"• Focus: {brief.subject_focus or 'mixed'}",
+                f"• Aspect ratio: `{request.aspect_ratio}`",
+                f"• Model: `{request.model_name}`",
+            ],
+            image_bytes=images[0]["image_bytes"],
+            mime_type=images[0]["mime_type"],
+            index=1,
+        )
+        await send_interaction_message(interaction, "Generated image in this channel.", ephemeral=True)
+
+    @generate_image.autocomplete("channel")
+    async def generate_image_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @generate_image.autocomplete("thread")
+    async def generate_image_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
 
 
@@ -1499,3 +1895,5 @@ def setup_commands(tree, get_assistant_response):
     tree.add_command(channel_group)
     tree.add_command(context_group)
     tree.add_command(memory_group)
+    tree.add_command(settings_group)
+    tree.add_command(generate_group)

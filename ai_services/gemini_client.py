@@ -1,6 +1,8 @@
 import logging
 import time
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from google import genai
 from google.genai import types
@@ -10,6 +12,8 @@ from config import (
     GEMINI_API_KEY,
     GEMINI_CHAT_MODEL,
     GEMINI_FALLBACK_MODEL,
+    GEMINI_IMAGE_DEFAULT_ASPECT_RATIO,
+    GEMINI_IMAGE_MODEL,
     GEMINI_MAX_OUTPUT_TOKENS,
     GEMINI_SUMMARY_MODEL,
     GEMINI_TEMPERATURE,
@@ -167,6 +171,189 @@ class GeminiClient:
                 self.client.files.delete(name=uploaded.name)
             except Exception as exc:
                 logger.warning("Failed to delete uploaded Gemini file %s: %s", uploaded.name, exc)
+
+    def _load_image_bytes(self, source) -> tuple[bytes, str | None]:
+        if hasattr(source, "image_bytes") and getattr(source, "image_bytes"):
+            mime_type = getattr(source, "content_type", None) or "image/png"
+            return getattr(source, "image_bytes"), mime_type
+
+        if isinstance(source, (str, Path)):
+            source_path = Path(source).expanduser()
+            if source_path.exists():
+                suffix = source_path.suffix.lower()
+                mime_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(suffix, "image/png")
+                return source_path.read_bytes(), mime_type
+
+            request = Request(str(source), headers={"User-Agent": "AIDM/1.0"})
+            with urlopen(request, timeout=30) as response:
+                data = response.read()
+                mime_type = response.headers.get_content_type()
+                return data, mime_type
+
+        if hasattr(source, "url"):
+            urls = [getattr(source, "url", None), getattr(source, "proxy_url", None)]
+            last_error = None
+            for candidate_url in urls:
+                if not candidate_url:
+                    continue
+                try:
+                    request = Request(str(candidate_url), headers={"User-Agent": "AIDM/1.0"})
+                    with urlopen(request, timeout=30) as response:
+                        data = response.read()
+                        mime_type = response.headers.get_content_type()
+                        return data, mime_type
+                except Exception as exc:
+                    last_error = exc
+            if last_error is not None:
+                raise last_error
+
+        if isinstance(source, dict) and source.get("image_bytes"):
+            return source["image_bytes"], source.get("content_type") or "image/png"
+
+        if isinstance(source, dict) and (source.get("url") or source.get("proxy_url")):
+            last_error = None
+            for candidate_url in (source.get("url"), source.get("proxy_url")):
+                if not candidate_url:
+                    continue
+                try:
+                    request = Request(str(candidate_url), headers={"User-Agent": "AIDM/1.0"})
+                    with urlopen(request, timeout=30) as response:
+                        data = response.read()
+                        mime_type = response.headers.get_content_type()
+                        return data, mime_type
+                except Exception as exc:
+                    last_error = exc
+            if last_error is not None:
+                raise last_error
+
+        raise ValueError(f"Unsupported image source: {source!r}")
+
+    def generate_image(
+        self,
+        prompt: str,
+        *,
+        model_name: str | None = None,
+        aspect_ratio: str | None = None,
+        reference_images: list | None = None,
+        negative_prompt: str | None = None,
+        number_of_images: int = 1,
+    ) -> list[dict]:
+        chosen_model = model_name or GEMINI_IMAGE_MODEL
+        refs = list(reference_images or [])
+        use_generate_content = chosen_model.startswith("gemini-")
+        effective_prompt = prompt.strip()
+        if negative_prompt:
+            effective_prompt = (
+                f"{effective_prompt}\n\n"
+                f"Negative guidance: {negative_prompt.strip()}"
+            ).strip()
+
+        try:
+            if use_generate_content:
+                content_parts = [effective_prompt]
+                for item in refs:
+                    try:
+                        image_bytes, mime_type = self._load_image_bytes(item)
+                    except Exception as exc:
+                        logger.warning("Skipping unusable reference image %r: %s", item, exc)
+                        continue
+                    content_parts.append(
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=mime_type or "image/png",
+                        )
+                    )
+
+                response = self.client.models.generate_content(
+                    model=chosen_model,
+                    contents=content_parts,
+                    config=types.GenerateContentConfig(
+                        candidate_count=number_of_images,
+                        response_modalities=["TEXT", "IMAGE"],
+                        image_config=types.ImageConfig(
+                            aspect_ratio=aspect_ratio or GEMINI_IMAGE_DEFAULT_ASPECT_RATIO,
+                        ),
+                    ),
+                )
+                generated = []
+                response_parts = getattr(response, "parts", None)
+                if response_parts is None:
+                    response_parts = []
+                    for candidate in getattr(response, "candidates", []) or []:
+                        content = getattr(candidate, "content", None)
+                        response_parts.extend(getattr(content, "parts", []) or [])
+                for part in response_parts:
+                    inline_data = getattr(part, "inline_data", None)
+                    image_bytes = getattr(inline_data, "data", None) if inline_data else None
+                    mime_type = getattr(inline_data, "mime_type", None) if inline_data else None
+                    if not image_bytes:
+                        continue
+                    generated.append(
+                        {
+                            "image_bytes": image_bytes,
+                            "mime_type": mime_type or "image/png",
+                            "enhanced_prompt": None,
+                            "rai_filtered_reason": None,
+                        }
+                    )
+            else:
+                config = types.GenerateImagesConfig(
+                    number_of_images=number_of_images,
+                    aspect_ratio=aspect_ratio or GEMINI_IMAGE_DEFAULT_ASPECT_RATIO,
+                    negative_prompt=negative_prompt,
+                    output_mime_type="image/png",
+                    add_watermark=False,
+                )
+                if refs:
+                    logger.warning(
+                        "Reference images are not supported for non-Gemini image generation path; using prompt-only generation."
+                    )
+                response = self.client.models.generate_images(
+                    model=chosen_model,
+                    prompt=effective_prompt,
+                    config=config,
+                )
+                generated = getattr(response, "generated_images", None) or []
+        except ClientError as exc:
+            raise RuntimeError(f"Gemini image generation failed: {exc}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Could not fetch reference image: {exc}") from exc
+
+        outputs: list[dict] = []
+        for generated_image in generated:
+            if isinstance(generated_image, dict):
+                image_bytes = generated_image.get("image_bytes")
+                mime_type = generated_image.get("mime_type")
+                if not image_bytes:
+                    continue
+                outputs.append(
+                    {
+                        "image_bytes": image_bytes,
+                        "mime_type": mime_type or "image/png",
+                        "enhanced_prompt": generated_image.get("enhanced_prompt"),
+                        "rai_filtered_reason": generated_image.get("rai_filtered_reason"),
+                    }
+                )
+                continue
+            image = getattr(generated_image, "image", None)
+            image_bytes = getattr(image, "image_bytes", None) if image else None
+            mime_type = getattr(image, "mime_type", None) if image else None
+            if not image_bytes:
+                continue
+            outputs.append(
+                {
+                    "image_bytes": image_bytes,
+                    "mime_type": mime_type or "image/png",
+                    "enhanced_prompt": getattr(generated_image, "enhanced_prompt", None),
+                    "rai_filtered_reason": getattr(generated_image, "rai_filtered_reason", None),
+                }
+            )
+        return outputs
 
 
 gemini_client = GeminiClient()

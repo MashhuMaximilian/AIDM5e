@@ -14,6 +14,9 @@
 - [x] `/context add` and `/context clear` publish canonical managed context entries into Discord
 - [x] `/context list` shows the effective compiled context state
 - [x] `/context summary` remains as a compatibility alias
+- [x] `/settings images` exists for per-campaign automatic image-generation behavior
+- [x] `/generate image` exists for manual image generation from summaries, selected messages, or a custom prompt
+- [x] Offline image test runner exists
 - [x] `CODEX_HANDOFF.md` removed from git tracking and ignored
 - [x] Supabase `memory_messages` storage path removed from runtime code
 - [x] Initial Docker runtime scaffold added
@@ -85,9 +88,9 @@
 
 - [ ] Phase 3: Image-aware context
   - [x] Support image references from `#context` / `#dm-planning` in the compiled context flow
-  - [ ] Clarify how text descriptions and image references should be combined for later scene generation
+  - [x] Clarify how text descriptions and image references should be combined for later scene generation
   - [x] Define optional user-facing tags/examples without making them mandatory
-  - [ ] Expose compiled image-aware context to the future scene/image generation pipeline
+  - [x] Expose compiled image-aware context to the future scene/image generation pipeline
 
 - [ ] Keep DM-private context separate from public summary context
 - [ ] Decide whether and when to add `/context_link`
@@ -108,10 +111,15 @@
 
 - [ ] Improve error handling and user-facing failure messages across commands
 - [ ] Revisit whether `/reference` should support more attachment/document types
-- [ ] Add image generation from summaries
-- [ ] Add `/generate image`
+- [x] Add image generation from summaries
+- [x] Add `/generate image`
+- [x] Add automated post-session image generation controlled by `/settings images`
+- [x] Add offline image testing from summaries and from the offline audio pipeline
+- [ ] Test the new Discord context workflow end-to-end against the image pipeline
+- [ ] Decide how `/generate image` should evolve for richer message/source selection UX
 - [ ] Add `/create player` / `/create npc` persona flows
 - [ ] Consider TTS story output later, with cost/server impact review
+- [ ] Consider whether a separate art/gallery channel is worthwhile later
 
 ## Model / Provider Strategy
 
