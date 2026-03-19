@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import re
-import time
 
 import discord
 
@@ -20,9 +19,6 @@ always_on_channels = {}
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 BULLET_ONLY_RE = re.compile(r"^\s*(?:[-*•]|o)\s*$")
 LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*•]|o)\s+(.*\S.*)$")
-STREAM_EDIT_MIN_INTERVAL_SECONDS = 0.8
-STREAM_EDIT_MIN_NEW_CHARS = 90
-STREAM_PREVIEW_LIMIT = 1850
 
 
 def _normalize_list_formatting(response: str) -> str:
@@ -130,81 +126,10 @@ async def send_response_in_chunks(channel, response):
         return
     response = format_for_discord(response)
     if len(response) > 2000:
-        for chunk in split_discord_chunks(response):
+        for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
             await channel.send(chunk)
     else:
         await channel.send(response)
-
-
-def split_discord_chunks(response: str, limit: int = 2000) -> list[str]:
-    if not response:
-        return [""]
-    return [response[i:i + limit] for i in range(0, len(response), limit)]
-
-
-def build_stream_preview(
-    response: str,
-    *,
-    prefix: str | None = None,
-    suffix: str | None = "Working...",
-) -> str:
-    body = format_for_discord(response or "").strip()
-    segments = [segment for segment in (prefix, body or "_…_", suffix) if segment]
-    joined = "\n\n".join(segments)
-    if len(joined) <= 2000:
-        return joined
-
-    reserve = sum(len(segment) for segment in (prefix, suffix) if segment)
-    reserve += 4 if prefix and suffix else 2 if prefix or suffix else 0
-    body_limit = max(200, STREAM_PREVIEW_LIMIT - reserve)
-    shortened_body = (body[: body_limit - 16].rstrip() + "\n\n[continuing...]") if len(body) > body_limit else body
-    segments = [segment for segment in (prefix, shortened_body or "_…_", suffix) if segment]
-    return "\n\n".join(segments)[:2000]
-
-
-async def maybe_update_stream_preview(
-    edit_callback,
-    response: str,
-    state: dict,
-    *,
-    prefix: str | None = None,
-    suffix: str | None = "Working...",
-    force: bool = False,
-) -> None:
-    now = time.monotonic()
-    last_len = state.get("last_len", 0)
-    last_time = state.get("last_time", 0.0)
-    if not force:
-        if len(response) - last_len < STREAM_EDIT_MIN_NEW_CHARS and now - last_time < STREAM_EDIT_MIN_INTERVAL_SECONDS:
-            return
-
-    content = build_stream_preview(response, prefix=prefix, suffix=suffix)
-    if content == state.get("last_content"):
-        return
-
-    await edit_callback(content)
-    state["last_len"] = len(response)
-    state["last_time"] = now
-    state["last_content"] = content
-
-
-async def finalize_streamed_message(message: discord.Message, response: str) -> None:
-    formatted = format_for_discord(response or "")
-    chunks = split_discord_chunks(formatted)
-    await message.edit(content=chunks[0] if chunks else "")
-    for chunk in chunks[1:]:
-        await message.channel.send(chunk)
-
-
-async def finalize_streamed_interaction(
-    interaction: discord.Interaction,
-    response: str,
-) -> None:
-    formatted = format_for_discord(response or "")
-    chunks = split_discord_chunks(formatted)
-    await interaction.edit_original_response(content=chunks[0] if chunks else "")
-    for chunk in chunks[1:]:
-        await interaction.followup.send(chunk)
 
 
 async def send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name=None):

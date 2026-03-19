@@ -637,7 +637,6 @@ def setup_commands(tree, get_assistant_response):
     )
     async def summarize(interaction: discord.Interaction, start: str = None, end: str = None, message_ids: str = None, query: str = None, last_n: int = None, channel: str = None, thread: str = None):
         await interaction.response.defer()  # Defer the response while processing
-        await interaction.edit_original_response(content="Reading the selected messages...")
 
         # Fetch the channel and thread if specified
         channel_id = int(channel) if channel else interaction.channel.id
@@ -658,25 +657,11 @@ def setup_commands(tree, get_assistant_response):
 
         options = options_or_error  # Assign the options for summarization
 
-        prompt = build_summary_from_history_prompt(conversation_history, options, query)
-        if prompt == "Invalid options for summarization.":
-            await interaction.edit_original_response(content=prompt)
-            return
-
-        if not assigned_memory:
-            await interaction.edit_original_response(content="No memory found for the specified parameters.")
-            return
-
-        await stream_prompt_to_interaction(
-            interaction,
-            prompt=prompt,
-            channel_id=channel_id,
-            category_id=category_id,
-            thread_id=thread_id,
-            assigned_memory=assigned_memory,
-            preview_prefix="AIDM is drafting the summary...",
-            model_name=GEMINI_SUMMARY_MODEL,
-        )
+        response = await summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory)
+        if response:
+            await send_response(interaction, response, channel_id=channel_id, thread_id=thread_id)
+        else:
+            await interaction.followup.send("No content to summarize.")
 
             # Autocomplete functions for channel and thread parameters
     @summarize.autocomplete('channel')  # Note that the parameter name is 'channel', not 'channel_id'
@@ -710,7 +695,6 @@ def setup_commands(tree, get_assistant_response):
         thread: str = None,
     ):
         await interaction.response.defer()
-        await interaction.edit_original_response(content="Collecting reference material...")
 
         channel_id = int(channel) if channel else interaction.channel.id
         thread_id = int(thread) if thread else None
@@ -742,51 +726,16 @@ def setup_commands(tree, get_assistant_response):
 
         if url and not has_message_refs:
             try:
-                extracted_url_text = await extract_public_url_text(url)
-            except Exception:
-                try:
-                    response = await stream_answer_from_public_url(
-                        query=query,
-                        url=url,
-                        edit_callback=lambda content: interaction.edit_original_response(content=content),
-                        preview_prefix="AIDM is reading the public URL...",
-                    )
-                except Exception as exc:
-                    await interaction.followup.send(f"Could not read the URL: {exc}")
-                    return
-                target_channel = resolve_interaction_target_channel(
-                    interaction,
-                    channel_id=channel_id,
-                    thread_id=thread_id,
-                    backup_channel_name="telldm",
-                )
-                if target_channel and target_channel.id != interaction.channel.id and not response.startswith("Error"):
-                    await send_response_in_chunks(target_channel, response)
-                    await interaction.edit_original_response(
-                        content=build_stream_preview(
-                            response,
-                            prefix="AIDM is reading the public URL...",
-                            suffix=f"Full response sent to <#{target_channel.id}>.",
-                        )
-                    )
-                else:
-                    await finalize_streamed_interaction(interaction, response)
-            else:
-                prompt = build_reference_answer_prompt(
+                response = await answer_from_public_url(
                     query=query,
-                    reference_material=[f"[Public URL: {url}]\n{extracted_url_text}"],
                     url=url,
-                )
-                await stream_prompt_to_interaction(
-                    interaction,
-                    prompt=prompt,
                     channel_id=channel_id,
-                    category_id=category_id,
                     thread_id=thread_id,
                     assigned_memory=assigned_memory,
-                    backup_channel_name="telldm",
-                    preview_prefix="AIDM is reading the public URL...",
                 )
+            except Exception as exc:
+                await interaction.followup.send(f"Could not read the URL: {exc}")
+                return
         else:
             if url:
                 try:
@@ -797,21 +746,21 @@ def setup_commands(tree, get_assistant_response):
                         "Use the other provided material and note that the URL may require a different retrieval path.]"
                     )
 
-            prompt = build_reference_answer_prompt(
+            response = await answer_from_references(
                 query=query,
                 reference_material=reference_chunks,
-                url=url,
-            )
-            await stream_prompt_to_interaction(
-                interaction,
-                prompt=prompt,
                 channel_id=channel_id,
-                category_id=category_id,
                 assigned_memory=assigned_memory,
                 thread_id=thread_id,
-                backup_channel_name="telldm",
-                preview_prefix="AIDM is answering from the selected references...",
+                url=url,
             )
+        await send_response(
+            interaction,
+            response,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            backup_channel_name="telldm",
+        )
 
     @reference.autocomplete('channel')
     async def reference_channel_autocomplete(interaction: discord.Interaction, current: str):
