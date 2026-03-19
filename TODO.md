@@ -13,7 +13,7 @@
 - [x] `/help` exists as a topic-based command for onboarding and grouped command discovery
 - [x] `/context add` and `/context clear` publish canonical managed context entries into Discord
 - [x] `/context list` shows the effective compiled context state
-- [x] `/context summary` remains as a compatibility alias
+- [x] `/context summary` removed from the command surface after the `/context add` transition
 - [x] `/settings images` exists for per-campaign automatic image-generation behavior
 - [x] `/generate image` exists for manual image generation from summaries, selected messages, or a custom prompt
 - [x] Offline image test runner exists
@@ -33,7 +33,6 @@
   - [ ] retention flag behavior with `KEEP_AUDIO_FILES` / `KEEP_TRANSCRIPT_FILES`
 
 - [x] Validate context behavior in Discord:
-  - [x] `/context summary` user response no longer exposes local file paths
   - [x] public/session updates visibly land in `#context`
   - [x] DM-private updates only mirror metadata in `#context`
   - [x] DM-private full content mirrors to `#dm-planning` when present
@@ -73,9 +72,8 @@
   - [x] Treat `#dm-planning` as the DM-private authoring surface
   - [x] Clarify `Public Evergreen` vs `Session Only` vs `DM Private` behavior in command UX
   - [x] Add clearer command entrypoints with `/context add`, `/context clear`, and `/context list`
-  - [x] Keep `/context summary` as a compatibility alias during the transition
+  - [x] Remove `/context summary` after the transition to `/context add`
   - [x] Keep session context easy to replace/clear manually instead of guessing expiration dates
-  - [ ] Decide how long `/context summary` should remain as a compatibility alias before removal
 
 - [ ] Phase 2: Context compilation without DB payload storage
   - [x] Use Discord-managed context messages as the preferred source of truth for context

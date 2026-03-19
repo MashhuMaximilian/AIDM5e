@@ -55,7 +55,7 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - public URLs
 - Public URL reading uses direct fetch first and Gemini URL Context as fallback.
 - Google Docs / Sheets remain out of scope for now.
-- `/context summary` stores transcript/summary support context in three scopes:
+- `/context add` stores transcript/summary support context in three scopes:
   - public evergreen
   - session-only
   - DM-private
@@ -63,7 +63,6 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - `/context add`
   - `/context clear`
   - `/context list`
-- `/context summary` remains available as a compatibility alias during the transition.
 - `#context` is the human-facing public/session authoring surface, while `#dm-planning` remains the DM-private surface.
 - `/context add` and `/context clear` now publish canonical managed context entries directly into those Discord channels.
 - `/context list` now shows the effective compiled context state so you can sanity-check what transcript/summary runs will consume.
@@ -79,8 +78,9 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
   - `/ask`
   - `/channel`
   - `/memory`
-- Added `/help` as a topic-based onboarding command for grouped commands, `/invite`, `/context summary`, and campaign setup flow.
-- `/help topic:Context` now reflects the Phase 1 `/context add|clear|list` workflow instead of only the older `/context summary` path.
+- Added `/help` as a topic-based onboarding command for grouped commands, `/invite`, and campaign setup flow.
+- `/help topic:Context` reflects the `/context add|clear|list` workflow.
+- `/context summary` was removed after the transition to `/context add`.
 - Standalone commands remain:
   - `/reference`
   - `/feedback`

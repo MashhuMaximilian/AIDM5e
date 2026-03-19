@@ -113,8 +113,7 @@ def _build_help_text(topic: str) -> str:
             "**Main commands**\n"
             "• `/context add`: add or replace context from notes or selected messages\n"
             "• `/context clear`: clear one scope\n"
-            "• `/context list`: inspect the current runtime view of each scope\n"
-            "• `/context summary`: legacy alias for `/context add`\n\n"
+            "• `/context list`: inspect the current runtime view of each scope\n\n"
             "**Scopes**\n"
             "• `Public Evergreen`: long-lived campaign facts like roster, spellings, factions, locations.\n"
             "• `Session Only`: current or next-session guidance. It stays active until you replace it or clear it; there is no automatic expiry.\n"
@@ -1402,66 +1401,6 @@ def setup_commands(tree, get_assistant_response):
             ]
         )
         await send_interaction_message(interaction, "\n".join(blocks), ephemeral=True)
-
-    @context_group.command(name="summary", description="Legacy alias for `/context add`.")
-    @app_commands.describe(
-        scope="Which context bucket to update.",
-        action="Whether to replace or append to that bucket.",
-        note="Optional manual text to store as context.",
-        tags="Optional comma-separated tags such as roster, npc, location, scene, style.",
-        start="Message ID to start from (if applicable).",
-        end="Message ID to end at (if applicable).",
-        message_ids="Individual message IDs to include.",
-        last_n="Use the last 'n' messages from the source target.",
-        channel="Optional source channel. Defaults to this channel.",
-        thread="Optional source thread. Overrides the source channel when set.",
-    )
-    @app_commands.choices(
-        scope=CONTEXT_SCOPE_CHOICES,
-        action=CONTEXT_WRITE_ACTION_CHOICES,
-    )
-    async def context_summary(
-        interaction: discord.Interaction,
-        scope: app_commands.Choice[str],
-        action: app_commands.Choice[str],
-        note: str = None,
-        tags: str = None,
-        start: str = None,
-        end: str = None,
-        message_ids: str = None,
-        last_n: int = None,
-        channel: str = None,
-        thread: str = None,
-    ):
-        await send_command_ack(interaction, "Updating context...")
-        try:
-            response_text = await _update_context_scope(
-                interaction,
-                scope_value=scope.value,
-                action_value=action.value,
-                note=note,
-                tags=tags,
-                start=start,
-                end=end,
-                message_ids=message_ids,
-                last_n=last_n,
-                channel=channel,
-                thread=thread,
-            )
-            await send_interaction_message(interaction, response_text, ephemeral=True)
-        except PermissionError as exc:
-            await send_interaction_message(interaction, str(exc), ephemeral=True)
-        except Exception as exc:
-            logger.exception("Error updating legacy summary context: %s", exc)
-            await send_interaction_message(interaction, f"Could not update context: {exc}", ephemeral=True)
-
-    @context_summary.autocomplete('channel')
-    async def context_summary_channel_autocomplete(interaction: discord.Interaction, current: str):
-        return await channel_autocomplete(interaction, current)
-
-    @context_summary.autocomplete('thread')
-    async def context_summary_thread_autocomplete(interaction: discord.Interaction, current: str):
-        return await thread_autocomplete(interaction, current)
 
     @generate_group.command(name="image", description="Generate images from the latest summary, selected messages, or a custom prompt.")
     @app_commands.describe(

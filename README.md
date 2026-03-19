@@ -172,7 +172,6 @@ Supabase does **not** store context payloads such as text or images.
 - `/context add`
 - `/context clear`
 - `/context list`
-- `/context summary` (legacy alias)
 
 Recommended usage:
 
