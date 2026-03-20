@@ -69,9 +69,9 @@ async def get_assistant_response(
     context_block: str | None = None,
 ):
     try:
-        channel = client.get_channel(channel_id)
-        if channel is None:
-            error_message = f"Error: Channel with ID {channel_id} not found."
+        target_channel = client.get_channel(thread_id or channel_id)
+        if target_channel is None:
+            error_message = f"Error: Channel with ID {thread_id or channel_id} not found."
             logger.error(error_message)
             return error_message
 
@@ -84,7 +84,7 @@ async def get_assistant_response(
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
         prompt = _build_prompt(memory_name, normalized_message, context_block=context_block)
 
-        async with channel.typing():
+        async with target_channel.typing():
             response_text = await asyncio.to_thread(
                 gemini_client.generate_text,
                 prompt,
@@ -97,7 +97,7 @@ async def get_assistant_response(
 
         logger.info("Gemini responded in memory '%s': %s", assigned_memory, response_text[:100])
         if send_message:
-            await send_response_in_chunks(channel, response_text)
+            await send_response_in_chunks(target_channel, response_text)
         return response_text
 
     except Exception as exc:

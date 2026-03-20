@@ -3,6 +3,9 @@
 import asyncio
 import io
 import logging
+import re
+import tempfile
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -21,12 +24,26 @@ from data_store.db_repository import (
     build_thread_data_snapshot,
     fetch_memory_details,
     get_campaign_image_settings,
+    set_thread_always_on,
     update_campaign_image_settings,
 )
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
 
 from .helper_functions import *
+from .player_workspace import (
+    build_items_card_body,
+    build_character_card_body,
+    build_character_card_embed,
+    build_skills_card_body,
+    build_player_workspace_view,
+    build_workspace_status_body,
+    enrich_player_workspace_draft,
+    generate_player_workspace_draft,
+    load_player_card_messages,
+    slugify_entity_key,
+    upsert_player_card,
+)
 from .shared_functions import *
 from .shared_functions import apply_always_on, send_response_in_chunks
 
@@ -89,6 +106,12 @@ USE_CONTEXT_CHOICES = [
     app_commands.Choice(name="Auto", value="auto"),
     app_commands.Choice(name="On", value="on"),
     app_commands.Choice(name="Off", value="off"),
+]
+
+PLAYER_CREATE_MODE_CHOICES = [
+    app_commands.Choice(name="Start from Idea", value="idea"),
+    app_commands.Choice(name="Import Sheet / Notes", value="import"),
+    app_commands.Choice(name="Refine Existing Character", value="finished"),
 ]
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -546,11 +569,338 @@ def _describe_context_source(source_target: discord.abc.GuildChannel | discord.T
     return getattr(source_target, "name", "manual note")
 
 
+def _truncate_label(value: str, limit: int = 80) -> str:
+    compact = " ".join((value or "").split()).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def _player_thread_name(display_name: str) -> str:
+    compact = re.sub(r"\s+", " ", (display_name or "").strip()) or "Unnamed Character"
+    thread_name = f"Character - {compact}"
+    return thread_name[:100]
+
+
+async def _find_player_thread(
+    channel: discord.TextChannel,
+    *,
+    display_name: str,
+) -> discord.Thread | None:
+    expected_name = _player_thread_name(display_name).lower()
+    for thread in channel.threads:
+        if thread.name.lower() == expected_name:
+            return thread
+
+    try:
+        async for thread in channel.archived_threads(limit=100):
+            if thread.name.lower() == expected_name:
+                return thread
+    except Exception as exc:
+        logger.warning("Could not search archived character threads in #%s: %s", channel.name, exc)
+    return None
+
+
+async def _extract_import_attachment_text(attachment: discord.Attachment) -> str:
+    if _attachment_is_image(attachment):
+        return f"[Image attachment imported: {attachment.filename}]"
+    try:
+        extracted = await extract_attachment_text(attachment)
+        return f"[Attachment: {attachment.filename}]\n{extracted}"
+    except Exception as exc:
+        logger.warning("Could not extract slash-command attachment %s: %s", attachment.filename, exc)
+        return f"[Attachment present but unreadable: {attachment.filename}. Reason: {exc}]"
+
+
+async def _save_attachment_to_temp_path(attachment: discord.Attachment) -> str:
+    suffix = Path(attachment.filename or "").suffix or ".bin"
+    with tempfile.NamedTemporaryFile(prefix="aidm-player-import-", suffix=suffix, delete=False) as handle:
+        temp_path = handle.name
+    payload = await attachment.read()
+    Path(temp_path).write_bytes(payload)
+    return temp_path
+
+
+def _attachment_supports_gemini_file_import(attachment: discord.Attachment) -> bool:
+    content_type = (attachment.content_type or "").lower()
+    filename = (attachment.filename or "").lower()
+    if content_type.startswith("image/") or content_type.startswith("text/"):
+        return True
+    if "pdf" in content_type:
+        return True
+    return filename.endswith((".pdf", ".png", ".jpg", ".jpeg", ".webp", ".txt", ".md"))
+
+
+async def _collect_message_attachment_temp_paths(messages: list[discord.Message]) -> list[str]:
+    paths: list[str] = []
+    seen: set[tuple[int, str]] = set()
+    for message in messages:
+        for attachment in message.attachments:
+            key = (message.id, attachment.url)
+            if key in seen or not _attachment_supports_gemini_file_import(attachment):
+                continue
+            seen.add(key)
+            try:
+                paths.append(await _save_attachment_to_temp_path(attachment))
+            except Exception as exc:
+                logger.warning(
+                    "Could not stage imported attachment %s from message %s for Gemini file parsing: %s",
+                    attachment.filename,
+                    message.id,
+                    exc,
+                )
+    return paths
+
+
+async def _collect_player_source_material(
+    interaction: discord.Interaction,
+    *,
+    note: str | None,
+    source_file: discord.Attachment | None,
+    channel: str | None,
+    thread: str | None,
+    message_ids: str | None,
+    last_n: int | None,
+) -> tuple[str | None, list[str], list[discord.Message]]:
+    parts: list[str] = []
+    source_labels: list[str] = []
+    selected_messages: list[discord.Message] = []
+
+    if any(value is not None for value in (message_ids, last_n)):
+        source_target = await _resolve_context_source_target(interaction, channel=channel, thread=thread)
+        if source_target is None:
+            raise ValueError("Could not resolve the source channel or thread.")
+        selected_messages, options_or_error = await select_messages(
+            source_target,
+            None,
+            None,
+            message_ids,
+            last_n,
+        )
+        if isinstance(options_or_error, str):
+            raise ValueError(options_or_error)
+        if selected_messages:
+            rendered = await _build_context_material_from_messages(selected_messages)
+            parts.append("\n\n".join(rendered))
+            source_labels.append(f"Discord messages from {_describe_context_source(source_target)}")
+
+    if note:
+        parts.append(note.strip())
+        source_labels.append("Manual note")
+
+    if source_file:
+        parts.append(await _extract_import_attachment_text(source_file))
+        source_labels.append(f"Slash attachment: {source_file.filename}")
+
+    source_material = "\n\n".join(part for part in parts if part).strip() or None
+    return source_material, source_labels, selected_messages
+
+
+async def _ensure_player_workspace_thread(
+    interaction: discord.Interaction,
+    *,
+    display_name: str,
+    entity_key: str,
+) -> tuple[discord.TextChannel, discord.Thread, bool]:
+    category = get_interaction_category(interaction)
+    if category is None:
+        raise ValueError("This command must be used inside a campaign category.")
+
+    character_sheets_channel = discord.utils.get(category.text_channels, name="character-sheets")
+    if character_sheets_channel is None:
+        raise ValueError("Could not find `#character-sheets` in this category. Run `/invite` first.")
+
+    thread = await _find_player_thread(character_sheets_channel, display_name=display_name)
+    created = False
+    if thread is None:
+        thread = await character_sheets_channel.create_thread(name=_player_thread_name(display_name))
+        created = True
+    elif thread.archived:
+        await thread.edit(archived=False)
+
+    memory_name = f"player-{entity_key}"
+    await assign_memory(
+        interaction,
+        "CREATE NEW MEMORY",
+        channel_id=str(character_sheets_channel.id),
+        thread_id=str(thread.id),
+        memory_name=memory_name,
+    )
+    await asyncio.to_thread(
+        ensure_thread_for_channel,
+        character_sheets_channel.id,
+        thread.id,
+        thread.name,
+        True,
+    )
+    await asyncio.to_thread(set_thread_always_on, thread.id, True)
+    always_on_channels[thread.id] = True
+    return character_sheets_channel, thread, created
+
+
+async def _upsert_player_workspace_cards(
+    thread: discord.Thread,
+    *,
+    entity_key: str,
+    display_name: str,
+    player_name: str | None,
+    mode: str,
+    source_material: str | None,
+    source_labels: list[str],
+    source_jump_url: str | None = None,
+    source_file_paths: list[str] | None = None,
+) -> dict[str, object]:
+    draft = generate_player_workspace_draft(
+        mode=mode,
+        character_name=display_name,
+        player_name=player_name,
+        source_labels=source_labels,
+        source_material=source_material,
+        source_file_paths=source_file_paths,
+    )
+    draft = enrich_player_workspace_draft(draft=draft, source_material=source_material)
+
+    existing = await load_player_card_messages(thread, entity_key)
+
+    sheet_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="sheet_card",
+        body=str(draft.get("sheet_card") or "Pending confirmation."),
+        existing_messages=existing.get("sheet_card"),
+        render_mode="text",
+    )
+    skills_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="skills_card",
+        body=str(draft.get("skills_card") or build_skills_card_body(str(draft.get("sheet_card") or "Pending confirmation."))),
+        existing_messages=existing.get("skills_card"),
+        render_mode="text",
+    )
+    profile_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="profile_card",
+        body=str(draft.get("profile_card") or "Pending confirmation."),
+        existing_messages=existing.get("profile_card"),
+        render_mode="text",
+    )
+    rules_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="rules_card",
+        body=str(draft.get("rules_card") or "Pending confirmation."),
+        existing_messages=existing.get("rules_card"),
+        render_mode="text",
+    )
+    items_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="items_card",
+        body=str(draft.get("items_card") or build_items_card_body("")),
+        existing_messages=existing.get("items_card"),
+        render_mode="text",
+    )
+    workspace_body = build_workspace_status_body(
+        mode=mode,
+        status="needs_review" if source_material else "draft",
+        source_summary=str(draft.get("source_summary") or ""),
+        missing_info=list(draft.get("missing_info", [])),
+        source_jump_url=source_jump_url,
+    )
+    workspace_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="workspace_card",
+        body=workspace_body,
+        existing_messages=existing.get("workspace_card"),
+        render_mode="text",
+    )
+
+    status = "needs_review" if source_material else "draft"
+    final_character_card = build_character_card_body(
+        display_name=display_name,
+        player_name=player_name,
+        mode=mode,
+        status=status,
+        build_line=str(draft.get("build_line") or ""),
+        concept=str(draft.get("concept") or ""),
+        source_summary=str(draft.get("source_summary") or ""),
+        missing_info=list(draft.get("missing_info", [])),
+        card_links={
+            "profile_card": profile_messages[0].jump_url if profile_messages else "",
+            "sheet_card": sheet_messages[0].jump_url if sheet_messages else "",
+            "skills_card": skills_messages[0].jump_url if skills_messages else "",
+            "rules_card": rules_messages[0].jump_url if rules_messages else "",
+            "items_card": items_messages[0].jump_url if items_messages else "",
+        },
+        sheet_body=str(draft.get("sheet_card") or ""),
+        skills_body=str(draft.get("skills_card") or ""),
+        profile_body=str(draft.get("profile_card") or ""),
+    )
+    character_messages = await upsert_player_card(
+        thread,
+        entity_key=entity_key,
+        display_name=display_name,
+        card_key="character_card",
+        body=final_character_card,
+        existing_messages=existing.get("character_card"),
+        embed=build_character_card_embed(
+            display_name=display_name,
+            player_name=player_name,
+            mode=mode,
+            status=status,
+            build_line=str(draft.get("build_line") or ""),
+            concept=str(draft.get("concept") or ""),
+            source_summary=str(draft.get("source_summary") or ""),
+            missing_info=list(draft.get("missing_info", [])),
+            card_links={},
+            public_publish_state="not published",
+            dm_publish_state="not published",
+            sheet_body=str(draft.get("sheet_card") or ""),
+            skills_body=str(draft.get("skills_card") or ""),
+            profile_body=str(draft.get("profile_card") or ""),
+            rules_body=str(draft.get("rules_card") or ""),
+            items_body=str(draft.get("items_card") or ""),
+        ),
+        render_mode="embed",
+        view=build_player_workspace_view(
+            card_links={
+                "workspace_card": workspace_messages[0].jump_url if workspace_messages else "",
+                "profile_card": profile_messages[0].jump_url if profile_messages else "",
+                "sheet_card": sheet_messages[0].jump_url if sheet_messages else "",
+                "skills_card": skills_messages[0].jump_url if skills_messages else "",
+                "rules_card": rules_messages[0].jump_url if rules_messages else "",
+                "items_card": items_messages[0].jump_url if items_messages else "",
+            },
+            source_link=source_jump_url,
+        ),
+    )
+    return {
+        "draft": draft,
+        "character_messages": character_messages,
+        "workspace_messages": workspace_messages,
+        "profile_messages": profile_messages,
+        "sheet_messages": sheet_messages,
+        "skills_messages": skills_messages,
+        "rules_messages": rules_messages,
+        "items_messages": items_messages,
+    }
+
+
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
     memory_group = app_commands.Group(name="memory", description="Memory management commands.")
     context_group = app_commands.Group(name="context", description="Context helpers for summaries and transcripts.")
+    create_group = app_commands.Group(name="create", description="Character creation workflows.")
     settings_group = app_commands.Group(name="settings", description="Campaign settings commands.")
     generate_group = app_commands.Group(name="generate", description="Image and media generation commands.")
 
@@ -565,6 +915,114 @@ def setup_commands(tree, get_assistant_response):
     ):
         help_topic = topic.value if topic else "overview"
         await send_interaction_message(interaction, _build_help_text(help_topic), ephemeral=True)
+
+    @create_group.command(name="player", description="Create or reopen a player-character workspace thread.")
+    @app_commands.describe(
+        mode="How you want to start the character workspace.",
+        character_name="The character's display name.",
+        player_name="Optional player name for roster mapping.",
+        note="Optional concept, notes, or short instructions.",
+        source_file="Optional PDF, text document, or image to import as source material.",
+        message_ids="Optional comma-separated message IDs to import from a channel or thread.",
+        last_n="Optional last N messages to import from a channel or thread.",
+        channel="Optional source channel for message import.",
+        thread="Optional source thread for message import.",
+    )
+    @app_commands.choices(mode=PLAYER_CREATE_MODE_CHOICES)
+    async def create_player(
+        interaction: discord.Interaction,
+        mode: app_commands.Choice[str],
+        character_name: str,
+        player_name: str | None = None,
+        note: str | None = None,
+        source_file: discord.Attachment | None = None,
+        message_ids: str | None = None,
+        last_n: int | None = None,
+        channel: str | None = None,
+        thread: str | None = None,
+    ):
+        await send_command_ack(interaction, "Opening character workspace... this may take a minute for larger sheets.")
+
+        entity_key = slugify_entity_key(character_name)
+        temp_source_paths: list[str] = []
+        try:
+            source_material, source_labels, selected_messages = await _collect_player_source_material(
+                interaction,
+                note=note,
+                source_file=source_file,
+                channel=channel,
+                thread=thread,
+                message_ids=message_ids,
+                last_n=last_n,
+            )
+            if source_file:
+                temp_source_paths.append(await _save_attachment_to_temp_path(source_file))
+            if selected_messages:
+                temp_source_paths.extend(await _collect_message_attachment_temp_paths(selected_messages))
+
+            _, workspace_thread, created = await _ensure_player_workspace_thread(
+                interaction,
+                display_name=character_name,
+                entity_key=entity_key,
+            )
+            if created:
+                await workspace_thread.send(
+                    "\n".join(
+                        [
+                            f"**Character workspace ready for {character_name}.**",
+                            "Use this thread as the draft workspace.",
+                            "Post new notes and source material here as the sheet evolves.",
+                            "For this first implementation slice, rerun `/create player` with new inputs to refresh the maintained cards.",
+                            "Nothing here is campaign canon until someone explicitly publishes a summary to `#context`.",
+                        ]
+                    )
+                )
+
+            source_message = None
+            if source_file:
+                forwarded_file = await source_file.to_file()
+                source_message = await workspace_thread.send(
+                    f"Imported source file from `/create player`: `{source_file.filename}`",
+                    file=forwarded_file,
+                )
+
+            result = await _upsert_player_workspace_cards(
+                workspace_thread,
+                entity_key=entity_key,
+                display_name=character_name,
+                player_name=player_name,
+                mode=mode.value,
+                source_material=source_material,
+                source_labels=source_labels,
+                source_jump_url=source_message.jump_url if source_message else None,
+                source_file_paths=temp_source_paths,
+            )
+        finally:
+            for temp_path in temp_source_paths:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception as exc:
+                    logger.warning("Failed to remove temporary player import file %s: %s", temp_path, exc)
+
+        draft = result["draft"]
+        missing_info = list(draft.get("missing_info", [])) if isinstance(draft, dict) else []
+        response_lines = [
+            f"Workspace {'created' if created else 'updated'} in {workspace_thread.mention}.",
+            f"Status: `{'needs_review' if source_material else 'draft'}`",
+        ]
+        if source_labels:
+            response_lines.append(f"Sources: {', '.join(source_labels)}")
+        if missing_info:
+            response_lines.append("Needs review: " + "; ".join(missing_info[:5]))
+        await send_interaction_message(interaction, "\n".join(response_lines), ephemeral=True)
+
+    @create_player.autocomplete("channel")
+    async def create_player_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @create_player.autocomplete("thread")
+    async def create_player_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
 
 
     @ask_group.command(name="campaign", description="Campaign info lookup. Defaults to #telldm if no target is set.")
@@ -1885,6 +2343,7 @@ def setup_commands(tree, get_assistant_response):
     tree.add_command(ask_group)
     tree.add_command(channel_group)
     tree.add_command(context_group)
+    tree.add_command(create_group)
     tree.add_command(memory_group)
     tree.add_command(settings_group)
     tree.add_command(generate_group)

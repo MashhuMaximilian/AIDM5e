@@ -8,6 +8,7 @@ from docx import Document
 
 from ai_services.assistant_interactions import get_assistant_response
 from data_store.memory_management import get_assigned_memory
+from .player_workspace import maybe_handle_player_workspace_message
 from .shared_functions import check_always_on, send_response_in_chunks
 
 # Configure logging
@@ -43,6 +44,8 @@ async def on_message(message):
         return False
 
     if channel_always_on:
+        if await maybe_handle_player_workspace_message(message):
+            return
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
@@ -59,6 +62,8 @@ async def on_message(message):
             logging.error("Assigned memory ID is invalid or empty.")
 
     if client.user in message.mentions and not response_sent:
+        if await maybe_handle_player_workspace_message(message):
+            return
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
             response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)

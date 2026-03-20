@@ -16,6 +16,7 @@ from data_store.db_repository import (
 )
 from data_store.utils import load_thread_data
 from discord_app import bot_commands, message_handlers
+from discord_app.player_workspace import register_player_workspace_views
 from voice.transcription import VoiceRecorder
 
 
@@ -28,6 +29,7 @@ recorder = VoiceRecorder()
 async def on_ready():
     logging.info("Bot has logged in as %s", client.user)
     await client.change_presence(status=discord.Status.online, activity=discord.Game("Bot is ready"))
+    register_player_workspace_views(client)
 
     await asyncio.to_thread(ensure_runtime_schema)
 

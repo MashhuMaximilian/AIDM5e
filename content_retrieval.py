@@ -41,12 +41,13 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 def extract_text_from_pdf_bytes(pdf_data: bytes) -> str:
-    text = ""
+    pages: list[str] = []
     with io.BytesIO(pdf_data) as pdf_file:
         reader = PyPDF2.PdfReader(pdf_file)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-    return text
+        for index, page in enumerate(reader.pages, start=1):
+            page_text = (page.extract_text() or "").strip()
+            pages.append(f"[PDF Page {index}]\n{page_text}")
+    return "\n\n".join(page for page in pages if page.strip())
 
 
 def extract_text_from_docx_bytes(docx_data: bytes) -> str:
