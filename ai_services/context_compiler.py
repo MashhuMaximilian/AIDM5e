@@ -117,7 +117,7 @@ def build_context_entry_messages(
         "dm": "DM Private",
     }.get(scope, scope.title())
     header_lines = [
-        f"**{title} context entry**",
+        f"**{title}**",
         f"• Action: `{action}`",
         f"• By: {actor_name}",
         f"• Source: {source_label}",
@@ -125,7 +125,9 @@ def build_context_entry_messages(
     if normalized_tags:
         header_lines.append(f"• Tags: `{', '.join(normalized_tags)}`")
     if normalized_assets:
-        header_lines.append(f"• Assets: `{len(normalized_assets)}` total, `{image_count}` image")
+        asset_label = f"{len(normalized_assets)} ref" if len(normalized_assets) == 1 else f"{len(normalized_assets)} refs"
+        image_label = f"{image_count} image" if image_count == 1 else f"{image_count} images"
+        header_lines.append(f"• Assets: `{asset_label}`, `{image_label}`")
 
     def build_message(part_index: int, part_count: int, part: str) -> str:
         metadata = dict(base_metadata)
@@ -136,19 +138,16 @@ def build_context_entry_messages(
         visible_lines = list(header_lines)
         if part_count > 1:
             visible_lines.append(f"• Part: {part_index}/{part_count}")
-
-        message = (
-            "\n".join(visible_lines)
-            + "\n\n"
-            + ENTRY_BEGIN
-            + "\n"
-            + metadata_json
-            + "\n"
-            + ENTRY_END
-        )
+        visible_sections = ["\n".join(visible_lines)]
+        if action == "clear":
+            visible_sections.append("_This scope was cleared._")
+        elif not part and normalized_assets:
+            visible_sections.append("_Image references captured for this entry._")
         if part:
-            message += "\n\n" + part
-        return message
+            visible_sections.append(part)
+
+        visible_sections.append(f"||{ENTRY_BEGIN}{metadata_json}{ENTRY_END}||")
+        return "\n\n".join(section for section in visible_sections if section)
 
     def compute_available_text_len(part_count: int) -> int:
         sample_message = build_message(part_count, part_count, "")
@@ -188,11 +187,14 @@ def parse_context_entry_fragment(message: discord.Message) -> dict | None:
         return None
 
     metadata_block = content[begin + len(ENTRY_BEGIN):end].strip()
-    body = content[end + len(ENTRY_END):].strip()
+    visible_content = (content[:begin] + content[end + len(ENTRY_END):]).replace("||", "").strip()
     try:
         metadata = json.loads(metadata_block)
     except json.JSONDecodeError:
         return None
+
+    sections = [section.strip() for section in visible_content.split("\n\n") if section.strip()]
+    body = "\n\n".join(sections[1:]).strip() if len(sections) > 1 else ""
 
     return {
         "metadata": metadata,
