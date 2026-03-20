@@ -85,6 +85,12 @@ IMAGE_ASPECT_RATIO_CHOICES = [
     app_commands.Choice(name="16:9", value="16:9"),
 ]
 
+USE_CONTEXT_CHOICES = [
+    app_commands.Choice(name="Auto", value="auto"),
+    app_commands.Choice(name="On", value="on"),
+    app_commands.Choice(name="Off", value="off"),
+]
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 
 
@@ -146,7 +152,9 @@ def _build_help_text(topic: str) -> str:
             "**/ask**\n"
             "• `/ask dm`: rules, spells, monsters, lore, adjudication.\n"
             "• `/ask campaign`: campaign-specific facts, homebrew, NPCs, inventory, status.\n\n"
-            "Both commands can target a channel or thread when you want the answer grounded in a specific campaign area."
+            "Both commands can target a channel or thread when you want the answer grounded in a specific campaign area.\n"
+            "• `/ask campaign` uses campaign context by default.\n"
+            "• `/ask dm` keeps context conservative by default, but you can override it with `use_context:on|off|auto`."
         )
     if topic == "channel":
         return (
@@ -563,7 +571,8 @@ def setup_commands(tree, get_assistant_response):
     @app_commands.describe(
         query="What you want to know.",
         channel="Optional target channel. Defaults to #telldm in this category.",
-        thread="Optional target thread. Overrides the channel target when set."
+        thread="Optional target thread. Overrides the channel target when set.",
+        use_context="Whether to include campaign context from #context."
     )
     @app_commands.choices(
         query_type=[
@@ -572,11 +581,28 @@ def setup_commands(tree, get_assistant_response):
             app_commands.Choice(name="NPC", value="npc"),
             app_commands.Choice(name="Inventory", value="inventory"),
             app_commands.Choice(name="Roll Check", value="rollcheck")
-        ]
+        ],
+        use_context=USE_CONTEXT_CHOICES,
     )
    
-    async def tellme(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, channel: str = None, thread: str = None):
-        await process_query_command(interaction, query_type, query, backup_channel_name="telldm", channel=channel, thread=thread)
+    async def tellme(
+        interaction: discord.Interaction,
+        query_type: app_commands.Choice[str],
+        query: str,
+        channel: str = None,
+        thread: str = None,
+        use_context: app_commands.Choice[str] | None = None,
+    ):
+        await process_query_command(
+            interaction,
+            query_type,
+            query,
+            backup_channel_name="telldm",
+            channel=channel,
+            thread=thread,
+            use_context=use_context.value if use_context else None,
+            default_context_when_auto=True,
+        )
 
     # Autocomplete for channels
     @tellme.autocomplete('channel')
@@ -595,7 +621,8 @@ def setup_commands(tree, get_assistant_response):
     @app_commands.describe(
         query="Your rules, lore, or adjudication question.",
         channel="Optional target channel. Defaults to #telldm in this category.",
-        thread="Optional target thread. Overrides the channel target when set."
+        thread="Optional target thread. Overrides the channel target when set.",
+        use_context="Whether to include campaign context from #context."
     )
     @app_commands.choices(
         query_type=[
@@ -607,10 +634,27 @@ def setup_commands(tree, get_assistant_response):
             app_commands.Choice(name="Conditions & Effects", value="conditions_effects"),
             app_commands.Choice(name="Rules Clarifications", value="rules_clarifications"),
             app_commands.Choice(name="Race or Class", value="race_class")
-        ]
+        ],
+        use_context=USE_CONTEXT_CHOICES,
     )
-    async def askdm(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, channel: str = None, thread: str = None):
-        await process_query_command(interaction, query_type, query, backup_channel_name="telldm", channel=channel, thread=thread)
+    async def askdm(
+        interaction: discord.Interaction,
+        query_type: app_commands.Choice[str],
+        query: str,
+        channel: str = None,
+        thread: str = None,
+        use_context: app_commands.Choice[str] | None = None,
+    ):
+        await process_query_command(
+            interaction,
+            query_type,
+            query,
+            backup_channel_name="telldm",
+            channel=channel,
+            thread=thread,
+            use_context=use_context.value if use_context else None,
+            default_context_when_auto=False,
+        )
 
     # Autocomplete for channels
     @askdm.autocomplete('channel')
@@ -680,8 +724,10 @@ def setup_commands(tree, get_assistant_response):
         last_n="Read the last 'n' messages (optional).",
         url="Optional public URL to read as additional context.",
         channel="Optional target channel and memory for the answer. Defaults to this channel.",
-        thread="Optional target thread and memory for the answer."
+        thread="Optional target thread and memory for the answer.",
+        use_context="Whether to include campaign context from #context."
     )
+    @app_commands.choices(use_context=USE_CONTEXT_CHOICES)
     async def reference(
         interaction: discord.Interaction,
         query: str,
@@ -692,6 +738,7 @@ def setup_commands(tree, get_assistant_response):
         url: str = None,
         channel: str = None,
         thread: str = None,
+        use_context: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -702,6 +749,12 @@ def setup_commands(tree, get_assistant_response):
         if not assigned_memory:
             await interaction.followup.send("No memory found for the specified parameters.")
             return
+
+        context_block = await load_command_context_block(
+            interaction,
+            use_context=use_context.value if use_context else None,
+            default_when_auto=False,
+        )
 
         reference_chunks: list[str] = []
         if any(value is not None for value in (start, end, message_ids, last_n)):
@@ -731,6 +784,7 @@ def setup_commands(tree, get_assistant_response):
                     channel_id=channel_id,
                     thread_id=thread_id,
                     assigned_memory=assigned_memory,
+                    context_block=context_block,
                 )
             except Exception as exc:
                 await interaction.followup.send(f"Could not read the URL: {exc}")
@@ -752,6 +806,7 @@ def setup_commands(tree, get_assistant_response):
                 assigned_memory=assigned_memory,
                 thread_id=thread_id,
                 url=url,
+                context_block=context_block,
             )
         await send_response(
             interaction,

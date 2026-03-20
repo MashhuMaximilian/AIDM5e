@@ -7,6 +7,7 @@ import discord
 from discord import app_commands
 
 from ai_services.assistant_interactions import get_assistant_response
+from ai_services.context_compiler import compile_context_packet_from_category
 from ai_services.gemini_client import gemini_client
 from config import GEMINI_SUMMARY_MODEL
 from content_retrieval import (
@@ -98,9 +99,16 @@ async def answer_from_references(
     assigned_memory: str,
     thread_id: int | None = None,
     url: str | None = None,
+    context_block: str | None = None,
 ):
     prompt = build_reference_prompt("\n\n".join(reference_material), query, url)
-    return await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+    return await get_assistant_response(
+        prompt,
+        channel_id,
+        thread_id=thread_id,
+        assigned_memory=assigned_memory,
+        context_block=context_block,
+    )
 
 
 async def answer_from_public_url(
@@ -109,11 +117,18 @@ async def answer_from_public_url(
     channel_id: int,
     assigned_memory: str,
     thread_id: int | None = None,
+    context_block: str | None = None,
 ):
     try:
         extracted_text = await extract_public_url_text(url)
         prompt = build_reference_prompt(extracted_text, query, url)
-        return await get_assistant_response(prompt, channel_id, thread_id=thread_id, assigned_memory=assigned_memory)
+        return await get_assistant_response(
+            prompt,
+            channel_id,
+            thread_id=thread_id,
+            assigned_memory=assigned_memory,
+            context_block=context_block,
+        )
     except Exception as exc:
         logging.warning("Direct URL fetch failed for %s, falling back to Gemini URL Context: %s", url, exc)
         prompt = build_reference_prompt(
@@ -206,6 +221,37 @@ def get_category_id(interaction):
     """Retrieve the category ID of the channel where the interaction occurred."""
     category = get_interaction_category(interaction)
     return category.id if category else None
+
+
+def resolve_use_context_flag(
+    use_context: str | None,
+    *,
+    default_when_auto: bool,
+) -> bool:
+    normalized = (use_context or "auto").lower()
+    if normalized == "on":
+        return True
+    if normalized == "off":
+        return False
+    return default_when_auto
+
+
+async def load_command_context_block(
+    interaction: discord.Interaction,
+    *,
+    use_context: str | None,
+    default_when_auto: bool,
+) -> str | None:
+    should_use_context = resolve_use_context_flag(use_context, default_when_auto=default_when_auto)
+    if not should_use_context:
+        return None
+
+    category = get_interaction_category(interaction)
+    if category is None:
+        return None
+
+    packet = await compile_context_packet_from_category(category, include_dm_context=False)
+    return packet.text_block
 
 async def thread_autocomplete(interaction: discord.Interaction, current: str):
     try:
@@ -316,16 +362,26 @@ async def memory_autocomplete(interaction: discord.Interaction, current: str):
 
     return matching_memories[:50]  # Limit to 50 suggestions
 
-async def process_query_command(interaction: discord.Interaction, query_type: app_commands.Choice[str], query: str, backup_channel_name: str, channel: str = None, thread: str = None):
+async def process_query_command(
+    interaction: discord.Interaction,
+    query_type: app_commands.Choice[str],
+    query: str,
+    backup_channel_name: str,
+    channel: str = None,
+    thread: str = None,
+    use_context: str | None = None,
+    default_context_when_auto: bool = False,
+):
     await interaction.response.defer()  # Defer response while processing
     
     prompt = construct_query_prompt(query_type.value, query)
     category_id = get_category_id(interaction)
+    category = get_interaction_category(interaction)
     channel_id = None
     thread_id = None
 
     if not channel and not thread:
-        target_channel = discord.utils.get(interaction.guild.channels, name=backup_channel_name, category=interaction.channel.category)
+        target_channel = discord.utils.get(interaction.guild.channels, name=backup_channel_name, category=category)
         channel_id = target_channel.id if target_channel else None
     else:
         channel_id = int(channel) if channel else None
@@ -338,13 +394,20 @@ async def process_query_command(interaction: discord.Interaction, query_type: ap
         await interaction.followup.send("No memory found for the specified parameters.")
         return
 
+    context_block = await load_command_context_block(
+        interaction,
+        use_context=use_context,
+        default_when_auto=default_context_when_auto,
+    )
+
     response = await get_assistant_response(
         prompt,
         channel_id,
         category_id,
         thread_id,
         assigned_memory=assigned_memory,
-        send_message=False
+        send_message=False,
+        context_block=context_block,
     )
     await send_response(
         interaction,

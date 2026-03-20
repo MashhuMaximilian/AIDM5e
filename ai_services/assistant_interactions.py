@@ -40,14 +40,22 @@ def _normalize_user_message(user_message) -> str:
     return str(user_message)
 
 
-def _build_prompt(memory_name: str | None, user_message: str) -> str:
+def _build_prompt(memory_name: str | None, user_message: str, context_block: str | None = None) -> str:
     memory_label = memory_name or "unassigned"
-    return (
+    prompt = (
         f"Current memory bucket: {memory_label}\n\n"
         "Persistent chat transcript history is disabled for this bot. "
         "Use the assigned memory bucket and the current request only.\n\n"
         f"Current user request:\n{user_message}"
     )
+    if context_block:
+        prompt = (
+            f"Campaign reference context:\n{context_block}\n\n"
+            "Use campaign reference context only when it is relevant to the current request. "
+            "If the memory/current request and the campaign context conflict, say so clearly instead of silently merging them.\n\n"
+            + prompt
+        )
+    return prompt
 
 
 async def get_assistant_response(
@@ -58,6 +66,7 @@ async def get_assistant_response(
     assigned_memory=None,
     send_message=False,
     model_name=None,
+    context_block: str | None = None,
 ):
     try:
         channel = client.get_channel(channel_id)
@@ -73,7 +82,7 @@ async def get_assistant_response(
 
         normalized_message = _normalize_user_message(user_message)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
-        prompt = _build_prompt(memory_name, normalized_message)
+        prompt = _build_prompt(memory_name, normalized_message, context_block=context_block)
 
         async with channel.typing():
             response_text = await asyncio.to_thread(
