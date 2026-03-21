@@ -18,6 +18,8 @@ PROFILE_FIELD_PAIR_RE = re.compile(
 
 def _slugify_heading(title: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+    if "character summary" in normalized:
+        return "summary"
     if "character profile" in normalized or normalized == "profile card":
         return "profile"
     if normalized in {"sheet card", "sheet"}:
@@ -30,7 +32,7 @@ def _slugify_heading(title: str) -> str:
         return "skills"
     if "actions in combat" in normalized or "actions magic" in normalized or "combat essentials" in normalized:
         return "actions"
-    if "class features" in normalized or "features traits" in normalized or "features magic" in normalized or normalized == "rules card":
+    if "rules features" in normalized or "class features" in normalized or "features traits" in normalized or "features magic" in normalized or normalized == "rules card":
         return "rules"
     if "inventory attunement" in normalized or normalized == "items card":
         return "items"
@@ -323,6 +325,7 @@ def parse_player_workspace_draft(raw_markdown: str, *, mode: str = "import") -> 
         identity=identity,
         concept=_extract_concept(sections, raw_markdown),
         sections=CharacterSections(
+            summary=_join_sections(sections, "summary"),
             profile=profile_text,
             core_status=core_status_text,
             abilities=abilities_text,

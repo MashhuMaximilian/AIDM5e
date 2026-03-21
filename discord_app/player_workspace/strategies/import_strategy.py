@@ -4,7 +4,11 @@ import asyncio
 
 from config import GEMINI_CHAT_MODEL
 
-from ..prompting import build_import_prompt, build_import_repair_prompt
+from ..prompting import (
+    build_import_prompt,
+    build_import_reference_links_prompt,
+    build_import_repair_prompt,
+)
 from ..schema import PlayerWorkspaceRequest
 
 
@@ -34,6 +38,26 @@ class ImportStrategy:
         prompt = build_import_repair_prompt(
             request,
             missing_sections=missing_sections,
+            current_markdown=current_markdown,
+        )
+        if request.source.file_paths:
+            return await asyncio.to_thread(
+                gemini.generate_text_from_files,
+                list(request.source.file_paths),
+                prompt,
+                GEMINI_CHAT_MODEL,
+            )
+        return await asyncio.to_thread(gemini.generate_text, prompt)
+
+    async def backfill_reference_links(
+        self,
+        request: PlayerWorkspaceRequest,
+        gemini,
+        *,
+        current_markdown: str,
+    ) -> str:
+        prompt = build_import_reference_links_prompt(
+            request,
             current_markdown=current_markdown,
         )
         if request.source.file_paths:

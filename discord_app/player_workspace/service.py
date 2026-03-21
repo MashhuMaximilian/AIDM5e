@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from ai_services.gemini_client import gemini_client
 
@@ -22,6 +23,104 @@ from .validator import validate_draft
 logger = logging.getLogger(__name__)
 CRITICAL_IMPORT_SECTIONS = ("core_status", "abilities", "skills", "actions")
 OPTIONAL_IMPORT_REPAIR_SECTIONS = ("reference_links",)
+
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+
+
+def _extract_spell_names(rules_text: str) -> list[str]:
+    section_match = re.search(
+        r"\*\*✨ Spellbook / Known Spells\*\*(.*?)(?=\n\s*\*\*|\n###|\Z)",
+        rules_text or "",
+        re.DOTALL,
+    )
+    if not section_match:
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in section_match.group(1).splitlines():
+        line = raw.strip().lstrip("*- ").strip()
+        if not line or ":" not in line:
+            continue
+        _, value = line.split(":", 1)
+        for part in value.split(","):
+            cleaned = re.sub(r"[*_`]", "", part).strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(cleaned)
+    return names
+
+
+def _extract_item_names(items_text: str) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in (items_text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        numbered = re.match(r"^\d+\.\s+(.+)$", line)
+        bullet = re.match(r"^\*\s+\*\*([^:*]+)\*\*", line)
+        if numbered:
+            candidate = re.sub(r"`", "", numbered.group(1)).strip()
+            candidate = re.sub(r"\s*\(.*?\)\s*$", "", candidate).strip()
+        elif bullet:
+            candidate = bullet.group(1).strip()
+        else:
+            continue
+        if not candidate:
+            continue
+        key = candidate.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(candidate)
+    return names
+
+
+def _reference_link_categories(reference_text: str) -> dict[str, set[str]]:
+    categories = {
+        "Race / Class / Subclass": set(),
+        "Feats": set(),
+        "Spells": set(),
+        "Items": set(),
+        "Other": set(),
+    }
+    current_category = "Other"
+    for raw in (reference_text or "").splitlines():
+        line = raw.strip()
+        if not line or "Reference Links" in line:
+            continue
+        if line.startswith("**") and line.endswith("**"):
+            heading = line.strip("* ").strip().lower()
+            if "race" in heading or "class" in heading or "subclass" in heading:
+                current_category = "Race / Class / Subclass"
+            elif "feat" in heading:
+                current_category = "Feats"
+            elif "spell" in heading:
+                current_category = "Spells"
+            elif "item" in heading:
+                current_category = "Items"
+            else:
+                current_category = "Other"
+            continue
+        match = MARKDOWN_LINK_RE.search(line)
+        if match:
+            categories[current_category].add(match.group(1).strip().lower())
+    return categories
+
+
+def _links_are_sparse(draft: CharacterDraft) -> bool:
+    categories = _reference_link_categories(draft.sections.reference_links)
+    spell_names = _extract_spell_names(draft.sections.rules)
+    item_names = _extract_item_names(draft.sections.items)
+    if spell_names and len(categories["Spells"]) < len(spell_names):
+        return True
+    if item_names and len(categories["Items"]) < len(item_names):
+        return True
+    return not any(categories.values())
 
 
 def _pick(primary: str | None, fallback: str | None) -> str | None:
@@ -46,6 +145,7 @@ def _merge_identity(base: IdentityBlock, patch: IdentityBlock) -> IdentityBlock:
 
 def _merge_sections(base: CharacterSections, patch: CharacterSections) -> CharacterSections:
     return CharacterSections(
+        summary=_pick(patch.summary, base.summary) or "",
         profile=_pick(patch.profile, base.profile) or "",
         core_status=_pick(patch.core_status, base.core_status) or "",
         abilities=_pick(patch.abilities, base.abilities) or "",
@@ -140,6 +240,16 @@ class CreatePlayerService:
                         validation.missing_sections,
                         validation.missing_fields,
                     )
+            if _links_are_sparse(draft) and hasattr(strategy, "backfill_reference_links"):
+                logger.info("Player import reference links are sparse; running dedicated links backfill pass")
+                links_markdown = await strategy.backfill_reference_links(
+                    request,
+                    self.gemini,
+                    current_markdown=draft.raw_markdown,
+                )
+                if (links_markdown or "").strip():
+                    linked = parse_player_workspace_draft(links_markdown, mode=request.mode)
+                    draft = _merge_drafts(draft, linked)
         cards = render_player_workspace_cards(request, draft, validation)
         return PlayerWorkspaceBundle(
             request=request,

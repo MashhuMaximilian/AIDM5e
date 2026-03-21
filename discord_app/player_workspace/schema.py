@@ -42,6 +42,7 @@ class IdentityBlock:
 
 @dataclass(slots=True)
 class CharacterSections:
+    summary: str = ""
     profile: str = ""
     core_status: str = ""
     abilities: str = ""
