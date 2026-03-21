@@ -32,16 +32,20 @@ PLAYER_SOURCE_ATTACHMENT_EXTENSIONS = {
 WORKSPACE_SLOT_ORDER: tuple[tuple[str, str], ...] = (
     ("Character Card", "character_card"),
     ("Profile Card", "profile_card"),
+    ("Skills & Actions", "skills_actions_card"),
     ("Rules Card", "rules_card"),
     ("Items Card", "items_card"),
+    ("Reference Links", "links_card"),
 )
 
 LEGACY_PATTERNS = (
     "**Character Card**",
     "**Profile Card**",
+    "**Skills & Actions**",
     "**Sheet Card**",
     "**Skills Card**",
     "**Rules Card**",
+    "**Reference Links**",
     "**Items Card**",
     "## Character Workspace",
     "## Core Status & Resources",
@@ -114,8 +118,8 @@ def _detail_embed(title: str, body: str) -> discord.Embed:
 
 def build_slot_payload(title: str, body: str) -> tuple[str, discord.Embed | None]:
     if title == "Character Card":
-        return f"**{title}**", _summary_embed(body)
-    return f"**{title}**", _detail_embed(title, body)
+        return "", _summary_embed(body)
+    return "", _detail_embed(title, body)
 
 
 class CardEditModal(discord.ui.Modal):
@@ -153,7 +157,9 @@ def build_summary_view(detail_links: dict[str, str] | None) -> discord.ui.View |
     view = discord.ui.View(timeout=None)
     ordered = [
         ("Profile", detail_links.get("profile")),
+        ("Skills", detail_links.get("skills_actions")),
         ("Rules", detail_links.get("rules")),
+        ("Links", detail_links.get("links")),
         ("Items", detail_links.get("items")),
     ]
     for label, url in ordered:
@@ -317,8 +323,9 @@ async def _pinned_workspace_slot_groups(thread: discord.Thread) -> dict[str, lis
         if bot_id is not None and message.author.id != bot_id:
             continue
         content = message.content or ""
+        embed_title = message.embeds[0].title if message.embeds else ""
         for title, _ in WORKSPACE_SLOT_ORDER:
-            if content.startswith(f"**{title}**"):
+            if content.startswith(f"**{title}**") or embed_title == title or (title == "Character Card" and embed_title == "Character Summary"):
                 groups[title].append(message)
                 break
     for title in groups:
@@ -391,7 +398,9 @@ async def sync_workspace_slots(thread: discord.Thread, bundle: PlayerWorkspaceBu
     if character_message is not None:
         detail_links = {
             "profile": resolved_messages["Profile Card"].jump_url if resolved_messages.get("Profile Card") else "",
+            "skills_actions": resolved_messages["Skills & Actions"].jump_url if resolved_messages.get("Skills & Actions") else "",
             "rules": resolved_messages["Rules Card"].jump_url if resolved_messages.get("Rules Card") else "",
+            "links": resolved_messages["Reference Links"].jump_url if resolved_messages.get("Reference Links") else "",
             "items": resolved_messages["Items Card"].jump_url if resolved_messages.get("Items Card") else "",
         }
         final_character_body = build_player_character_card(
@@ -420,6 +429,8 @@ async def sync_workspace_slots(thread: discord.Thread, bundle: PlayerWorkspaceBu
     return WorkspaceSlots(
         character_card_message_id=resolved_ids.get("Character Card"),
         profile_card_message_id=resolved_ids.get("Profile Card"),
+        skills_actions_card_message_id=resolved_ids.get("Skills & Actions"),
         rules_card_message_id=resolved_ids.get("Rules Card"),
+        links_card_message_id=resolved_ids.get("Reference Links"),
         items_card_message_id=resolved_ids.get("Items Card"),
     )

@@ -115,7 +115,9 @@ class ValidationResult:
 class WorkspaceSlots:
     character_card_message_id: int | None = None
     profile_card_message_id: int | None = None
+    skills_actions_card_message_id: int | None = None
     rules_card_message_id: int | None = None
+    links_card_message_id: int | None = None
     items_card_message_id: int | None = None
 
 
@@ -123,7 +125,9 @@ class WorkspaceSlots:
 class PlayerWorkspaceCardBundle:
     character_card: str
     profile_card: str
+    skills_actions_card: str
     rules_card: str
+    links_card: str
     items_card: str
     welcome_text: str
 

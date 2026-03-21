@@ -40,13 +40,6 @@ STANDARD_TEMPLATE = dedent(
     SPEED ...... [Value]
     INIT ....... [Value]
     PB ......... [Value]
-    ----------------------
-    RESOURCES & POOLS
-    HIT DICE .................. [X]d[Y]
-    [RESOURCE 1] .............. [Value]
-    [RESOURCE 2] .............. [Value]
-    [RESOURCE 3] .............. [Value]
-    ------------------------
     ```
 
     ```
@@ -103,7 +96,9 @@ STANDARD_TEMPLATE = dedent(
     ## ⚔️ CLASS FEATURES & TRAITS
 
     **🌌 Racial Traits**
-    > `[Trait 1]` • `[Trait 2]` • `[Trait 3]`
+    * **[Trait 1]:** [Effect]
+    * **[Trait 2]:** [Effect]
+    * **[Trait 3]:** [Effect]
 
     **🥋 [Class] Features (Lvl [X])**
     * **[Feature Name]:** Description with `[Numerical Values]` in backticks.
@@ -121,14 +116,25 @@ STANDARD_TEMPLATE = dedent(
 
     **🔋 Resource Tracking**
     * Include all visible trackable pools, spell slots, charges, uses/rest, uses/day, item charges, feature counters, and similar per-character resources when present.
-    * Use visible tracker circles in this section only, like `○ ○ ○` or `○`, followed by the original recharge note in parentheses.
-    * Preserve the source sheet's exact resource expression when it matters, such as `3 Charges`, `11 / Short Rest`, `1d3 regained at Dawn`, or `1+1d4 Charges (Regained at Sunset)`.
+    * Use visible tracker circles in this section only, like `○ ○ ○` or `○`, followed by the original recharge note in inline code.
+    * Format examples:
+      * `**Wild Shape:** ○ ○ `(Short Rest)``
+      * `**Star Map (Guiding Bolt/Augury):** ○ ○ ○ ○ `(4/Long Rest)``
+      * `**Armband Charges:** `1+1d4 Charges (Regained at Sunset)``
+    * Keep `RESOURCES & POOLS` content out of the core-status code block. Put all pool-style information here instead.
+
+    **✨ Spell Slots**
+    * **Cantrips:** Unlimited
+    * **Lvl 1:** ○ ○ ○ ○
+    * **Lvl 2:** ○ ○ ○
+    * Only include levels that actually exist on the sheet.
 
     ### 🔗 REFERENCE LINKS
     * **Race:** [Exact canonical URL if known]
     * **Class:** [Exact canonical URL if known]
     * **Subclass:** [Exact canonical URL if known]
     * **Feats:** [Exact canonical URL if known]
+    * **Spells:** [Exact canonical URL if known]
     * **Items:** [Exact canonical URL if known]
     * Omit this section entirely if you do not have at least one exact trusted URL.
 
@@ -182,6 +188,12 @@ STANDARD_TEMPLATE = dedent(
     * **Lvl 1:** *[Name], [Name]*
     * **Lvl 2:** *[Name], [Name]*
     ... [Up to Lvl 9] ...
+
+    **✨ Spell Slots**
+    * **Cantrips:** Unlimited
+    * **Lvl 1:** ○ ○ ○ ○
+    * **Lvl 2:** ○ ○ ○
+    * Only include levels that actually exist on the sheet.
     """
 ).strip()
 
@@ -212,6 +224,9 @@ def _base_prompt_parts(request: PlayerWorkspaceRequest) -> list[str]:
         "- Keep the output readable and breathable.",
         "- Do not generate generic search links.",
         "- Capture visible resource pools, charges, uses/rest, uses/day, spell slots, item charges, and feature counters when they appear on the sheet.",
+        "- Keep `CORE STATUS` separate from `🔋 Resource Tracking`; do not duplicate pool-style information inside the core-status code block.",
+        "- Put spell-slot counts in the dedicated `✨ Spell Slots` section, and keep spell names only in `✨ Spellbook / Known Spells`.",
+        "- Do not duplicate the same table or section content in multiple places. Keep each piece of information in its intended section only.",
         "- Keep `ACTIONS IN COMBAT` or `ACTIONS & MAGIC` as a readable multiline section with bullets; do not collapse it into one paragraph.",
         "- Keep the `PASSIVE PERCEPTION` / `PASSIVE INSIGHT` lines and the legend under `SKILLS & SENSES` when available.",
         "- For file imports, do not leave Ability Scores, Saving Throws, Skills, or Actions as `Unknown` if they are visible anywhere on the sheet.",

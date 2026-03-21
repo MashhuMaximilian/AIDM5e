@@ -161,7 +161,7 @@ def _parse_core_status_rows(text: str) -> tuple[list[tuple[str, str]], list[tupl
     return left_rows, right_rows
 
 
-def _render_core_status_table(text: str, *, build_line: str | None = None) -> str:
+def _render_core_status_table(text: str, *, build_line: str | None = None, include_resources: bool = True) -> str:
     left_rows, right_rows = _parse_core_status_rows(text)
     if not left_rows and not right_rows:
         return text.strip()
@@ -179,14 +179,15 @@ def _render_core_status_table(text: str, *, build_line: str | None = None) -> st
     ])
     for l_label, l_value in left_rows:
         lines.append(_format_core_row(l_label, _compact_resource_value(l_value), width=22))
-    lines.extend([
-        "----------------------",
-        "RESOURCES & POOLS",
-    ])
-    for r_label, r_value in right_rows:
-        compact_label = (r_label or "RESOURCE")[:18]
-        lines.append(f"{compact_label:.<24} {_compact_resource_value(r_value)}")
-    lines.append("------------------------")
+    if include_resources:
+        lines.extend([
+            "----------------------",
+            "RESOURCES & POOLS",
+        ])
+        for r_label, r_value in right_rows:
+            compact_label = (r_label or "RESOURCE")[:18]
+            lines.append(f"{compact_label:.<24} {_compact_resource_value(r_value)}")
+        lines.append("------------------------")
     lines.append("```")
     return "\n".join(lines)
 
@@ -325,9 +326,70 @@ def _render_magic_excerpt(rules_text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _build_resource_tracking(rules_text: str) -> str:
-    if "🔋 Resource Tracking" in (rules_text or ""):
+def _extract_named_section(text: str, heading: str) -> str:
+    lines = (text or "").splitlines()
+    out: list[str] = []
+    in_section = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith(heading):
+            in_section = True
+            out.append(heading)
+            continue
+        if in_section and stripped.startswith("**") and not stripped.startswith(heading):
+            break
+        if in_section and stripped.startswith(("## ", "### ")):
+            break
+        if in_section and stripped:
+            out.append(raw_line.rstrip())
+    return "\n".join(out).strip()
+
+
+def _render_spell_slots_excerpt(rules_text: str) -> str:
+    explicit = _extract_named_section(rules_text, "**✨ Spell Slots**")
+    if explicit:
+        lines: list[str] = ["**✨ Spell Slots**"]
+        for raw_line in explicit.splitlines()[1:]:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            stripped = stripped.lstrip("*- ").strip()
+            stripped = stripped.replace("[ ]", "○")
+            lines.append(f"* {stripped}")
+        return "\n".join(lines)
+
+    excerpt = _render_magic_excerpt(rules_text)
+    source = excerpt or rules_text or ""
+    if not source:
         return ""
+    lines: list[str] = ["**✨ SPELL SLOTS**"]
+    seen = False
+    if re.search(r"\bCantrips?\b", source, re.IGNORECASE):
+        lines.append("* **Cantrips:** Unlimited")
+        seen = True
+    counts: dict[int, int] = {}
+    for level in range(1, 10):
+        match = re.search(rf"(?:Lvl|Level)\s*{level}\s*\((\d+)\s+Slots?\)", source, re.IGNORECASE)
+        if match:
+            counts[level] = int(match.group(1))
+    for level in sorted(counts):
+        dots = " ".join("○" for _ in range(counts[level]))
+        lines.append(f"* **Lvl {level}:** {dots}")
+        seen = True
+    return "\n".join(lines) if seen else ""
+
+
+def _render_spellcasting_ability_excerpt(rules_text: str, actions_text: str) -> str:
+    source = "\n".join(part for part in ((actions_text or "").strip(), (rules_text or "").strip()) if part)
+    if not source:
+        return ""
+    match = re.search(r"Spellcasting Ability:\s*([A-Za-z]+)\s*\(([^)]+)\)", source, re.IGNORECASE)
+    if not match:
+        return ""
+    return f"**Spellcasting Ability:** {match.group(1).strip().title()} ({match.group(2).strip()})"
+
+
+def _build_resource_tracking(rules_text: str) -> str:
     rows: list[str] = []
     seen: set[str] = set()
     for raw_line in (rules_text or "").splitlines():
@@ -354,6 +416,41 @@ def _build_resource_tracking(rules_text: str) -> str:
     if not rows:
         return ""
     return "\n".join(["**🔋 Resource Tracking**", *rows]).strip()
+
+
+def _extract_resource_tracking_section(rules_text: str) -> str:
+    return _extract_named_section(rules_text, "**🔋 Resource Tracking**")
+
+
+def _strip_named_section(rules_text: str, heading: str) -> str:
+    lines = (rules_text or "").splitlines()
+    out: list[str] = []
+    in_section = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if stripped.startswith(heading):
+            in_section = True
+            continue
+        if in_section and stripped.startswith("**") and not stripped.startswith(heading):
+            in_section = False
+        if in_section and stripped.startswith(("## ", "### ")):
+            in_section = False
+        if in_section:
+            continue
+        out.append(raw_line)
+    return "\n".join(out).strip()
+
+
+def _strip_resource_tracking_section(rules_text: str) -> str:
+    return _strip_named_section(rules_text, "**🔋 Resource Tracking**")
+
+
+def _strip_spell_slots_section(rules_text: str) -> str:
+    return _strip_named_section(rules_text, "**✨ Spell Slots**")
+
+
+def _strip_reference_links_section(rules_text: str) -> str:
+    return _strip_named_section(rules_text, "### 🔗 REFERENCE LINKS")
 
 
 def _normalize_actions_section(text: str) -> str:
@@ -433,7 +530,7 @@ def _render_encumbrance_block(text: str) -> str:
             f"PUSH/DRAG/LIFT: {push}",
             f"CARRY CAPACITY: {carry}",
         ],
-        width=51,
+        width=42,
     )
 
 
@@ -480,10 +577,57 @@ def _normalize_resource_tracking_block(text: str) -> str:
         if stripped.startswith("**🔋 Resource Tracking**"):
             out.append("**🔋 Resource Tracking**")
             continue
-        stripped = stripped.lstrip("* ").strip()
+        stripped = stripped.lstrip("*- ").strip()
         stripped = stripped.replace("`[ ]`", "`○`").replace("[ ]", "○")
-        out.append(stripped)
+        match = re.match(r"^\*\*(.+?):\*\*\s*(.+)$", stripped)
+        if match:
+            name = match.group(1).strip()
+            value = match.group(2).strip()
+        else:
+            parts = stripped.split(":", 1)
+            if len(parts) == 2:
+                name, value = parts[0].strip("* "), parts[1].strip()
+            else:
+                out.append(f"- {stripped}")
+                continue
+        value = re.sub(r"\s+", " ", value)
+        value = re.sub(r"\((Short Rest|Long Rest|Dawn|Sunset|Day)\)$", r"`(\1)`", value, flags=re.IGNORECASE)
+        if re.match(r"^○(?:\s*○)*(?:\s*`[^`]+`)?$", value):
+            out.append(f"- **{name}:** {value}")
+        elif value.startswith("`") and value.endswith("`"):
+            out.append(f"- **{name}:** {value}")
+        else:
+            out.append(f"- **{name}:** `{value}`")
     return "\n".join(out)
+
+
+def _resource_tracking_for_display(rules_text: str) -> str:
+    existing = _extract_resource_tracking_section(rules_text)
+    return _normalize_resource_tracking_block(existing or _build_resource_tracking(rules_text))
+
+
+def _summary_resource_tracking_from_core_status(core_status_text: str) -> str:
+    _left_rows, right_rows = _parse_core_status_rows(core_status_text)
+    if not right_rows:
+        return ""
+
+    lines: list[str] = ["**🔋 Resource Tracking**"]
+    for label, value in right_rows:
+        raw = " ".join((value or "").split()).strip()
+        if not raw:
+            continue
+        name = label.replace("_", " ").title()
+        circle_match = re.match(r"^((?:○\s*)+)(?:\(([^)]+)\))?$", raw, re.IGNORECASE)
+        if circle_match:
+            tracker = " ".join("○" for _ in re.findall(r"○", circle_match.group(1)))
+            note = (circle_match.group(2) or "").strip()
+            if note:
+                lines.append(f"- **{name}:** {tracker} `({note})`")
+            else:
+                lines.append(f"- **{name}:** {tracker}")
+            continue
+        lines.append(f"- **{name}:** `{raw}`")
+    return "\n".join(lines)
 
 
 def _strip_duplicate_profile_heading(text: str, character_name: str) -> str:
@@ -565,8 +709,63 @@ def _render_actions_excerpt(actions_text: str, *, limit: int = 5) -> str:
 def _render_reference_link_list(links: list[ReferenceLink]) -> str:
     if not links:
         return ""
-    parts = [f"[{link.label}]({link.url})" for link in links if (link.label or "").strip() and (link.url or "").strip()]
-    return " • ".join(parts)
+    parts = [f"* [{link.label}]({link.url})" for link in links if (link.label or "").strip() and (link.url or "").strip()]
+    return "\n".join(parts)
+
+
+def _render_reference_links_card(reference_text: str, links: list[ReferenceLink]) -> str:
+    categories: dict[str, list[str]] = {
+        "Race / Class / Subclass": [],
+        "Feats": [],
+        "Spells": [],
+        "Items": [],
+        "Other": [],
+    }
+    parsed_any = False
+    for line in (reference_text or "").splitlines():
+        stripped = line.strip()
+        if not stripped or "Reference Links" in stripped:
+            continue
+        md = re.search(r"\[([^\]]+)\]\((https?://[^)]+)\)", stripped)
+        if not md:
+            continue
+        label = md.group(1).strip()
+        url = md.group(2).strip()
+        prefix = stripped.split("[", 1)[0].strip("* :-").lower()
+        category = "Other"
+        if any(token in prefix for token in ("race", "class", "subclass")):
+            category = "Race / Class / Subclass"
+        elif "feat" in prefix:
+            category = "Feats"
+        elif "spell" in prefix:
+            category = "Spells"
+        elif "item" in prefix:
+            category = "Items"
+        categories[category].append(f"* [{label}]({url})")
+        parsed_any = True
+    if not parsed_any:
+        for link in links:
+            label = (link.label or "").strip()
+            url = (link.url or "").strip()
+            if not label or not url:
+                continue
+            lowered = label.lower()
+            category = "Other"
+            if any(token in lowered for token in ("race", "class", "subclass")):
+                category = "Race / Class / Subclass"
+            elif "feat" in lowered:
+                category = "Feats"
+            elif "spell" in lowered:
+                category = "Spells"
+            elif any(token in lowered for token in ("item", "ring", "cloak", "mantle", "rod", "circlet", "gloves", "tattoos")):
+                category = "Items"
+            categories[category].append(f"* [{label}]({url})")
+    sections: list[str] = []
+    for title in ("Race / Class / Subclass", "Feats", "Spells", "Items", "Other"):
+        if categories[title]:
+            sections.append(f"**{title}**")
+            sections.extend(categories[title])
+    return "\n".join(sections).strip()
 
 
 def _render_detail_links(detail_links: dict[str, str] | None) -> str:
@@ -574,7 +773,9 @@ def _render_detail_links(detail_links: dict[str, str] | None) -> str:
         return ""
     ordered = [
         ("Profile", detail_links.get("profile")),
+        ("Skills", detail_links.get("skills_actions")),
         ("Rules", detail_links.get("rules")),
+        ("Links", detail_links.get("links")),
         ("Items", detail_links.get("items")),
     ]
     parts = [f"[{label}]({url})" for label, url in ordered if url]
@@ -591,38 +792,26 @@ def build_player_character_card(
     detail_links: dict[str, str] | None = None,
 ) -> str:
     name = draft.identity.character_name or request.character_name or "Unnamed Character"
-    concept = draft.concept or "Needs review."
+    concept = draft.concept or ""
+    if concept.strip().upper() in {"CORE STATUS", "RESOURCE TRACKING", "SPELL SLOTS"}:
+        concept = ""
     build_line = draft.identity.build_line or "Needs review."
-    core_status = draft.sections.core_status.strip()
-    abilities = draft.sections.abilities.strip()
-    skills = draft.sections.skills.strip()
-    actions = draft.sections.actions.strip()
-    magic_excerpt = _render_magic_excerpt(draft.sections.rules)
-    combat_excerpt = _render_actions_excerpt(actions)
-    resource_tracking = _normalize_resource_tracking_block(_build_resource_tracking(draft.sections.rules))
+    spell_slots = _render_spell_slots_excerpt(draft.sections.rules)
+    spellcasting_ability = _render_spellcasting_ability_excerpt(draft.sections.rules, draft.sections.actions)
+    resource_tracking = _summary_resource_tracking_from_core_status(draft.sections.core_status) or _resource_tracking_for_display(draft.sections.rules)
 
     parts = [
         f"**{name.upper()}**",
-        f"> {concept}",
+        f"**BUILD**: {build_line}",
     ]
-    if core_status:
-        parts.extend(["## Core Status & Resources", _render_core_status_table(core_status, build_line=build_line)])
-    if abilities:
-        parts.extend(["## Ability Scores & Saving Throws", _render_abilities_table(abilities)])
-    if skills:
-        parts.extend(["## Skills & Senses", _render_skills_table(skills)])
-    if combat_excerpt:
-        parts.extend(["## Actions in Combat", combat_excerpt])
-    if magic_excerpt:
-        parts.extend(["## Spells & Magic", tidy_markdown_for_discord(magic_excerpt)])
+    if concept.strip():
+        parts.insert(1, f"> {concept}")
+    if spellcasting_ability:
+        parts.append(spellcasting_ability)
     if resource_tracking:
-        parts.extend(["## Resource Tracking", tidy_markdown_for_discord(resource_tracking)])
-    if validation.missing_sections or validation.missing_fields:
-        parts.append("## Needs Review")
-        for section in validation.missing_sections:
-            parts.append(f"• Missing section: {section}")
-        for field in validation.missing_fields:
-            parts.append(f"• Missing field: {field}")
+        parts.append(tidy_markdown_for_discord(resource_tracking))
+    if spell_slots:
+        parts.append(tidy_markdown_for_discord(spell_slots))
     return tidy_markdown_for_discord("\n".join(parts))
 
 
@@ -635,14 +824,29 @@ def render_player_workspace_cards(
     character_name = draft.identity.character_name or request.character_name or "Unnamed Character"
     cleaned_profile = _strip_duplicate_profile_heading(_strip_first_code_block(draft.sections.profile), character_name)
     profile_body = _coalesce(
-        f"### 👤 CHARACTER PROFILE — {character_name}",
+        f"### {character_name}",
         cleaned_profile,
         _render_profile_identity_table(draft),
+        _render_core_status_table(
+            draft.sections.core_status,
+            build_line=draft.identity.build_line or request.character_name or "Needs review.",
+            include_resources=False,
+        ) if draft.sections.core_status.strip() else "",
     )
     profile_card = tidy_markdown_for_discord(profile_body)
-    resource_tracking = _build_resource_tracking(draft.sections.rules)
-    rules_body = _coalesce(_ensure_feats_section(draft.sections.rules), resource_tracking, _normalize_reference_links(draft.sections.reference_links))
-    rules_card = tidy_markdown_for_discord(_normalize_resource_tracking(rules_body))
+    rules_body = _strip_reference_links_section(_strip_spell_slots_section(_strip_resource_tracking_section(_ensure_feats_section(draft.sections.rules))))
+    rules_card = tidy_markdown_for_discord(rules_body)
+    skills_actions_card = tidy_markdown_for_discord(_coalesce(
+        "## Ability Scores & Saving Throws",
+        _render_abilities_table(draft.sections.abilities) if draft.sections.abilities.strip() else "",
+        "## Skills & Senses",
+        _render_skills_table(draft.sections.skills) if draft.sections.skills.strip() else "",
+        "## Actions in Combat",
+        _normalize_actions_section(draft.sections.actions) if draft.sections.actions.strip() else "",
+    ))
+    links_card = tidy_markdown_for_discord(
+        _render_reference_links_card(draft.sections.reference_links, draft.reference_links)
+    ) or "Needs review."
     items_body = _coalesce(
         draft.sections.items,
         _render_encumbrance_block(draft.sections.encumbrance) if draft.sections.encumbrance.strip() else "",
@@ -654,7 +858,9 @@ def render_player_workspace_cards(
     return PlayerWorkspaceCardBundle(
         character_card=character_card,
         profile_card=profile_card,
+        skills_actions_card=skills_actions_card,
         rules_card=rules_card,
+        links_card=links_card,
         items_card=items_card,
         welcome_text=welcome_text,
     )
