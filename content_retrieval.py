@@ -1,6 +1,7 @@
 import io
 import logging
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import urlparse
 
 import aiohttp
@@ -63,6 +64,25 @@ def extract_text_from_html(html: str) -> str:
     parser = _HTMLTextExtractor()
     parser.feed(html)
     return parser.get_text()
+
+
+def extract_text_from_local_file(path: str) -> str:
+    file_path = Path(path)
+    suffix = file_path.suffix.lower()
+    payload = file_path.read_bytes()
+
+    if suffix == ".pdf":
+        text = extract_text_from_pdf_bytes(payload)
+    elif suffix in {".txt", ".md"}:
+        text = payload.decode("utf-8", errors="replace")
+    elif suffix == ".docx":
+        text = extract_text_from_docx_bytes(payload)
+    elif suffix in {".html", ".htm"}:
+        text = extract_text_from_html(payload.decode("utf-8", errors="replace"))
+    else:
+        raise ValueError(f"Unsupported local file type for {file_path.name}.")
+
+    return _truncate_text(text)
 
 
 def _truncate_text(text: str) -> str:

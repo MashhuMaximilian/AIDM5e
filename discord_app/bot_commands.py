@@ -18,13 +18,29 @@ from ai_services.context_compiler import (
 from content_retrieval import extract_attachment_text, format_message_text, select_messages
 from config import DM_ROLE_NAME
 from data_store.db_repository import (
+    assign_memory_to_thread,
     build_thread_data_snapshot,
+    ensure_channel_for_category,
+    ensure_memory,
+    ensure_thread_for_channel,
     fetch_memory_details,
     get_campaign_image_settings,
+    get_or_create_campaign_context,
+    set_thread_always_on,
     update_campaign_image_settings,
 )
 from data_store.memory_management import *
 from prompts.summary_prompts import build_feedback_prompt
+from discord_app.player_workspace import (
+    PlayerWorkspaceRequest,
+    SourceBundle,
+    build_player_workspace,
+    collect_player_source_material,
+    ensure_character_sheets_channel,
+    find_or_create_player_thread,
+    sync_workspace_slots,
+    slugify_player_key,
+)
 
 from .helper_functions import *
 from .shared_functions import *
@@ -545,7 +561,6 @@ def _describe_context_source(source_target: discord.abc.GuildChannel | discord.T
         return source_target.mention
     return getattr(source_target, "name", "manual note")
 
-
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
@@ -553,6 +568,7 @@ def setup_commands(tree, get_assistant_response):
     context_group = app_commands.Group(name="context", description="Context helpers for summaries and transcripts.")
     settings_group = app_commands.Group(name="settings", description="Campaign settings commands.")
     generate_group = app_commands.Group(name="generate", description="Image and media generation commands.")
+    create_group = app_commands.Group(name="create", description="Character creation workflows.")
 
     @tree.command(name="help", description="Show command help and campaign onboarding guidance.")
     @app_commands.describe(topic="Optional topic to explain in more detail.")
@@ -565,6 +581,130 @@ def setup_commands(tree, get_assistant_response):
     ):
         help_topic = topic.value if topic else "overview"
         await send_interaction_message(interaction, _build_help_text(help_topic), ephemeral=True)
+
+
+    @create_group.command(name="player", description="Create or refresh a player character workspace.")
+    @app_commands.describe(
+        mode="Create from idea or import from source material.",
+        character_name="Character name. Used for the thread name and card labels.",
+        player_name="Optional player name to include in the draft.",
+        note="Concept notes or extra instructions for the draft.",
+        attachment="Optional character sheet, notes, or source file.",
+        start="Message ID to start from when importing from a conversation.",
+        end="Message ID to end at when importing from a conversation.",
+        message_ids="Comma-separated message IDs to import.",
+        last_n="Import the last n messages from the selected source.",
+        channel="Optional source channel for message-based import.",
+        thread="Optional source thread for message-based import.",
+    )
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Start from Idea", value="idea"),
+            app_commands.Choice(name="Import Sheet / Notes", value="import"),
+        ]
+    )
+    async def create_player(
+        interaction: discord.Interaction,
+        mode: app_commands.Choice[str],
+        character_name: str | None = None,
+        player_name: str | None = None,
+        note: str | None = None,
+        attachment: discord.Attachment | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        message_ids: str | None = None,
+        last_n: int | None = None,
+        channel: str | None = None,
+        thread: str | None = None,
+    ):
+        await send_command_ack(interaction, "Creating player workspace... this might take a minute.")
+
+        category = get_interaction_category(interaction)
+        if category is None:
+            raise ValueError("Run `/create player` inside a campaign category.")
+
+        source_text, file_paths, source_label, temp_paths = await collect_player_source_material(
+            interaction,
+            note=note,
+            attachment=attachment,
+            start=start,
+            end=end,
+            message_ids=message_ids,
+            last_n=last_n,
+            channel=channel,
+            thread=thread,
+            resolve_source_target=_resolve_context_source_target,
+            build_context_material_from_messages=_build_context_material_from_messages,
+            describe_context_source=_describe_context_source,
+        )
+
+        if mode.value == "import" and not any([attachment, source_text, note]):
+            raise ValueError("Import mode needs an attachment, note, or selected messages to read from.")
+
+        display_name = (character_name or "New Character").strip()
+        thread_name = f"Character - {display_name}"
+        sheets_channel = await ensure_character_sheets_channel(interaction, category)
+        player_thread, created_thread = await find_or_create_player_thread(sheets_channel, thread_name)
+
+        context = await asyncio.to_thread(
+            get_or_create_campaign_context,
+            interaction.guild.id,
+            interaction.guild.name,
+            category.id,
+            category.name,
+            DM_ROLE_NAME,
+        )
+        memory_name = f"player-{slugify_player_key(display_name)}"
+        memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
+        await asyncio.to_thread(ensure_thread_for_channel, sheets_channel.id, player_thread.id, player_thread.name, True)
+        await asyncio.to_thread(assign_memory_to_thread, player_thread.id, memory_id)
+        await asyncio.to_thread(set_thread_always_on, player_thread.id, True)
+
+        try:
+            request = PlayerWorkspaceRequest(
+                mode=mode.value,
+                character_name=character_name,
+                player_name=player_name,
+                source=SourceBundle(
+                    note=note,
+                    source_text=source_text,
+                    file_paths=file_paths,
+                    source_label=source_label,
+                ),
+                thread_name=thread_name,
+            )
+            bundle = await build_player_workspace(request, gemini=gemini_client)
+
+            if created_thread:
+                await player_thread.send(bundle.cards.welcome_text)
+                if attachment is not None:
+                    await player_thread.send(
+                        f"Imported source file from `/create player`: `{attachment.filename}`",
+                        file=await attachment.to_file(),
+                    )
+
+            await sync_workspace_slots(player_thread, bundle)
+        finally:
+            for temp_path in temp_paths:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    logger.warning("Failed to clean up temporary player import file %s", temp_path)
+
+        action_label = "created" if created_thread else "updated"
+        await send_interaction_message(
+            interaction,
+            f"Player workspace {action_label} in {player_thread.mention}.",
+            ephemeral=True,
+        )
+
+    @create_player.autocomplete("channel")
+    async def create_player_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await channel_autocomplete(interaction, current)
+
+    @create_player.autocomplete("thread")
+    async def create_player_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await thread_autocomplete(interaction, current)
 
 
     @ask_group.command(name="campaign", description="Campaign info lookup. Defaults to #telldm if no target is set.")
@@ -1885,6 +2025,7 @@ def setup_commands(tree, get_assistant_response):
     tree.add_command(ask_group)
     tree.add_command(channel_group)
     tree.add_command(context_group)
+    tree.add_command(create_group)
     tree.add_command(memory_group)
     tree.add_command(settings_group)
     tree.add_command(generate_group)
