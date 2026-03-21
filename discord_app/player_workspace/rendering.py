@@ -389,8 +389,8 @@ def _build_resource_tracking_from_resource_pools(resource_pools: list[ResourcePo
 def _extract_summary_build(summary_text: str, fallback: str) -> str:
     match = re.search(r"BUILD\.{0,}:\**\s*(.+)", summary_text or "", re.IGNORECASE)
     if match:
-        return match.group(1).strip().strip("*")
-    return fallback
+        return re.sub(r"\*+", "", match.group(1)).strip()
+    return re.sub(r"\*+", "", fallback).strip()
 
 
 def _extract_summary_quote(summary_text: str, fallback: str | None) -> str:
@@ -404,6 +404,8 @@ def _extract_summary_quote(summary_text: str, fallback: str | None) -> str:
                 and "BUILD" not in upper
                 and "CORE STATUS" not in upper
                 and "RACE / CLASS / SUBCLASS" not in upper
+                and "CHARACTER LEVEL, RACE, & CLASS" not in upper
+                and "SPELLCASTING ABILITY" not in upper
                 and "REFERENCE LINKS" not in upper
             ):
                 words = candidate.strip('"').strip("'").split()
@@ -636,9 +638,15 @@ def build_player_character_card(
     parts = [f"**{name.upper()}**"]
     if concept:
         parts.append(f"> {concept}")
-    parts.append(f"> `BUILD: {build_line}`")
+    parts.append(f"> **BUILD**: {build_line}")
     if spellcasting:
-        parts.append(f"> {spellcasting}")
+        spellcasting_line = re.sub(r"\*+", "", spellcasting.strip("`")).strip()
+        if ":" in spellcasting_line:
+            _, rhs = spellcasting_line.split(":", 1)
+            spellcasting_value = rhs.strip()
+        else:
+            spellcasting_value = spellcasting_line
+        parts.append(f"> **Spellcasting Ability**: {spellcasting_value}")
     if resource_tracking:
         parts.append(resource_tracking)
     if spell_slots:
