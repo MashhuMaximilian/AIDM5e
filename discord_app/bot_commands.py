@@ -3,6 +3,7 @@
 import asyncio
 import io
 import logging
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -40,6 +41,21 @@ from discord_app.player_workspace import (
     find_or_create_player_thread,
     sync_workspace_slots,
     slugify_player_key,
+)
+from discord_app.player_workspace.prompting import (
+    build_npc_workspace_system_prompt,
+    build_other_prepass_prompt,
+    build_other_workspace_system_prompt,
+    build_player_workspace_system_prompt,
+)
+from discord_app.workspace_threads import (
+    NPC_DEFAULT_CARD_TITLES,
+    WorkspaceDefinition,
+    build_npc_blank_cards,
+    build_other_blank_cards,
+    build_workspace_welcome_text,
+    parse_other_prepass_output,
+    sync_workspace_cards,
 )
 
 from .helper_functions import *
@@ -561,6 +577,84 @@ def _describe_context_source(source_target: discord.abc.GuildChannel | discord.T
         return source_target.mention
     return getattr(source_target, "name", "manual note")
 
+
+def _default_npc_card_inventory_text() -> str:
+    descriptions = {
+        "Summary Card": "High-level identity, role, faction, CR, status, and last seen location.",
+        "Profile Card": "Name, aliases, race/type, age, appearance, and distinctive features.",
+        "Personality & Hooks": "Traits, ideals, flaws, bonds, secrets, and party hooks.",
+        "Stat Block": "Core combat statistics, actions, and creature abilities.",
+        "Relationships": "Party relationships, NPC connections, and faction standing.",
+    }
+    return "\n".join(f"- {title}: {descriptions[title]}" for title in NPC_DEFAULT_CARD_TITLES)
+
+
+def _default_npc_cascade_rules_text() -> str:
+    return "\n".join(
+        [
+            "- Faction or allegiance change -> Summary Card, Profile Card, Relationships",
+            "- Race or creature type change -> Profile Card, Stat Block",
+            "- Role or status change -> Summary Card, Relationships, Personality & Hooks",
+            "- Adding abilities, spells, or items -> Stat Block, Summary Card",
+            "- Party relationship changes -> Relationships, Personality & Hooks",
+        ]
+    )
+
+
+async def _ensure_workspace_thread(
+    interaction: discord.Interaction,
+    *,
+    display_name: str,
+    thread_prefix: str,
+    memory_prefix: str,
+) -> tuple[discord.TextChannel, discord.Thread, bool]:
+    category = get_interaction_category(interaction)
+    if category is None:
+        raise ValueError("Run this command inside a campaign category.")
+
+    sheets_channel = await ensure_character_sheets_channel(interaction, category)
+    thread_name = f"{thread_prefix} - {display_name}"
+    workspace_thread, created_thread = await find_or_create_player_thread(sheets_channel, thread_name)
+
+    context = await asyncio.to_thread(
+        get_or_create_campaign_context,
+        interaction.guild.id,
+        interaction.guild.name,
+        category.id,
+        category.name,
+        DM_ROLE_NAME,
+    )
+    memory_name = f"{memory_prefix}-{slugify_player_key(display_name)}"
+    memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
+    await asyncio.to_thread(ensure_thread_for_channel, sheets_channel.id, workspace_thread.id, workspace_thread.name, True)
+    await asyncio.to_thread(assign_memory_to_thread, workspace_thread.id, memory_id)
+    await asyncio.to_thread(set_thread_always_on, workspace_thread.id, True)
+    return sheets_channel, workspace_thread, created_thread
+
+
+async def _seed_workspace_thread(
+    *,
+    get_assistant_response,
+    thread: discord.Thread,
+    category_id: int | None,
+    note: str | None,
+    system_prompt: str,
+) -> None:
+    memory_id = await asyncio.to_thread(get_assigned_memory, thread.parent.id if thread.parent else thread.id, category_id, thread.id)
+    if not memory_id:
+        return
+    user_text = (note or "").strip() or "The workspace has just been created. Acknowledge briefly and invite the user to keep adding notes or ask for edits."
+    response = await get_assistant_response(
+        user_text,
+        thread.parent.id if thread.parent else thread.id,
+        category_id,
+        thread.id,
+        memory_id,
+        system_prompt=system_prompt,
+    )
+    if response:
+        await send_response_in_chunks(thread, response)
+
 def setup_commands(tree, get_assistant_response):
     ask_group = app_commands.Group(name="ask", description="Rules and lore commands.")
     channel_group = app_commands.Group(name="channel", description="Channel and thread commands.")
@@ -617,7 +711,7 @@ def setup_commands(tree, get_assistant_response):
         channel: str | None = None,
         thread: str | None = None,
     ):
-        await send_command_ack(interaction, "Creating player workspace... this might take a minute.")
+        await send_command_ack(interaction, "Creating player workspace... this might take a couple minutes. Trust the process.")
 
         category = get_interaction_category(interaction)
         if category is None:
@@ -705,6 +799,118 @@ def setup_commands(tree, get_assistant_response):
     @create_player.autocomplete("thread")
     async def create_player_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await thread_autocomplete(interaction, current)
+
+
+    @create_group.command(name="npc", description="Create or refresh an NPC workspace.")
+    @app_commands.describe(
+        npc_name="NPC name. Used for the thread and card labels.",
+        note="Optional notes or concept details for the NPC.",
+    )
+    async def create_npc(
+        interaction: discord.Interaction,
+        npc_name: str,
+        note: str | None = None,
+    ):
+        await send_command_ack(interaction, "Creating NPC workspace... this should just take a moment.")
+
+        display_name = (npc_name or "New NPC").strip()
+        _, npc_thread, created_thread = await _ensure_workspace_thread(
+            interaction,
+            display_name=display_name,
+            thread_prefix="NPC",
+            memory_prefix="npc",
+        )
+
+        definition = WorkspaceDefinition(
+            kind="npc",
+            entity_name=display_name,
+            user_note=(note or "").strip(),
+            card_inventory_text=_default_npc_card_inventory_text(),
+            cascade_rules_text=_default_npc_cascade_rules_text(),
+            card_titles=list(NPC_DEFAULT_CARD_TITLES),
+        )
+        cards = build_npc_blank_cards(display_name)
+
+        if created_thread:
+            await npc_thread.send(build_workspace_welcome_text(definition))
+
+        await sync_workspace_cards(npc_thread, cards)
+        await _seed_workspace_thread(
+            get_assistant_response=get_assistant_response,
+            thread=npc_thread,
+            category_id=npc_thread.parent.category.id if npc_thread.parent and npc_thread.parent.category else None,
+            note=note,
+            system_prompt=build_npc_workspace_system_prompt(display_name),
+        )
+
+        action_label = "created" if created_thread else "updated"
+        await send_interaction_message(
+            interaction,
+            f"NPC workspace {action_label} in {npc_thread.mention}.",
+            ephemeral=True,
+        )
+
+
+    @create_group.command(name="other", description="Create or refresh a custom workspace.")
+    @app_commands.describe(
+        entity_name="Entity name. Used for the thread and card labels.",
+        note="What this workspace is for. Used to design the card inventory.",
+    )
+    async def create_other(
+        interaction: discord.Interaction,
+        entity_name: str,
+        note: str | None = None,
+    ):
+        await send_command_ack(interaction, "Designing custom workspace... this might take a minute.")
+
+        display_name = (entity_name or "New Entity").strip()
+        if not (note or "").strip():
+            raise ValueError("`/create other` needs a note describing what this workspace is for.")
+
+        _, other_thread, created_thread = await _ensure_workspace_thread(
+            interaction,
+            display_name=display_name,
+            thread_prefix="Other",
+            memory_prefix="other",
+        )
+
+        prepass_prompt = build_other_prepass_prompt(note)
+        prepass_output = await asyncio.to_thread(gemini_client.generate_text, prepass_prompt)
+        card_titles, card_inventory_text, cascade_rules_text = parse_other_prepass_output(prepass_output)
+
+        definition = WorkspaceDefinition(
+            kind="other",
+            entity_name=display_name,
+            user_note=(note or "").strip(),
+            card_inventory_text=card_inventory_text,
+            cascade_rules_text=cascade_rules_text,
+            card_titles=card_titles,
+        )
+        cards = build_other_blank_cards(display_name, card_titles)
+
+        if created_thread:
+            await other_thread.send(build_workspace_welcome_text(definition))
+
+        await sync_workspace_cards(other_thread, cards)
+        await _seed_workspace_thread(
+            get_assistant_response=get_assistant_response,
+            thread=other_thread,
+            category_id=other_thread.parent.category.id if other_thread.parent and other_thread.parent.category else None,
+            note=note,
+            system_prompt=build_other_workspace_system_prompt(
+                display_name,
+                note,
+                card_inventory_text,
+                cascade_rules_text,
+            ),
+        )
+
+        action_label = "created" if created_thread else "updated"
+        await send_interaction_message(
+            interaction,
+            f"Custom workspace {action_label} in {other_thread.mention}.",
+            ephemeral=True,
+        )
 
 
     @ask_group.command(name="campaign", description="Campaign info lookup. Defaults to #telldm if no target is set.")
@@ -2015,7 +2221,7 @@ def setup_commands(tree, get_assistant_response):
             message = "I do not have permission to complete that command in Discord."
         else:
             command_name = interaction.command.qualified_name if interaction.command else "that command"
-            message = f"Could not complete `{command_name}` because of an internal error."
+            message = f"Could not complete `{command_name}` because of an internal error. Please try again now or later."
 
         try:
             await send_interaction_message(interaction, message, ephemeral=True)

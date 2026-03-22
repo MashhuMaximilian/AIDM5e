@@ -58,6 +58,12 @@ def _build_prompt(memory_name: str | None, user_message: str, context_block: str
     return prompt
 
 
+def _compose_system_prompt(system_prompt: str | None = None) -> str:
+    if not system_prompt:
+        return SYSTEM_PROMPT
+    return f"{SYSTEM_PROMPT}\n\n{system_prompt.strip()}".strip()
+
+
 async def get_assistant_response(
     user_message,
     channel_id,
@@ -67,6 +73,7 @@ async def get_assistant_response(
     send_message=False,
     model_name=None,
     context_block: str | None = None,
+    system_prompt: str | None = None,
 ):
     try:
         channel = client.get_channel(channel_id)
@@ -88,7 +95,7 @@ async def get_assistant_response(
             response_text = await asyncio.to_thread(
                 gemini_client.generate_text,
                 prompt,
-                SYSTEM_PROMPT,
+                _compose_system_prompt(system_prompt),
                 model_name,
             )
 
