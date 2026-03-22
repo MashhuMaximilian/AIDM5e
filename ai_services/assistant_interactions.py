@@ -76,9 +76,10 @@ async def get_assistant_response(
     system_prompt: str | None = None,
 ):
     try:
-        channel = client.get_channel(channel_id)
+        target_id = thread_id or channel_id
+        channel = client.get_channel(target_id)
         if channel is None:
-            error_message = f"Error: Channel with ID {channel_id} not found."
+            error_message = f"Error: Channel with ID {target_id} not found."
             logger.error(error_message)
             return error_message
 

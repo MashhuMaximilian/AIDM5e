@@ -19,7 +19,7 @@ from config import (
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_MEMORY_NAMES = ("gameplay", "out-of-game", "dm-private")
+DEFAULT_MEMORY_NAMES = ("gameplay", "out-of-game", "dm-private", "worldbuilding")
 DEFAULT_CHANNEL_SPECS = (
     {"name": "gameplay", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "telldm", "memory": "out-of-game", "always_on": True, "is_dm_private": False},
@@ -27,6 +27,7 @@ DEFAULT_CHANNEL_SPECS = (
     {"name": "session-summary", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "feedback", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "npcs", "memory": "gameplay", "always_on": False, "is_dm_private": False},
+    {"name": "worldbuilding", "memory": "worldbuilding", "always_on": False, "is_dm_private": False},
     {"name": "character-sheets", "memory": "out-of-game", "always_on": False, "is_dm_private": False},
     {"name": "lore-and-teasers", "memory": "gameplay", "always_on": False, "is_dm_private": False},
     {"name": "items", "memory": "out-of-game", "always_on": False, "is_dm_private": False},

@@ -3,6 +3,7 @@ import aiohttp
 import discord
 import logging
 import re
+from pathlib import Path
 from config import client
 import PyPDF2
 import io
@@ -125,6 +126,10 @@ def _target_card_titles(message_text: str, card_titles: list[str]) -> list[str]:
             if f" {alias} " in lowered:
                 matched.append(title)
                 break
+    if matched:
+        return matched
+    if any(token in lowered for token in (" card ", " cards ", " all cards ", " all card ")):
+        return list(card_titles)
     return matched
 
 
@@ -133,6 +138,7 @@ async def _fetch_attachment_context(attachments: list[discord.Attachment]) -> st
     for attachment in attachments:
         label = attachment.filename
         content_type = attachment.content_type or ""
+        suffix = Path(attachment.filename).suffix.lower()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(attachment.url) as resp:
@@ -146,13 +152,13 @@ async def _fetch_attachment_context(attachments: list[discord.Attachment]) -> st
             continue
 
         try:
-            if "image" in content_type:
+            if "image" in content_type or suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
                 blocks.append(f"[Attached image: {attachment.url}]")
-            elif "pdf" in content_type:
+            elif "pdf" in content_type or suffix == ".pdf":
                 blocks.append(f"[Attached PDF: {label}]\n{extract_text_from_pdf(file_data)}")
-            elif "text/plain" in content_type:
+            elif "text/plain" in content_type or suffix in {".txt", ".md"}:
                 blocks.append(f"[Attached text file: {label}]\n{file_data.decode('utf-8', errors='ignore')}")
-            elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
+            elif "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type or suffix == ".docx":
                 blocks.append(f"[Attached DOCX: {label}]\n{extract_text_from_docx(file_data)}")
         except Exception as exc:
             logging.warning("Failed to extract attachment context from %s: %s", label, exc)

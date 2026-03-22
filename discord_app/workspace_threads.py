@@ -289,6 +289,14 @@ def build_workspace_summary_view(messages: dict[str, discord.Message]) -> discor
 async def discover_workspace_card_messages(thread: discord.Thread) -> dict[str, discord.Message]:
     bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
     bot_id = bot_user.id if bot_user else None
+    history_messages = [message async for message in thread.history(limit=100, oldest_first=True)]
+    expected_titles: set[str] = set()
+    for message in history_messages:
+        metadata = parse_workspace_metadata(message.content)
+        if metadata is not None:
+            expected_titles = set(metadata.card_titles)
+            break
+
     messages: dict[str, discord.Message] = {}
     for message in await thread.pins():
         if bot_id is not None and message.author.id != bot_id:
@@ -296,6 +304,17 @@ async def discover_workspace_card_messages(thread: discord.Thread) -> dict[str, 
         title = message.embeds[0].title if message.embeds else ""
         if title:
             messages[title] = message
+
+    if not expected_titles or not expected_titles.issubset(messages.keys()):
+        for message in history_messages:
+            if bot_id is not None and message.author.id != bot_id:
+                continue
+            title = message.embeds[0].title if message.embeds else ""
+            if not title:
+                continue
+            if expected_titles and title not in expected_titles:
+                continue
+            messages.setdefault(title, message)
     return messages
 
 
