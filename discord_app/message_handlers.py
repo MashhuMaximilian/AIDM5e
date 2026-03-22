@@ -1,17 +1,76 @@
+import asyncio
 import aiohttp
 import discord
 import logging
+import re
 from config import client
 import PyPDF2
 import io
 from docx import Document
 
 from ai_services.assistant_interactions import get_assistant_response
+from ai_services.gemini_client import gemini_client
+from content_retrieval import extract_public_url_text
 from data_store.memory_management import get_assigned_memory
 from .shared_functions import check_always_on, send_response_in_chunks
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+URL_RE = re.compile(r"https?://\S+")
+
+
+def _extract_urls(text: str | None) -> list[str]:
+    if not text:
+        return []
+    cleaned_urls: list[str] = []
+    seen: set[str] = set()
+    for match in URL_RE.findall(text):
+        url = match.rstrip(".,);]>\"'")
+        if url in seen:
+            continue
+        seen.add(url)
+        cleaned_urls.append(url)
+    return cleaned_urls
+
+
+def _url_kind(url: str) -> str:
+    lowered = url.lower()
+    if "notion.so" in lowered or "notion.site" in lowered:
+        return "Notion URL"
+    if "drive.google.com" in lowered or "docs.google.com" in lowered:
+        return "Google Drive URL"
+    return "Public URL"
+
+
+async def _fetch_url_context(urls: list[str]) -> str:
+    blocks: list[str] = []
+    for url in urls:
+        label = _url_kind(url)
+        try:
+            extracted = await extract_public_url_text(url)
+            blocks.append(f"[{label}: {url}]\n{extracted}")
+            continue
+        except Exception as exc:
+            logging.warning("Direct URL fetch failed for %s, falling back to Gemini URL Context: %s", url, exc)
+
+        try:
+            fallback = await asyncio.to_thread(
+                gemini_client.generate_text_with_url_context,
+                "Read the provided public URL and extract the most relevant factual content in plain text for downstream assistant context. "
+                "Focus on the actual linked document/page. Do not answer the user directly. Do not add commentary.",
+                [url],
+                None,
+            )
+            if fallback:
+                blocks.append(f"[{label}: {url}]\n{fallback.strip()}")
+                continue
+        except Exception as exc:
+            logging.warning("Gemini URL context fallback failed for %s: %s", url, exc)
+
+        blocks.append(f"[{label} could not be fetched: {url}]")
+
+    return "\n\n".join(block for block in blocks if block.strip()).strip()
 
 @client.event
 async def on_message(message):
@@ -35,6 +94,7 @@ async def on_message(message):
 
     response_sent = False
     channel_always_on = await check_always_on(channel_id, category_id, thread_id)
+    urls = _extract_urls(message.content)
 
     async def send_response(response):
         if response:
@@ -42,26 +102,20 @@ async def on_message(message):
             return True
         return False
 
-    if channel_always_on:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
+    should_respond = channel_always_on or channel_name == "telldm" or client.user in message.mentions or bool(urls)
 
-    if channel_name == "telldm" and not response_sent:
+    if should_respond:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
         if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
-
-    if client.user in message.mentions and not response_sent:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            response = await get_assistant_response(user_message, channel_id, category_id, thread_id, assigned_memory)
+            context_block = await _fetch_url_context(urls) if urls else None
+            response = await get_assistant_response(
+                user_message,
+                channel_id,
+                category_id,
+                thread_id,
+                assigned_memory,
+                context_block=context_block,
+            )
             response_sent = await send_response(response)
         else:
             logging.error("Assigned memory ID is invalid or empty.")
