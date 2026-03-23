@@ -1,5 +1,6 @@
 import io
 import logging
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 MAX_FETCHED_TEXT_CHARS = 40000
 MAX_FETCHED_BINARY_BYTES = 15 * 1024 * 1024
+GOOGLE_DOC_RE = re.compile(r"https?://docs\.google\.com/document/(?:u/\d+/)?d/([a-zA-Z0-9_-]+)")
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -130,6 +132,16 @@ async def extract_public_url_text(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http and https URLs are supported.")
+
+    google_doc_match = GOOGLE_DOC_RE.match(url)
+    if google_doc_match:
+        document_id = google_doc_match.group(1)
+        export_url = f"https://docs.google.com/document/d/{document_id}/export?format=txt"
+        payload, content_type = await _read_http_bytes(export_url)
+        text = payload.decode("utf-8", errors="replace")
+        text = _truncate_text(text)
+        if text:
+            return text
 
     payload, content_type = await _read_http_bytes(url)
     content_type = (content_type or "").lower()

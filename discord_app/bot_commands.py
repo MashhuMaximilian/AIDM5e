@@ -72,10 +72,12 @@ logger = logging.getLogger(__name__)
 HELP_TOPICS = (
     ("overview", "Overview"),
     ("invite", "Invite"),
+    ("create", "Create"),
     ("context", "Context"),
     ("settings", "Settings"),
     ("ask", "Ask"),
     ("channel", "Channel"),
+    ("generate", "Generate"),
     ("memory", "Memory"),
     ("reference", "Reference"),
     ("feedback", "Feedback"),
@@ -137,19 +139,46 @@ def _build_help_text(topic: str) -> str:
     if topic == "invite":
         return (
             "**/invite**\n"
-            "Use this in any text channel inside a campaign category.\n"
-            "It scaffolds the default AIDM layout for that category, including `#context`, `#dm-planning`, "
-            "`#session-summary`, and `session-voice`.\n\n"
-            "**Typical flow**\n"
-            "• Create a category and one starter text channel.\n"
-            "• Run `/invite` there.\n"
-            "• Read the onboarding post in that same channel.\n"
-            "• Use `/help topic:Context` to start loading roster and session guidance."
+            "Use this to scaffold a campaign workspace.\n\n"
+            "**What it does**\n"
+            "• Creates a campaign category if you run it outside an existing one\n"
+            "• Creates the default channels like `#gameplay`, `#telldm`, `#context`, `#session-summary`, `#npcs`, `#worldbuilding`, and `#dm-planning`\n"
+            "• Creates the default voice channel `session-voice`\n"
+            "• Sets up the default memory buckets behind those channels\n\n"
+            "**When to use it**\n"
+            "• Right after installing AIDM in a new server\n"
+            "• Any time you want a fresh campaign structure without building channels by hand\n\n"
+            "**Recommended flow**\n"
+            "• Run `/invite`\n"
+            "• Read the onboarding post it sends\n"
+            "• Use `/help topic:Context`\n"
+            "• Add roster, naming, factions, and style notes with `/context add`\n"
+            "• Use `/help topic:Create` when you are ready to make player, NPC, or worldbuilding workspaces"
+        )
+    if topic == "create":
+        return (
+            "**/create**\n"
+            "Use this to create draft workspaces in threads.\n\n"
+            "**Available workspace types**\n"
+            "• `/create player`: player character workspace under `#character-sheets`\n"
+            "• `/create npc`: NPC workspace under `#npcs`\n"
+            "• `/create other`: custom worldbuilding workspace under `#worldbuilding`\n\n"
+            "**How workspaces behave**\n"
+            "• AIDM creates pinned card messages inside the thread\n"
+            "• You can drop notes, URLs, and supported files into the thread\n"
+            "• You can ask AIDM to update one card or all cards\n"
+            "• NPC and Other workspaces are draft spaces first; they are meant to be refined over time\n\n"
+            "**Good examples**\n"
+            "• `/create npc npc_name:Master Ratta note:Awakened cat scholar and retired academic`\n"
+            "• `/create other entity_name:Huka Masala note:Location, city, sunken spire district`\n"
+            "• In the thread: `update the cards using this PDF`\n\n"
+            "**Tip**\n"
+            "Be explicit when you want edits. Phrases like `update the cards`, `edit the summary card`, or `add this to the stat block` work best."
         )
     if topic == "context":
         return (
             "**/context**\n"
-            "Use this to store context that later helps transcripts, summaries, and future visual tooling.\n\n"
+            "Use this to store campaign knowledge AIDM should reuse later.\n\n"
             "**Main commands**\n"
             "• `/context add`: add or replace context from notes or selected messages\n"
             "• `/context clear`: clear one scope\n"
@@ -158,6 +187,11 @@ def _build_help_text(topic: str) -> str:
             "• `Public Evergreen`: long-lived campaign facts like roster, spellings, factions, locations.\n"
             "• `Session Only`: current or next-session guidance. It stays active until you replace it or clear it; there is no automatic expiry.\n"
             f"• `DM Private`: DM-only context. Only members with the `{DM_ROLE_NAME}` role can edit it.\n\n"
+            "**Use it for**\n"
+            "• party rosters and name spellings\n"
+            "• homebrew rules and faction notes\n"
+            "• image style direction and recurring scene references\n"
+            "• session prep notes you want summaries to respect\n\n"
             "**Good inputs**\n"
             "• Manual notes\n"
             "• `last_n` recent messages from a channel like `#gameplay`\n"
@@ -172,65 +206,124 @@ def _build_help_text(topic: str) -> str:
     if topic == "settings":
         return (
             "**/settings**\n"
-            "Use `/settings images` to control automatic post-session image generation for this campaign.\n\n"
+            "Use this to change campaign-level bot behavior.\n\n"
+            "**Current settings command**\n"
+            "• `/settings images`: controls automatic post-session image generation for this campaign\n\n"
             "**Current image settings**\n"
             "• `mode`: `off` or `auto`\n"
             "• `quality`: `auto`, `fast`, or `hq`\n"
             "• `max_scenes`: optional safety cap for auto-generated scenes\n"
             "• `include_dm_context`: whether DM-private context can inform automated images\n"
             "• `post_channel`: where automated images should be posted\n\n"
-            "Creative style still belongs in `#context` or `#dm-planning`, not in `/settings`."
+            "**Important distinction**\n"
+            "• `/settings` is for runtime behavior\n"
+            "• `#context` and `#dm-planning` are for content, style, and world knowledge\n\n"
+            "Creative style should still live in `#context` or `#dm-planning`, not in `/settings`."
         )
     if topic == "ask":
         return (
             "**/ask**\n"
-            "• `/ask dm`: rules, spells, monsters, lore, adjudication.\n"
-            "• `/ask campaign`: campaign-specific facts, homebrew, NPCs, inventory, status.\n\n"
+            "Use this when you want AIDM to answer a question directly.\n\n"
+            "**Commands**\n"
+            "• `/ask dm`: rules, spells, monsters, lore, adjudication\n"
+            "• `/ask campaign`: campaign-specific facts, homebrew, NPCs, inventory, status\n\n"
+            "**When to use which**\n"
+            "• Use `/ask dm` for general D&D questions\n"
+            "• Use `/ask campaign` for questions about your world, party, NPCs, or campaign facts\n\n"
             "Both commands can target a channel or thread when you want the answer grounded in a specific campaign area.\n"
             "• `/ask campaign` uses campaign context by default.\n"
-            "• `/ask dm` keeps context conservative by default, but you can override it with `use_context:on|off|auto`."
+            "• `/ask dm` keeps context conservative by default, but you can override it with `use_context:on|off|auto`.\n\n"
+            "**Example**\n"
+            "• `/ask campaign query_type:npc query:What does the party know about Master Ratta?`"
         )
     if topic == "channel":
         return (
             "**/channel**\n"
-            "• `/channel summarize`: recap selected messages.\n"
-            "• `/channel send`: move/copy important content into another channel or thread.\n"
-            "• `/channel start`: create a thread or channel flow.\n"
-            "• `/channel set_always_on`: decide whether AIDM listens without a mention in that target."
+            "Use this for channel-level utilities.\n\n"
+            "**Commands**\n"
+            "• `/channel summarize`: recap selected messages\n"
+            "• `/channel send`: move/copy important content into another channel or thread\n"
+            "• `/channel start`: create a thread or channel flow\n"
+            "• `/channel set_always_on`: decide whether AIDM listens without a mention in that target\n\n"
+            "**Always On means**\n"
+            "• AIDM can answer normal messages in that channel or thread without being mentioned\n"
+            "• good for `#telldm`, active workspaces, or dedicated planning threads\n"
+            "• if it is off, mention AIDM to get a response"
+        )
+    if topic == "generate":
+        return (
+            "**/generate image**\n"
+            "Use this to make one-off images from campaign material.\n\n"
+            "**Source modes**\n"
+            "• latest summary\n"
+            "• selected message IDs\n"
+            "• last N messages\n"
+            "• custom prompt\n\n"
+            "**Use it for**\n"
+            "• scene illustrations\n"
+            "• NPC/location mood pieces\n"
+            "• visual callbacks after a session\n\n"
+            "**Tip**\n"
+            "If you want recurring visual style, store that guidance in `#context` rather than rewriting it every time."
         )
     if topic == "memory":
         return (
             "**/memory**\n"
-            "• `/memory list`: inspect memory assignments for this category, channel, or thread.\n"
-            "• `/memory assign`: point a channel or thread at a memory.\n"
-            "• `/memory delete`: remove a non-default memory.\n"
-            "• `/memory reset`: clear a target memory and remove AIDM replies from that target."
+            "Use this to inspect and manage which memory bucket a channel or thread uses.\n\n"
+            "**Commands**\n"
+            "• `/memory list`: inspect memory assignments for this category, channel, or thread\n"
+            "• `/memory assign`: point a channel or thread at a memory\n"
+            "• `/memory delete`: remove a non-default memory\n"
+            "• `/memory reset`: clear a target memory and remove AIDM replies from that target\n\n"
+            "**Why this matters**\n"
+            "Memory buckets define what AIDM should treat as the current working memory for that channel or thread.\n"
+            "Most users will not need to change memory assignments often, but it is useful for advanced organization."
         )
     if topic == "reference":
         return (
             "**/reference**\n"
-            "Read selected messages, attachments, or a public URL and answer from them.\n"
-            "Use this when you want grounded extraction or explanation rather than general campaign recall."
+            "Use this when you want AIDM to answer from specific source material.\n\n"
+            "**It can read**\n"
+            "• selected messages\n"
+            "• supported attachments\n"
+            "• a public URL\n\n"
+            "Use this when you want grounded extraction or explanation rather than general campaign recall.\n\n"
+            "**Note**\n"
+            "Public URLs pasted into normal chat can also be auto-detected now, but `/reference` is still the explicit tool when you want a focused document-reading workflow."
         )
     if topic == "feedback":
         return (
             "**/feedback**\n"
-            "Use `/feedback` to capture what worked, what did not, and what should change next time. "
-            "It is the lightweight place to leave operational notes after a session or test."
+            "Use this after a session or test run to record what worked and what needs to change.\n\n"
+            "It is the lightweight place to leave operational notes, workflow feedback, or product observations.\n"
+            "AIDM posts the feedback and generates a recap in `#feedback` so it does not get lost."
         )
     return (
         "**AIDM Help**\n"
-        "Use `/help` with a topic for detail.\n\n"
+        "AIDM is a Discord campaign assistant for questions, context management, workspace drafting, summaries, references, and images.\n\n"
+        "**Best first steps for a new server**\n"
+        "1. Run `/invite`\n"
+        "2. Read the onboarding post it creates\n"
+        "3. Run `/help topic:Context`\n"
+        "4. Add roster, world facts, and DM notes with `/context add`\n"
+        "5. Use `/create npc`, `/create other`, or `/create player` when you want structured draft workspaces\n\n"
         "**Topics**\n"
         "• `Invite`: scaffold a campaign category and get started\n"
+        "• `Create`: player, NPC, and custom workspaces\n"
         "• `Context`: public/session/DM guidance for transcript and summary runs\n"
         "• `Settings`: campaign-level image automation settings\n"
         "• `Ask`: rules or campaign questions\n"
         "• `Channel`: summarization and routing tools\n"
+        "• `Generate`: one-off image generation\n"
         "• `Memory`: inspect and assign memory behavior\n"
         "• `Reference`: answer from selected messages, files, or URLs\n"
         "• `Feedback`: leave structured follow-up notes\n\n"
-        "The fastest next step for a new campaign is: run `/invite`, then use `/help topic:Context`."
+        "**How AIDM usually works**\n"
+        "• Use slash commands for explicit actions\n"
+        "• Mention AIDM when you want a reply in normal chat\n"
+        "• Turn Always On on only in places where constant replies make sense\n"
+        "• Use workspace threads to draft NPCs, locations, and characters over time\n\n"
+        "Run `/help topic:<name>` for the area you want to learn next."
     )
 
 
@@ -678,6 +771,27 @@ async def _seed_workspace_thread(
     )
     if response:
         await send_response_in_chunks(thread, response)
+
+
+async def _pin_recent_bot_messages(thread: discord.Thread, *, limit: int = 20) -> None:
+    bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
+    bot_id = bot_user.id if bot_user else None
+    if bot_id is None:
+        return
+    if bot_user is not None and not thread.permissions_for(bot_user).manage_messages:
+        logger.warning("Cannot pin setup messages in thread %s because the bot lacks Manage Messages permission", thread.id)
+        return
+
+    await asyncio.sleep(1)
+
+    recent_messages = [message async for message in thread.history(limit=limit)]
+    for message in reversed(recent_messages):
+        if message.author.id != bot_id:
+            continue
+        try:
+            await message.pin(reason="AIDM workspace setup")
+        except discord.HTTPException as exc:
+            logger.warning("Failed to pin setup message %s in thread %s: %s", message.id, thread.id, exc)
 
 def setup_commands(tree, get_assistant_response):
     register_command_modules(tree, get_assistant_response, globals())

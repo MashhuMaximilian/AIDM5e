@@ -376,8 +376,8 @@ async def sync_workspace_slots(thread: discord.Thread, bundle: PlayerWorkspaceBu
             message = await thread.send(content=content, embed=embed, view=view)
             try:
                 await message.pin(reason="AIDM character workspace slot")
-            except discord.HTTPException:
-                logger.warning("Failed to pin workspace slot %s in thread %s", title, thread.id)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to pin workspace slot %s in thread %s: %s", title, thread.id, exc)
         else:
             current_description = message.embeds[0].description if message.embeds else ""
             target_description = embed.description if embed else ""

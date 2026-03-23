@@ -227,18 +227,11 @@ def dedent_block(text: str) -> str:
 
 def build_workspace_welcome_text(definition: WorkspaceDefinition) -> str:
     human = {
-        "npc": f"NPC workspace ready for {definition.entity_name}. Use this thread as the draft workspace.",
-        "other": f"Custom workspace ready for {definition.entity_name}. Use this thread as the draft workspace.",
-        "player": f"Character workspace ready for {definition.entity_name}. Use this thread as the draft workspace.",
+        "npc": f"NPC workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
+        "other": f"Custom workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
+        "player": f"Character workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
     }[definition.kind]
-    metadata = build_workspace_metadata_block(
-        kind=definition.kind,
-        entity_name=definition.entity_name,
-        user_note=definition.user_note,
-        card_inventory_text=definition.card_inventory_text,
-        cascade_rules_text=definition.cascade_rules_text,
-    )
-    return f"{human}\nPost new notes and source material here as it evolves.\n\n{metadata}"
+    return f"{human}\nPost new notes and source material here as it evolves."
 
 
 def build_workspace_embed(title: str, body: str, *, summary: bool = False) -> discord.Embed:
@@ -332,8 +325,8 @@ async def sync_workspace_cards(thread: discord.Thread, cards: dict[str, str]) ->
             message = await thread.send(content="", embed=embed, view=view)
             try:
                 await message.pin(reason="AIDM workspace slot")
-            except discord.HTTPException:
-                logger.warning("Failed to pin workspace slot %s in thread %s", title, thread.id)
+            except discord.HTTPException as exc:
+                logger.warning("Failed to pin workspace slot %s in thread %s: %s", title, thread.id, exc)
         else:
             current_title = message.embeds[0].title if message.embeds else ""
             current_description = message.embeds[0].description if message.embeds else ""
@@ -347,6 +340,12 @@ async def sync_workspace_cards(thread: discord.Thread, cards: dict[str, str]) ->
     if summary_message is not None:
         final_view = build_workspace_summary_view(resolved)
         await summary_message.edit(view=final_view)
+
+    for title, message in resolved.items():
+        try:
+            await message.pin(reason="AIDM workspace slot")
+        except discord.HTTPException as exc:
+            logger.warning("Failed to pin workspace slot %s in thread %s: %s", title, thread.id, exc)
     return resolved
 
 
@@ -360,16 +359,43 @@ def build_card_update_prompt(
         f"### CURRENT CARD: {title}\n{body.strip() or 'Needs review.'}"
         for title, body in card_bodies.items()
     )
-    target_block = "\n".join(f"- {title}" for title in target_titles)
+    target_block = "\n".join(f"- {title}" for title in target_titles) if target_titles else "- No existing card was explicitly named."
     return (
         "The user asked you to update workspace cards.\n\n"
         f"Target cards:\n{target_block}\n\n"
         f"User request:\n{request_text.strip()}\n\n"
         f"Current card contents:\n{cards_block}\n\n"
-        "Return only the full updated bodies for the cards that should change, using exactly this format:\n"
+        "Do not create new cards unless the user explicitly asked for a new separate card.\n"
+        "Do not return explanations, chat, or analysis.\n"
+        "Return only the full updated card bodies using exactly this format:\n"
         "### CARD: Card Title\n"
         "Full card body\n\n"
         "Do not include commentary before or after the card bodies."
+    )
+
+
+def build_card_creation_prompt(
+    *,
+    request_text: str,
+    card_bodies: dict[str, str],
+) -> str:
+    cards_block = "\n\n".join(
+        f"### CURRENT CARD: {title}\n{body.strip() or 'Needs review.'}"
+        for title, body in card_bodies.items()
+    )
+    return (
+        "The user asked you to create a brand-new separate workspace card.\n\n"
+        f"User request:\n{request_text.strip()}\n\n"
+        f"Current card contents:\n{cards_block}\n\n"
+        "Rules:\n"
+        "- Create exactly one new polished card.\n"
+        "- Do not modify or rewrite any existing card.\n"
+        "- Choose a clear card title.\n"
+        "- The new card should be a proper UI card body, not a chat reply.\n"
+        "- Return only the new card using exactly this format:\n"
+        "### CARD: Card Title\n"
+        "Full card body\n\n"
+        "Do not include commentary before or after the card body."
     )
 
 

@@ -19,11 +19,13 @@ from discord_app.player_workspace.prompting import (
     build_player_workspace_system_prompt,
 )
 from discord_app.workspace_threads import (
+    build_card_creation_prompt,
     build_card_update_prompt,
     discover_workspace_card_messages,
     parse_card_update_response,
     parse_workspace_metadata,
     parse_workspace_thread,
+    sync_workspace_cards,
 )
 from .shared_functions import check_always_on, send_response_in_chunks
 
@@ -104,6 +106,26 @@ def _is_explicit_edit_request(text: str | None) -> bool:
     return any(word in content for word in (" update ", " change ", " add ", " edit ")) or content.startswith(("update ", "change ", "add ", "edit "))
 
 
+def _is_workspace_card_action_request(text: str | None) -> bool:
+    content = (text or "").lower().strip()
+    if not content:
+        return False
+    action_words = ("update", "change", "add", "edit", "create", "make")
+    card_words = ("card", "cards")
+    return any(word in content for word in action_words) and any(word in content for word in card_words)
+
+
+def _is_new_card_request(text: str | None) -> bool:
+    content = (text or "").lower()
+    return (
+        "new card" in content
+        or "separate card" in content
+        or "create a card" in content
+        or "create new card" in content
+        or "make a card" in content
+    )
+
+
 def _card_aliases(title: str) -> set[str]:
     cleaned = re.sub(r"[^a-z0-9& ]+", " ", title.lower()).strip()
     aliases = {cleaned, cleaned.replace("&", "and").strip()}
@@ -128,7 +150,7 @@ def _target_card_titles(message_text: str, card_titles: list[str]) -> list[str]:
                 break
     if matched:
         return matched
-    if any(token in lowered for token in (" card ", " cards ", " all cards ", " all card ")):
+    if any(token in lowered for token in (" all cards ", " all card ", " update all cards ", " change all cards ", " edit all cards ")):
         return list(card_titles)
     return matched
 
@@ -162,6 +184,36 @@ async def _fetch_attachment_context(attachments: list[discord.Attachment]) -> st
                 blocks.append(f"[Attached DOCX: {label}]\n{extract_text_from_docx(file_data)}")
         except Exception as exc:
             logging.warning("Failed to extract attachment context from %s: %s", label, exc)
+    return "\n\n".join(block for block in blocks if block.strip()).strip()
+
+
+async def _collect_recent_workspace_context(message: discord.Message, *, limit: int = 6) -> str:
+    note_lines: list[str] = []
+    urls: list[str] = []
+    attachments: list[discord.Attachment] = []
+
+    async for prior_message in message.channel.history(limit=limit, before=message, oldest_first=True):
+        if prior_message.author == client.user or prior_message.is_system():
+            continue
+        content = (prior_message.content or "").strip()
+        if content:
+            note_lines.append(f"{prior_message.author.display_name}: {content}")
+            urls.extend(_extract_urls(content))
+        if prior_message.attachments:
+            attachments.extend(list(prior_message.attachments))
+
+    deduped_urls = list(dict.fromkeys(urls))
+    blocks: list[str] = []
+    if note_lines:
+        blocks.append("[Recent Workspace Notes]\n" + "\n".join(note_lines[-limit:]))
+    if deduped_urls:
+        recent_url_context = await _fetch_url_context(deduped_urls)
+        if recent_url_context:
+            blocks.append("[Recent Workspace URLs]\n" + recent_url_context)
+    if attachments:
+        recent_attachment_context = await _fetch_attachment_context(attachments[:4])
+        if recent_attachment_context:
+            blocks.append("[Recent Workspace Attachments]\n" + recent_attachment_context)
     return "\n\n".join(block for block in blocks if block.strip()).strip()
 
 
@@ -202,38 +254,48 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
     url_context = await _fetch_url_context(urls) if urls else ""
     attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
     extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
+    recent_context = await _collect_recent_workspace_context(message)
 
     target_titles = _target_card_titles(message.content, list(card_messages.keys()))
-    if _is_explicit_edit_request(message.content) and target_titles:
+    if _is_workspace_card_action_request(message.content):
         card_bodies = {
             title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
             for title, card_message in card_messages.items()
         }
+        prompt_text = build_card_creation_prompt(
+            request_text=message.content,
+            card_bodies=card_bodies,
+        ) if _is_new_card_request(message.content) else build_card_update_prompt(
+            request_text=message.content,
+            card_bodies=card_bodies,
+            target_titles=target_titles,
+        )
         response = await get_assistant_response(
-            build_card_update_prompt(
-                request_text=message.content,
-                card_bodies=card_bodies,
-                target_titles=target_titles,
-            ),
+            prompt_text,
             channel_id,
             category_id,
             thread_id,
             assigned_memory,
-            context_block=extra_context or None,
+            context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
             system_prompt=system_prompt,
         )
         updates = parse_card_update_response(response)
         if not updates:
+            await send_response_in_chunks(
+                message.channel,
+                "I could not turn that into card changes yet. Please mention which card to update, or say `create a new card for ...`."
+            )
             return True
-        changed_titles: list[str] = []
-        for title, new_body in updates.items():
-            target_message = card_messages.get(title)
-            if target_message is None:
-                continue
-            embed = target_message.embeds[0].copy() if target_message.embeds else discord.Embed(title=title, color=discord.Color.dark_grey())
-            embed.description = new_body
-            await target_message.edit(embed=embed)
-            changed_titles.append(title)
+        if not _is_new_card_request(message.content) and not target_titles and len(updates) > 1:
+            await send_response_in_chunks(
+                message.channel,
+                "I need a more specific target card for that update. Please name the card, or say `update all cards`."
+            )
+            return True
+        merged_cards = dict(card_bodies)
+        merged_cards.update(updates)
+        resolved_messages = await sync_workspace_cards(message.channel, merged_cards)
+        changed_titles = [title for title in updates.keys() if title in resolved_messages]
         if changed_titles:
             await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
         return True
@@ -243,7 +305,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
             for title, card_message in card_messages.items()
         )
-        context_block = "\n\n".join(block for block in [card_context, extra_context] if block).strip() or None
+        context_block = "\n\n".join(block for block in [card_context, recent_context, extra_context] if block).strip() or None
         response = await get_assistant_response(
             message.content,
             channel_id,
@@ -258,12 +320,22 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         return True
 
     if message.attachments or urls:
+        acknowledgment = (
+            "I received the new source material for this workspace. "
+            "Tell me `update the cards` when you want me to apply it."
+        )
+        if not (extra_context or recent_context):
+            acknowledgment = (
+                "I received the source material, but I could not read it cleanly. "
+                "If it is a Google Doc, make sure public access is enabled, or attach/export a PDF."
+            )
+        await send_response_in_chunks(message.channel, acknowledgment)
         return True
     return False
 
 @client.event
 async def on_message(message):
-    if message.author == client.user:
+    if message.author == client.user or message.is_system():
         return
     logging.info(f"Received message from {message.author}")
 

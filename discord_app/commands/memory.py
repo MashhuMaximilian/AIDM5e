@@ -235,15 +235,23 @@ def register(memory_group, h) -> None:
             await h.reset_memory_history(assigned_memory)
 
             deleted_discord_msgs = 0
+            start_id = int(starting_with_message_id) if starting_with_message_id else None
             async for message in target.history(limit=500):
-                if message.author.id == interaction.client.user.id:
-                    if not starting_with_message_id or int(message.id) >= int(starting_with_message_id):
-                        try:
-                            await message.delete()
-                            deleted_discord_msgs += 1
-                            await h.asyncio.sleep(0.35)
-                        except (discord.Forbidden, discord.HTTPException) as e:
-                            logging.warning(f"Could not delete message {message.id}: {e}")
+                should_delete = False
+                if start_id is not None:
+                    should_delete = int(message.id) >= start_id
+                else:
+                    should_delete = message.author.id == interaction.client.user.id
+
+                if not should_delete:
+                    continue
+
+                try:
+                    await message.delete()
+                    deleted_discord_msgs += 1
+                    await h.asyncio.sleep(0.35)
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    logging.warning(f"Could not delete message {message.id}: {e}")
 
             await interaction.followup.send(
                 f"🧹 **Reset complete!**\n"
