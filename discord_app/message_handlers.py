@@ -146,6 +146,14 @@ def _is_new_card_request(text: str | None) -> bool:
 def _card_aliases(title: str) -> set[str]:
     cleaned = re.sub(r"[^a-z0-9& ]+", " ", title.lower()).strip()
     aliases = {cleaned, cleaned.replace("&", "and").strip()}
+    parts = [part.strip() for part in cleaned.split(":", 1)]
+    if len(parts) == 2:
+        prefix, remainder = parts
+        if remainder:
+            aliases.add(remainder)
+            aliases.add(remainder.replace("&", "and").strip())
+        if prefix:
+            aliases.add(prefix)
     if cleaned.endswith(" card"):
         aliases.add(cleaned[:-5].strip())
     if title == "Character Card":
@@ -157,19 +165,53 @@ def _card_aliases(title: str) -> set[str]:
     return {alias for alias in aliases if alias}
 
 
+def _normalize_match_text(text: str | None) -> str:
+    return re.sub(r"[^a-z0-9& ]+", " ", (text or "").lower()).strip()
+
+
+def _tokenize_match_text(text: str | None) -> set[str]:
+    normalized = _normalize_match_text(text).replace("&", "and")
+    return {token for token in normalized.split() if token}
+
+
 def _target_card_titles(message_text: str, card_titles: list[str]) -> list[str]:
-    lowered = f" {re.sub(r'[^a-z0-9& ]+', ' ', (message_text or '').lower())} "
+    normalized_message = _normalize_match_text(message_text)
+    lowered = f" {normalized_message} "
+    message_tokens = _tokenize_match_text(message_text)
     matched: list[str] = []
+    scored_matches: list[tuple[int, str]] = []
     for title in card_titles:
+        aliases = _card_aliases(title)
         for alias in _card_aliases(title):
             if f" {alias} " in lowered:
                 matched.append(title)
                 break
+        if title in matched:
+            continue
+
+        title_tokens = _tokenize_match_text(title)
+        alias_tokens = [_tokenize_match_text(alias) for alias in aliases]
+        candidate_token_sets = [tokens for tokens in [title_tokens, *alias_tokens] if tokens]
+
+        best_score = 0
+        for token_set in candidate_token_sets:
+            overlap = len(token_set & message_tokens)
+            if overlap >= max(1, len(token_set) - 1):
+                best_score = max(best_score, overlap)
+        if best_score:
+            scored_matches.append((best_score, title))
     if matched:
         return matched
     if any(token in lowered for token in (" all cards ", " all card ", " update all cards ", " change all cards ", " edit all cards ")):
         return list(card_titles)
-    return matched
+
+    if scored_matches:
+        scored_matches.sort(key=lambda item: (-item[0], len(item[1])))
+        top_score = scored_matches[0][0]
+        top_titles = [title for score, title in scored_matches if score == top_score]
+        if len(top_titles) == 1:
+            return top_titles
+    return []
 
 
 async def _fetch_attachment_context(attachments: list[discord.Attachment]) -> str:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ai_services.gemini_client import gemini_client
 
-from .rendering import build_thread_welcome_text
 from .schema import PlayerWorkspaceBundle, PlayerWorkspaceRequest
 from .service import CreatePlayerService
 

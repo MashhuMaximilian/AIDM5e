@@ -60,7 +60,7 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
       - `> **Spellcasting Ability**: ...`
       - `🛡️ **AC: `...`**  |  🎯 **DC: `...`** | 💎 **PB: `...`**  | 🏃 **SPD: `...`**`
       - `🎲 **Hit Dice:** `current / max [die]``
-      - `**### 💟 HP: [ current / max ]**`
+      - `**💟 HP: [ current / max ]**`
       - a 45-block HP bar using `█` and `░`
     - HP bar rule: filled blocks = round(current_hp / max_hp * 45); empty blocks = 45 - filled
     - Preserve the HP bar whenever the Summary card is revised
@@ -200,6 +200,25 @@ def build_other_prepass_prompt(user_note: str | None) -> str:
     return _append_card_formatting_prompt(prompt)
 
 
+def build_thread_welcome_text(request: PlayerWorkspaceRequest) -> str:
+    display_name = request.character_name or "this character"
+    if request.mode == "idea":
+        return (
+            f"**Character workspace ready for {display_name}.**\n"
+            "Use this thread as the draft workspace.\n"
+            "Add concept notes, references, and source material here as the build takes shape.\n"
+            "Nothing here is campaign canon until someone explicitly publishes a summary."
+            "**If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.**"
+        )
+    return (
+        f"**Character workspace ready for {display_name}.**\n"
+        "Use this thread as the draft workspace.\n"
+        "Post new notes and source material here as the sheet evolves.\n"
+        "Nothing here is campaign canon until someone explicitly publishes a summary."
+        "**If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.**"
+    )
+
+
 STANDARD_TEMPLATE = dedent(
     """
     Here is a standardized output. I attached a pdf, and I want you to give me back the contents of it, but in this standardized manner below. Meticulously scan all features and equipment for limited resources (pools, charges, daily uses, short-rest uses, long-rest uses, and item charges) and place them in the correct section. Ensure all numerical bonuses from magic items or feats are fully calculated into the final AC, attack rolls, saving throw modifiers, and spellcasting values.
@@ -214,7 +233,7 @@ STANDARD_TEMPLATE = dedent(
 
     🎲 **Hit Dice:** `[Current Hit Dice] / [Max Hit Dice] [[Hit Die]]`
 
-    **### 💟 HP: [ [Current HP] / [Max HP] ]**
+    **💟 HP: [ [Current HP] / [Max HP] ]**
     `█████████████████████████████████████████████`
 
     **🔋 RESOURCE TRACKING**
@@ -544,3 +563,45 @@ def build_import_reference_links_prompt(
 
 def build_idea_prompt(request: PlayerWorkspaceRequest) -> str:
     return build_player_import_prompt(request)
+
+
+def build_format_pass_prompt(raw_markdown: str) -> str:
+    """
+    Second-pass prompt. Takes the raw markdown from Pass 1
+    and asks Gemini to:
+    1. Fix any section that doesn't match the STANDARD_TEMPLATE
+       format exactly (heading names, code block structure,
+       dot-padding alignment, tracker circles).
+    2. Fill in any section that is blank or says 'Needs review.'
+       if the information exists elsewhere in the draft.
+    3. Backfill the Reference Links section with exact trusted
+       URLs for class, subclass, race, feats, spells, and items
+       present on this character. Trusted sources: D&D Beyond,
+       5e.tools, 5esrd.com, dnd5e.wikidot.com, rpgbot.net,
+       Roll20, AideDD.
+    4. Return the complete corrected sheet. Nothing else — no
+       commentary before or after.
+    """
+
+    parts = [
+        "You are AIDM. Below is a character sheet draft that was generated from a PDF import.",
+        "Your only job is to clean and complete it.",
+        "Rules:",
+        "- Fix any formatting that does not match the template exactly: heading names, code block structure, dot-padding alignment, tracker circles (use ◯ not ○).",
+        "- Fill in any section that is blank or says 'Needs review.' if the data exists anywhere else in the draft.",
+        "- Backfill the Reference Links section. Include exact trusted URLs for every class, subclass, race, feat, spell, and item identifiable on this character.",
+        "- Trusted sources: D&D Beyond, 5e.tools, 5esrd.com, dnd5e.wikidot.com, rpgbot.net, Roll20, AideDD.",
+        "- Omit a category only if you cannot confidently identify any exact URL for it.",
+        "- Preserve the Summary card combat snapshot and HP bar. The HP bar must always use exactly 45 total blocks.",
+        "- Return the complete corrected sheet in exactly the same structure as the template below.",
+        "- Do not add commentary before or after the sheet.",
+        "",
+        "Template structure to follow:",
+        "",
+        STANDARD_TEMPLATE,
+        "",
+        "Draft to fix:",
+        "",
+        raw_markdown.strip(),
+    ]
+    return "\n\n".join(parts).strip()

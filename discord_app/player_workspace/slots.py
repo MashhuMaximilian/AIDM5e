@@ -12,7 +12,6 @@ import discord
 from content_retrieval import extract_text_from_local_file, select_messages
 from data_store.db_repository import ensure_channel_for_category
 
-from .rendering import build_player_character_card
 from .schema import PlayerWorkspaceBundle, WorkspaceSlots
 
 
@@ -403,26 +402,8 @@ async def sync_workspace_slots(thread: discord.Thread, bundle: PlayerWorkspaceBu
             "links": resolved_messages["Reference Links"].jump_url if resolved_messages.get("Reference Links") else "",
             "items": resolved_messages["Items Card"].jump_url if resolved_messages.get("Items Card") else "",
         }
-        final_character_body = build_player_character_card(
-            bundle.request,
-            bundle.draft,
-            bundle.validation,
-            detail_links=detail_links,
-        )
-        final_content, final_embed = build_slot_payload("Character Card", final_character_body)
         final_view = build_summary_view(detail_links)
-        current_description = character_message.embeds[0].description if character_message.embeds else ""
-        current_title = character_message.embeds[0].title if character_message.embeds else ""
-        if (
-            (character_message.content or "") != final_content
-            or current_description != final_embed.description
-            or current_title != final_embed.title
-        ):
-            character_message = await character_message.edit(content=final_content, embed=final_embed, view=final_view)
-            resolved_ids["Character Card"] = character_message.id
-            resolved_messages["Character Card"] = character_message
-        else:
-            await character_message.edit(view=final_view)
+        await character_message.edit(view=final_view)
 
     await _cleanup_workspace_messages(thread, keep_ids)
 

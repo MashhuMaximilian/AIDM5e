@@ -5,6 +5,7 @@ import asyncio
 from config import GEMINI_CHAT_MODEL
 
 from ..prompting import (
+    build_format_pass_prompt,
     build_import_prompt,
     build_import_reference_links_prompt,
     build_import_repair_prompt,
@@ -60,6 +61,23 @@ class ImportStrategy:
             request,
             current_markdown=current_markdown,
         )
+        if request.source.file_paths:
+            return await asyncio.to_thread(
+                gemini.generate_text_from_files,
+                list(request.source.file_paths),
+                prompt,
+                GEMINI_CHAT_MODEL,
+            )
+        return await asyncio.to_thread(gemini.generate_text, prompt)
+
+    async def format_pass(
+        self,
+        request: PlayerWorkspaceRequest,
+        gemini,
+        *,
+        raw_markdown: str,
+    ) -> str:
+        prompt = build_format_pass_prompt(raw_markdown)
         if request.source.file_paths:
             return await asyncio.to_thread(
                 gemini.generate_text_from_files,
