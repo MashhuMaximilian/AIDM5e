@@ -155,8 +155,9 @@ def _normalize_skill_name(name: str) -> str:
     return aliases.get(normalized, name.strip())
 
 
-def _render_profile_identity_table(draft: CharacterDraft) -> str:
+def _render_profile_identity_table(draft: CharacterDraft, fallback_player_name: str | None = None) -> str:
     identity = draft.identity
+    player_name = _normalize_player_name(identity.player_name, fallback_player_name) or "Unknown"
     return "\n".join(
         [
             "```",
@@ -167,7 +168,7 @@ def _render_profile_identity_table(draft: CharacterDraft) -> str:
             f"CLASS.....: {identity.class_name or 'Unknown'}",
             f"SUBCLASS..: {identity.subclass or 'Unknown'}",
             f"XP........: {identity.xp or 'Unknown'}",
-            f"PLAYER....: {identity.player_name or 'Unknown'}",
+            f"PLAYER....: {player_name}",
             f"BACKGROUND: {identity.background or 'Unknown'}",
             f"ALIGNMENT.: {identity.alignment or 'Unknown'}",
             f"DEITY.....: {identity.deity or 'Unknown'}",
@@ -386,6 +387,16 @@ def _build_resource_tracking_from_resource_pools(resource_pools: list[ResourcePo
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+def _normalize_player_name(value: str | None, fallback: str | None = None) -> str | None:
+    candidate = (value or "").strip()
+    if candidate and candidate.lower() not in {"unknown", "needs review."}:
+        return candidate
+    fallback_candidate = (fallback or "").strip()
+    if fallback_candidate and fallback_candidate.lower() not in {"unknown", "needs review."}:
+        return fallback_candidate
+    return candidate or fallback_candidate or None
+
+
 def _extract_summary_build(summary_text: str, fallback: str) -> str:
     match = re.search(r"BUILD\.{0,}:\**\s*(.+)", summary_text or "", re.IGNORECASE)
     if match:
@@ -422,6 +433,96 @@ def _extract_summary_quote(summary_text: str, fallback: str | None) -> str:
 def _extract_inline_spellcasting(summary_text: str) -> str:
     match = re.search(r"`?Spellcasting Ability:\s*([A-Za-z]+)\s*\(([^)]+)\)`?", summary_text or "", re.IGNORECASE)
     return f"`Spellcasting Ability: {match.group(1).strip().title()} ({match.group(2).strip()})`" if match else ""
+
+
+def _extract_spellcasting_dc(spellcasting_text: str) -> str:
+    match = re.search(r"\bDC\s*([+-]?\d+)\b", spellcasting_text or "", re.IGNORECASE)
+    return match.group(1).strip() if match else "Unknown"
+
+
+def _core_status_map(core_status_text: str) -> dict[str, str]:
+    left_rows, _ = _parse_core_status_rows(core_status_text)
+    return {label.upper(): value for label, value in left_rows}
+
+
+def _format_speed_for_summary(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (value or "").strip())
+    cleaned = re.sub(r"(\d+)\s*ft\.?", r"\1ft", cleaned, flags=re.IGNORECASE)
+    return cleaned or "Unknown"
+
+
+def _format_hit_dice_value(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (value or "").strip())
+    if not cleaned:
+        return "Unknown"
+    slash_match = re.match(r"(\d+)\s*/\s*(\d+)\s*[\[(]?\s*(d\d+)\s*[\])]?$", cleaned, re.IGNORECASE)
+    if slash_match:
+        return f"{slash_match.group(1)} / {slash_match.group(2)} [{slash_match.group(3).lower()}]"
+    compact = cleaned.replace(" ", "")
+    dice_match = re.match(r"(\d+)d(\d+)$", compact, re.IGNORECASE)
+    if dice_match:
+        count = dice_match.group(1)
+        return f"{count} / {count} [d{dice_match.group(2)}]"
+    return cleaned
+
+
+def _extract_hit_dice(resource_pools: list[ResourcePool], core_status_text: str) -> str:
+    for pool in resource_pools:
+        if (pool.name or "").strip().lower() == "hit dice":
+            return _format_hit_dice_value(pool.value)
+    _, right_rows = _parse_core_status_rows(core_status_text)
+    for label, value in right_rows:
+        if label.upper() == "HIT DICE":
+            return _format_hit_dice_value(value)
+    return "Unknown"
+
+
+def _extract_hp_values(core_status_text: str) -> tuple[int | None, int | None]:
+    hp_value = _core_status_map(core_status_text).get("HP", "")
+    match = re.search(r"(\d+)\s*/\s*(\d+)", hp_value)
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _render_hp_bar(current_hp: int | None, max_hp: int | None) -> str:
+    if current_hp is None or max_hp is None or max_hp <= 0:
+        return ""
+    ratio = max(0.0, min(1.0, current_hp / max_hp))
+    filled = round(ratio * 45)
+    empty = 45 - filled
+    return f"`{'█' * filled}{'░' * empty}`"
+
+
+def _render_summary_combat_snapshot(
+    core_status_text: str,
+    resource_pools: list[ResourcePool],
+    spellcasting_text: str,
+) -> str:
+    core = _core_status_map(core_status_text)
+    ac = core.get("AC", "Unknown")
+    pb = core.get("PB", "Unknown")
+    speed = _format_speed_for_summary(core.get("SPEED", "Unknown"))
+    dc = _extract_spellcasting_dc(spellcasting_text)
+    hit_dice = _extract_hit_dice(resource_pools, core_status_text)
+    current_hp, max_hp = _extract_hp_values(core_status_text)
+    hp_bar = _render_hp_bar(current_hp, max_hp)
+
+    parts = [
+        f"🛡️ **AC: `{ac}`**  |  🎯 **DC: `{dc}`** | 💎 **PB: `{pb}`**  | 🏃 **SPD: `{speed}`**",
+        "",
+        f"🎲 **Hit Dice:** `{hit_dice}`",
+    ]
+    if current_hp is not None and max_hp is not None:
+        parts.extend(
+            [
+                "",
+                f"**### 💟 HP: [ {current_hp} / {max_hp} ]**",
+            ]
+        )
+        if hp_bar:
+            parts.append(hp_bar)
+    return "\n".join(parts).strip()
 
 
 def _build_resource_tracking(rules_text: str) -> str:
@@ -625,6 +726,7 @@ def build_player_character_card(
     detail_links: dict[str, str] | None = None,
 ) -> str:
     name = draft.identity.character_name or request.character_name or "Unnamed Character"
+    draft.identity.player_name = _normalize_player_name(draft.identity.player_name, request.player_name)
     summary_text = draft.sections.summary
     concept = _extract_summary_quote(summary_text, draft.concept)
     build_line = _extract_summary_build(summary_text, draft.identity.build_line or "Needs review.")
@@ -635,6 +737,7 @@ def build_player_character_card(
         resource_tracking = _build_resource_tracking_from_pools(draft.sections.core_status)
     spell_slots = _render_summary_spell_slots(summary_text, draft.sections.rules)
     spellcasting = _extract_inline_spellcasting(summary_text) or _render_spellcasting_ability_excerpt(draft.sections.rules, draft.sections.actions)
+    combat_snapshot = _render_summary_combat_snapshot(draft.sections.core_status, draft.resource_pools, spellcasting)
     parts = [f"**{name.upper()}**"]
     if concept:
         parts.append(f"> {concept}")
@@ -647,6 +750,9 @@ def build_player_character_card(
         else:
             spellcasting_value = spellcasting_line
         parts.append(f"> **Spellcasting Ability**: {spellcasting_value}")
+    if combat_snapshot:
+        parts.append("")
+        parts.append(combat_snapshot)
     if resource_tracking:
         parts.append(resource_tracking)
     if spell_slots:
@@ -665,7 +771,7 @@ def render_player_workspace_cards(
     profile_body = _coalesce(
         f"### {character_name}",
         _strip_duplicate_profile_heading(_strip_first_code_block(draft.sections.profile), character_name),
-        _render_profile_identity_table(draft),
+        _render_profile_identity_table(draft, request.player_name),
         _render_core_status_table(draft.sections.core_status, build_line=draft.identity.build_line or request.character_name or "Needs review."),
     )
     skills_actions_body = _coalesce(
@@ -704,10 +810,13 @@ def build_thread_welcome_text(request: PlayerWorkspaceRequest) -> str:
             "Use this thread as the draft workspace.\n"
             "Add concept notes, references, and source material here as the build takes shape.\n"
             "Nothing here is campaign canon until someone explicitly publishes a summary."
+            "**If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.**"
         )
     return (
         f"**Character workspace ready for {display_name}.**\n"
         "Use this thread as the draft workspace.\n"
         "Post new notes and source material here as the sheet evolves.\n"
         "Nothing here is campaign canon until someone explicitly publishes a summary."
+        "**If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.**"
+
     )

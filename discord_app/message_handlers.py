@@ -33,6 +33,7 @@ from .shared_functions import check_always_on, send_response_in_chunks
 logging.basicConfig(level=logging.INFO)
 
 URL_RE = re.compile(r"https?://\S+")
+PLAYER_ROW_RE = re.compile(r"PLAYER\.*:\s*([^\n`]+)", re.IGNORECASE)
 
 
 def _extract_urls(text: str | None) -> list[str]:
@@ -86,6 +87,22 @@ async def _fetch_url_context(urls: list[str]) -> str:
         blocks.append(f"[{label} could not be fetched: {url}]")
 
     return "\n\n".join(block for block in blocks if block.strip()).strip()
+
+
+async def _start_thinking_indicator(message: discord.Message) -> discord.Message | None:
+    try:
+        return await message.channel.send("*AIDM is thinking...*")
+    except discord.HTTPException:
+        return None
+
+
+async def _stop_thinking_indicator(indicator_message: discord.Message | None) -> None:
+    if indicator_message is None:
+        return
+    try:
+        await indicator_message.delete()
+    except discord.HTTPException:
+        pass
 
 
 def _is_workspace_thread(channel: discord.abc.Messageable) -> bool:
@@ -217,12 +234,29 @@ async def _collect_recent_workspace_context(message: discord.Message, *, limit: 
     return "\n\n".join(block for block in blocks if block.strip()).strip()
 
 
+def _extract_player_name_from_workspace_cards(card_messages: dict[str, discord.Message]) -> str | None:
+    for title in ("Profile Card", "Character Card"):
+        card_message = card_messages.get(title)
+        if card_message is None:
+            continue
+        body = card_message.embeds[0].description if card_message.embeds else (card_message.content or "")
+        if not body:
+            continue
+        match = PLAYER_ROW_RE.search(body)
+        if not match:
+            continue
+        candidate = match.group(1).strip()
+        if candidate and candidate.lower() not in {"unknown", "needs review."}:
+            return candidate
+    return None
+
+
 async def _workspace_system_prompt(thread: discord.Thread, card_messages: dict[str, discord.Message]) -> str | None:
     kind, entity_name = parse_workspace_thread(thread.name)
     if kind is None or not entity_name:
         return None
     if kind == "player":
-        return build_player_workspace_system_prompt(entity_name, None)
+        return build_player_workspace_system_prompt(entity_name, _extract_player_name_from_workspace_cards(card_messages))
     if kind == "npc":
         return build_npc_workspace_system_prompt(entity_name)
 
@@ -246,92 +280,97 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
     if not system_prompt:
         return False
 
-    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-    if not assigned_memory:
-        return False
-
-    urls = _extract_urls(message.content)
-    url_context = await _fetch_url_context(urls) if urls else ""
-    attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
-    extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
-    recent_context = await _collect_recent_workspace_context(message)
-
     target_titles = _target_card_titles(message.content, list(card_messages.keys()))
-    if _is_workspace_card_action_request(message.content):
-        card_bodies = {
-            title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
-            for title, card_message in card_messages.items()
-        }
-        prompt_text = build_card_creation_prompt(
-            request_text=message.content,
-            card_bodies=card_bodies,
-        ) if _is_new_card_request(message.content) else build_card_update_prompt(
-            request_text=message.content,
-            card_bodies=card_bodies,
-            target_titles=target_titles,
-        )
-        response = await get_assistant_response(
-            prompt_text,
-            channel_id,
-            category_id,
-            thread_id,
-            assigned_memory,
-            context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
-            system_prompt=system_prompt,
-        )
-        updates = parse_card_update_response(response)
-        if not updates:
-            await send_response_in_chunks(
-                message.channel,
-                "I could not turn that into card changes yet. Please mention which card to update, or say `create a new card for ...`."
-            )
-            return True
-        if not _is_new_card_request(message.content) and not target_titles and len(updates) > 1:
-            await send_response_in_chunks(
-                message.channel,
-                "I need a more specific target card for that update. Please name the card, or say `update all cards`."
-            )
-            return True
-        merged_cards = dict(card_bodies)
-        merged_cards.update(updates)
-        resolved_messages = await sync_workspace_cards(message.channel, merged_cards)
-        changed_titles = [title for title in updates.keys() if title in resolved_messages]
-        if changed_titles:
-            await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
-        return True
+    needs_assistant = _is_workspace_card_action_request(message.content) or _has_clear_question(message.content)
+    indicator_message = await _start_thinking_indicator(message) if needs_assistant else None
+    try:
+        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+        if not assigned_memory:
+            return False
 
-    if _has_clear_question(message.content):
-        card_context = "\n\n".join(
-            f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
-            for title, card_message in card_messages.items()
-        )
-        context_block = "\n\n".join(block for block in [card_context, recent_context, extra_context] if block).strip() or None
-        response = await get_assistant_response(
-            message.content,
-            channel_id,
-            category_id,
-            thread_id,
-            assigned_memory,
-            context_block=context_block,
-            system_prompt=system_prompt,
-        )
-        if response:
-            await send_response_in_chunks(message.channel, response)
-        return True
+        urls = _extract_urls(message.content)
+        url_context = await _fetch_url_context(urls) if urls else ""
+        attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
+        extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
+        recent_context = await _collect_recent_workspace_context(message)
 
-    if message.attachments or urls:
-        acknowledgment = (
-            "I received the new source material for this workspace. "
-            "Tell me `update the cards` when you want me to apply it."
-        )
-        if not (extra_context or recent_context):
+        if _is_workspace_card_action_request(message.content):
+            card_bodies = {
+                title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
+                for title, card_message in card_messages.items()
+            }
+            prompt_text = build_card_creation_prompt(
+                request_text=message.content,
+                card_bodies=card_bodies,
+            ) if _is_new_card_request(message.content) else build_card_update_prompt(
+                request_text=message.content,
+                card_bodies=card_bodies,
+                target_titles=target_titles,
+            )
+            response = await get_assistant_response(
+                prompt_text,
+                channel_id,
+                category_id,
+                thread_id,
+                assigned_memory,
+                context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
+                system_prompt=system_prompt,
+            )
+            updates = parse_card_update_response(response)
+            if not updates:
+                await send_response_in_chunks(
+                    message.channel,
+                    "I could not turn that into card changes yet. Please mention which card to update, or say `create a new card for ...`."
+                )
+                return True
+            if not _is_new_card_request(message.content) and not target_titles and len(updates) > 1:
+                await send_response_in_chunks(
+                    message.channel,
+                    "I need a more specific target card for that update. Please name the card, or say `update all cards`."
+                )
+                return True
+            merged_cards = dict(card_bodies)
+            merged_cards.update(updates)
+            resolved_messages = await sync_workspace_cards(message.channel, merged_cards)
+            changed_titles = [title for title in updates.keys() if title in resolved_messages]
+            if changed_titles:
+                await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
+            return True
+
+        if _has_clear_question(message.content):
+            card_context = "\n\n".join(
+                f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
+                for title, card_message in card_messages.items()
+            )
+            context_block = "\n\n".join(block for block in [card_context, recent_context, extra_context] if block).strip() or None
+            response = await get_assistant_response(
+                message.content,
+                channel_id,
+                category_id,
+                thread_id,
+                assigned_memory,
+                context_block=context_block,
+                system_prompt=system_prompt,
+            )
+            if response:
+                await send_response_in_chunks(message.channel, response)
+            return True
+
+        if message.attachments or urls:
             acknowledgment = (
-                "I received the source material, but I could not read it cleanly. "
-                "If it is a Google Doc, make sure public access is enabled, or attach/export a PDF."
+                "I received the new source material for this workspace. "
+                "Tell me `update the cards` when you want me to apply it."
             )
-        await send_response_in_chunks(message.channel, acknowledgment)
-        return True
-    return False
+            if not (extra_context or recent_context):
+                acknowledgment = (
+                    "I received the source material, but I could not read it cleanly. "
+                    "If it is a Google Doc, make sure public access is enabled, or attach/export a PDF."
+                )
+            await send_response_in_chunks(message.channel, acknowledgment)
+            return True
+        return False
+    finally:
+        await _stop_thinking_indicator(indicator_message)
 
 @client.event
 async def on_message(message):
@@ -369,27 +408,31 @@ async def on_message(message):
         return False
 
     should_respond = channel_always_on or channel_name == "telldm" or client.user in message.mentions or bool(urls)
+    indicator_message = await _start_thinking_indicator(message) if should_respond else None
 
-    if should_respond:
-        assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
-        if assigned_memory:
-            context_block = await _fetch_url_context(urls) if urls else None
-            response = await get_assistant_response(
-                user_message,
-                channel_id,
-                category_id,
-                thread_id,
-                assigned_memory,
-                context_block=context_block,
-            )
-            response_sent = await send_response(response)
-        else:
-            logging.error("Assigned memory ID is invalid or empty.")
+    try:
+        if should_respond:
+            assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
+            if assigned_memory:
+                context_block = await _fetch_url_context(urls) if urls else None
+                response = await get_assistant_response(
+                    user_message,
+                    channel_id,
+                    category_id,
+                    thread_id,
+                    assigned_memory,
+                    context_block=context_block,
+                )
+                response_sent = await send_response(response)
+            else:
+                logging.error("Assigned memory ID is invalid or empty.")
 
-    if message.attachments and not response_sent:
-        for attachment in message.attachments:
-            logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
-            await handle_attachments(attachment, user_message, channel_id, category_id, thread_id)
+        if message.attachments and not response_sent:
+            for attachment in message.attachments:
+                logging.info(f"Found attachment: {attachment.filename} with URL: {attachment.url}")
+                await handle_attachments(attachment, user_message, channel_id, category_id, thread_id)
+    finally:
+        await _stop_thinking_indicator(indicator_message)
 
 
 async def handle_attachments(attachment, user_message, channel_id, category_id, thread_id):

@@ -22,6 +22,7 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 - `session-summary`
 - `feedback`
 - `npcs`
+- `worldbuilding`
 - `character-sheets`
 - `lore-and-teasers`
 - `items`
@@ -34,6 +35,7 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 The intended live flow is that AIDM auto-joins a campaign voice channel when someone joins, including the default session voice channel created by `/invite`.
 
 `/invite` now also posts a starter onboarding message back into the channel where the command was invoked so new campaigns immediately get usage guidance without having to hunt through the scaffold.
+If `/invite` is run outside a category, it now creates a new category automatically and scaffolds the campaign there.
 
 ## Prompt System
 
@@ -96,6 +98,23 @@ The intended live flow is that AIDM auto-joins a campaign voice channel when som
 - `/memory reset` no longer clears Supabase chat transcript rows because that storage path has been removed.
 - Dense list formatting was normalized for Discord output.
 - Utility command error handling was improved and old command duplication issues were cleaned up.
+- Command registration was modularized out of `discord_app/bot_commands.py` into command-group modules under `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/discord_app/commands/`.
+- Any incoming message that contains a public URL can now trigger the same fetch-first URL reading path that `/reference` uses.
+
+## Workspace Threads
+
+- Added `/create npc` and `/create other` workspace scaffolding.
+- `/create npc` creates workspace threads under `#npcs` and assigns a dedicated NPC memory to the thread.
+- `/create other` creates workspace threads under `#worldbuilding` and reuses the parent channel's `worldbuilding` memory.
+- NPC/Other workspace cards are created as blank cards and are no longer auto-filled immediately after thread creation.
+- Workspace card updates now:
+  - work even when Discord pinning fails
+  - fall back to thread history/embed discovery instead of using pins as the source of truth
+  - support broad requests like "update the cards"
+  - read PDF, text, DOCX, and image attachments more reliably when Discord omits content types
+- Workspace welcome messages for NPC/Other no longer need to expose the raw internal metadata block to the user.
+- Always-on message handling now ignores Discord system messages such as pin notifications.
+- Typing indicators for workspace and thread replies now target the active thread instead of the parent channel.
 
 ## Model Configuration
 

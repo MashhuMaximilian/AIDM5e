@@ -38,7 +38,7 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     - Do not respond to every message — only when there is something to do
 
     Cards in this workspace:
-    - Summary card: name, build, resources, spell slots
+    - Summary card: name, build, spellcasting ability, AC/DC/PB/speed combat snapshot, hit dice, 45-block HP bar, resources, spell slots
     - Profile card: identity, appearance, core status
     - Stats & Skills card: ability scores, saving throws, skills
     - Actions card: attacks, spellcasting, combat actions
@@ -52,6 +52,18 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     - Magic item added → Items, Stats, Actions, Resources
     - Level up → Stats, Actions, Rules, Resources, Skills
     - Class or subclass change → almost everything
+
+    Summary card formatting rules:
+    - Always keep the Summary card compact and mobile-readable
+    - Include these lines when the values are known:
+      - `> **BUILD**: ...`
+      - `> **Spellcasting Ability**: ...`
+      - `🛡️ **AC: `...`**  |  🎯 **DC: `...`** | 💎 **PB: `...`**  | 🏃 **SPD: `...`**`
+      - `🎲 **Hit Dice:** `current / max [die]``
+      - `**### 💟 HP: [ current / max ]**`
+      - a 45-block HP bar using `█` and `░`
+    - HP bar rule: filled blocks = round(current_hp / max_hp * 45); empty blocks = 45 - filled
+    - Preserve the HP bar whenever the Summary card is revised
 
     DM-private rule: never publish Secrets fields to #context automatically.
     """
@@ -197,6 +209,13 @@ STANDARD_TEMPLATE = dedent(
 
     > BUILD: Level [Lvl] [Race] [Class] ([Subclass])
     > Spellcasting Ability: [Ability] (DC [#] | +[#] to hit)
+
+    🛡️ **AC: `[AC]`**  |  🎯 **DC: `[DC]`** | 💎 **PB: `[PB]`**  | 🏃 **SPD: `[Speed]`**
+
+    🎲 **Hit Dice:** `[Current Hit Dice] / [Max Hit Dice] [[Hit Die]]`
+
+    **### 💟 HP: [ [Current HP] / [Max HP] ]**
+    `█████████████████████████████████████████████`
 
     **🔋 RESOURCE TRACKING**
     * **[Resource Name]:** ○ ○ ○ `[Recharge]`
@@ -413,11 +432,13 @@ def _base_prompt_parts(request: PlayerWorkspaceRequest) -> list[str]:
         "- Do not generate generic search links.",
         "- Do not duplicate the same table, list, or code block in multiple sections.",
         "- The summary card should contain only: name, build, spellcasting ability when relevant, resource tracking, and spell slots.",
+        "- The summary card should also include the combat snapshot lines for AC, DC, PB, speed, hit dice, and the 45-block HP bar.",
         "- The profile section should contain the quote, identity block, and build + core status code block.",
         "- Keep `CORE STATUS` separate from `🔋 Resource Tracking`.",
         "- Put spell-slot counts only in `✨ Spell Slots`, and spell names only in `✨ Spellbook / Known Spells`.",
         "- In `🔋 Resource Tracking`, use `○` tracker circles and put recharge notes in inline code.",
         "- Preserve visible recharge details exactly when they matter, such as `1+1d4`, `1d3 regained at Dawn`, or `Each bead 1/Long Rest`.",
+        "- HP bar rule: always render exactly 45 total blocks using `█` for filled and `░` for empty. Filled blocks = round(current_hp / max_hp * 45).",
         "- In `Reference Links`, include exact trusted URLs for class, subclass, race, feats, spells, and items whenever they are identifiable.",
         "- Include all relevant links about the items, feats, spells, class, subclass, and race present on this character from trusted community sources such as D&D Beyond, 5e.tools, 5esrd.com, dnd5e.wikidot.com, rpgbot.net, Roll20, and AideDD.",
         "- Do not limit links to a single website if better exact links are available elsewhere.",

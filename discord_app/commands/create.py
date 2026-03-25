@@ -109,6 +109,8 @@ def register(create_group, h) -> None:
                     )
 
             await h.sync_workspace_slots(player_thread, bundle)
+            if created_thread:
+                await h._pin_recent_bot_messages(player_thread)
         finally:
             for temp_path in temp_paths:
                 try:
@@ -166,6 +168,8 @@ def register(create_group, h) -> None:
             await npc_thread.send(h.build_workspace_welcome_text(definition))
 
         await h.sync_workspace_cards(npc_thread, cards)
+        if created_thread:
+            await h._pin_recent_bot_messages(npc_thread)
 
         action_label = "created" if created_thread else "updated"
         await h.send_interaction_message(
@@ -217,6 +221,8 @@ def register(create_group, h) -> None:
             await other_thread.send(h.build_workspace_welcome_text(definition))
 
         await h.sync_workspace_cards(other_thread, cards)
+        if created_thread:
+            await h._pin_recent_bot_messages(other_thread)
 
         action_label = "created" if created_thread else "updated"
         await h.send_interaction_message(

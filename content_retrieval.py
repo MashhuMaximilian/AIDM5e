@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import re
 from html.parser import HTMLParser
@@ -16,6 +17,16 @@ logger = logging.getLogger(__name__)
 MAX_FETCHED_TEXT_CHARS = 40000
 MAX_FETCHED_BINARY_BYTES = 15 * 1024 * 1024
 GOOGLE_DOC_RE = re.compile(r"https?://docs\.google\.com/document/(?:u/\d+/)?d/([a-zA-Z0-9_-]+)")
+NOTION_URL_RE = re.compile(r"https?://(?:www\.)?(?:notion\.so|notion\.site)/", re.IGNORECASE)
+NOTION_NEXT_DATA_RE = re.compile(
+    r'<script[^>]*id="__NEXT_DATA__"[^>]*>\s*(\{.*?\})\s*</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+NOTION_TITLE_RE = re.compile(r"<title>(.*?)</title>", re.DOTALL | re.IGNORECASE)
+NOTION_META_DESC_RE = re.compile(
+    r'<meta[^>]+name="description"[^>]+content="([^"]+)"',
+    re.IGNORECASE,
+)
 
 
 class _HTMLTextExtractor(HTMLParser):
@@ -94,6 +105,14 @@ def _truncate_text(text: str) -> str:
     return text[:MAX_FETCHED_TEXT_CHARS] + "\n...[truncated]..."
 
 
+def _collapse_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _looks_like_notion_url(url: str) -> bool:
+    return bool(NOTION_URL_RE.match(url or ""))
+
+
 async def _read_http_bytes(url: str) -> tuple[bytes, str | None]:
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
@@ -104,6 +123,123 @@ async def _read_http_bytes(url: str) -> tuple[bytes, str | None]:
             if len(payload) > MAX_FETCHED_BINARY_BYTES:
                 raise ValueError(f"Fetched content from {url} is too large to process safely.")
             return payload, content_type
+
+
+def _collect_notion_strings(node, out: list[str]) -> None:  # noqa: ANN001
+    if isinstance(node, str):
+        text = _collapse_whitespace(node)
+        if (
+            len(text) >= 3
+            and not text.startswith("http")
+            and text not in {"en", "block", "page", "text", "notion"}
+        ):
+            out.append(text)
+        return
+    if isinstance(node, list):
+        for item in node:
+            _collect_notion_strings(item, out)
+        return
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key.lower() in {
+                "id",
+                "version",
+                "spaceid",
+                "userid",
+                "file_ids",
+                "permissions",
+                "icon",
+                "cover",
+                "created_time",
+                "last_edited_time",
+                "signedurl",
+                "copyspaceid",
+                "copysourceurl",
+                "copysourceworkspaceid",
+            }:
+                continue
+            _collect_notion_strings(value, out)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _extract_notion_text_from_next_data(html: str) -> str:
+    match = NOTION_NEXT_DATA_RE.search(html or "")
+    if not match:
+        return ""
+    try:
+        data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return ""
+    strings: list[str] = []
+    _collect_notion_strings(data, strings)
+    filtered: list[str] = []
+    for value in _dedupe_preserve_order(strings):
+        lowered = value.lower()
+        if lowered in {"notion", "made with notion", "the page you are looking for cannot be found"}:
+            continue
+        if len(value) == 32 and re.fullmatch(r"[a-f0-9-]+", value, re.IGNORECASE):
+            continue
+        filtered.append(value)
+    return _truncate_text("\n".join(filtered))
+
+
+def _extract_notion_text_from_html(html: str) -> str:
+    parts: list[str] = []
+    title_match = NOTION_TITLE_RE.search(html or "")
+    if title_match:
+        title = _collapse_whitespace(title_match.group(1).replace(" | Notion", ""))
+        if title:
+            parts.append(title)
+    meta_match = NOTION_META_DESC_RE.search(html or "")
+    if meta_match:
+        description = _collapse_whitespace(meta_match.group(1))
+        if description and description not in parts:
+            parts.append(description)
+    page_text = extract_text_from_html(html or "")
+    cleaned_lines: list[str] = []
+    for raw in page_text.splitlines():
+        line = _collapse_whitespace(raw)
+        lowered = line.lower()
+        if not line:
+            continue
+        if lowered in {
+            "made with notion",
+            "duplicate",
+            "search",
+            "backlinks",
+            "comments",
+            "add a comment",
+            "notion",
+        }:
+            continue
+        cleaned_lines.append(line)
+    for value in _dedupe_preserve_order(cleaned_lines):
+        if value not in parts:
+            parts.append(value)
+    return _truncate_text("\n".join(parts))
+
+
+async def extract_notion_url_text(url: str) -> str:
+    payload, _ = await _read_http_bytes(url)
+    html = payload.decode("utf-8", errors="replace")
+    notion_json_text = _extract_notion_text_from_next_data(html)
+    if notion_json_text:
+        return notion_json_text
+    notion_html_text = _extract_notion_text_from_html(html)
+    if notion_html_text:
+        return notion_html_text
+    raise ValueError(f"No readable Notion text could be extracted from {url}.")
 
 
 async def extract_attachment_text(attachment: discord.Attachment) -> str:
@@ -132,6 +268,9 @@ async def extract_public_url_text(url: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("Only http and https URLs are supported.")
+
+    if _looks_like_notion_url(url):
+        return await extract_notion_url_text(url)
 
     google_doc_match = GOOGLE_DOC_RE.match(url)
     if google_doc_match:

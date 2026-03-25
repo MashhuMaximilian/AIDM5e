@@ -2,15 +2,15 @@
 
 ## Next Up
 
-- [ ] Add `/create player`
+- [ ] Continue `/create npc` and `/create other` polish
+  - [ ] validate workspace card updates from mixed file types in real Discord threads
+  - [ ] refine when the bot should stay silent vs acknowledge notes in workspace threads
+  - [ ] decide whether other-workspace metadata needs a hidden non-message storage path later
+
+- [ ] Revisit `/create player`
   - [ ] collect structured character fields that are useful for summaries and images
   - [ ] write clean, human-readable campaign context into `#context`
   - [ ] decide how character image references should be attached or linked
-
-- [ ] Add `/create npc`
-  - [ ] collect structured NPC fields that are useful for summaries and images
-  - [ ] write clean, human-readable campaign context into `#context`
-  - [ ] decide how recurring NPCs vs one-off NPCs should be represented
 
 - [ ] Test the Discord-native context workflow end-to-end against the image pipeline
   - [ ] use real `#context` character descriptions and image references
@@ -76,6 +76,7 @@
 ## Later
 
 - [ ] Revisit whether `/reference` should support more attachment/document types
+- [ ] Consider moving long stable workspace/system prompt bodies into dedicated files under `prompts/`
 - [ ] Consider whether a separate art / gallery channel is worthwhile
 - [ ] Consider TTS story output later, with cost/server impact review
 - [ ] Compare `gemini-3-flash-preview` vs `gemini-3.1-flash-lite-preview` on real D&D audio

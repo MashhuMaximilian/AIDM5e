@@ -160,9 +160,11 @@ def register(tree, h) -> None:
     @tree.command(name="invite", description="Initialize the default AIDM channel layout for this category.")
     async def invite_command(interaction: discord.Interaction):
         category = interaction.channel.category
+        created_category = False
         if not category:
-            await interaction.response.send_message("This command must be used in a category channel.")
-            return
+            base_name = getattr(interaction.channel, "name", None) or interaction.guild.name
+            category = await interaction.guild.create_category(base_name.replace("-", " ").title())
+            created_category = True
 
         await h.send_command_ack(interaction, "Initializing campaign...")
 
@@ -178,6 +180,7 @@ def register(tree, h) -> None:
         reused_voice = ", ".join(invite_result["reused_voice"]) if invite_result["reused_voice"] else "none"
         await interaction.followup.send(
             f"Campaign initialized for **{category.name}**.\n"
+            f"Created category: {'yes' if created_category else 'no'}\n"
             f"Created channels: {created}\n"
             f"Reused channels: {reused}\n"
             f"Created voice channels: {created_voice}\n"
