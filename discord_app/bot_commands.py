@@ -194,6 +194,8 @@ def _build_help_text(topic: str) -> str:
             "• homebrew rules and faction notes\n"
             "• image style direction and recurring scene references\n"
             "• session prep notes you want summaries to respect\n\n"
+            "**Tip**\n"
+            "• `#help` now includes a Party Voice Roster Template you can fill in and store with `/context add` for better voice transcript attribution\n\n"
             "**Good inputs**\n"
             "• Manual notes\n"
             "• `last_n` recent messages from a channel like `#gameplay`\n"
@@ -361,7 +363,29 @@ def _build_help_guide_sections() -> list[str]:
     for topic in HELP_GUIDE_TOPICS:
         title = topic.title()
         sections.append(f"## {title}\n\n{_build_help_text(topic)}")
+    sections.append(f"## Party Voice Roster Template\n\n{_build_voice_roster_template()}")
     return sections
+
+
+def _build_voice_roster_template() -> str:
+    return (
+        "Fill this out, then store it in `#context` with `/context add` so AIDM can better identify speakers, players, and characters in voice transcripts.\n\n"
+        "Use this as a template:\n\n"
+        "```text\n"
+        "========================================================================================================================================================================\n"
+        "Here are the members of the party along with their class and race, for future clarity about their deeds and personality as well as mispronouncing names\n\n"
+        "Bianca | @usernameofBianca | {user id of Bianca} | Solanis | Class: Paladin, Oath of Burning Hunger | Race: Human | Gender: Female | Role: Moral compass and emotional anchor of the party.\n\n"
+        "Andrei | @usernameofAndrei | {user id of Andrei} | Zain | Class: Warlock, Fiend-flavored homebrew subclass | Race: Human | Gender: Male | Role: Experienced fighter marked by recent trauma.\n\n"
+        "Thomas | @usernameofThomas | {user id of Thomas} | Atomix | Class: Artificer (Battle Smith) | Race: Human | Gender: Male | Role: Inventor and arcane engineer.\n\n"
+        "Max | @usernameofMax | {user id of Max} | Hanaho | Class: Druid (Circle of the Stars) | Race: Vidra/Ottryn | Gender: Male | Role: Nature guide and spiritual touchstone.\n"
+        "========================================================================================================================================================================\n"
+        "```\n\n"
+        "**Why this helps**\n"
+        "• better voice transcript speaker labels\n"
+        "• better player-to-character mapping\n"
+        "• fewer name misspellings and misattributions\n"
+        "• better session summaries when several people are talking"
+    )
 
 
 def _build_help_greeting_prompt(category: discord.CategoryChannel) -> str:
