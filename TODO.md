@@ -2,13 +2,22 @@
 
 ## Next Up
 
-- [ ] Continue `/create npc` and `/create other` polish
-  - [ ] validate workspace card updates from mixed file types in real Discord threads
-  - [ ] refine when the bot should stay silent vs acknowledge notes in workspace threads
-  - [ ] decide whether other-workspace metadata needs a hidden non-message storage path later
+- [ ] Continue workspace-thread polish for `/create npc` and `/create other`
+  - [ ] validate card updates from mixed file types in real Discord threads
+  - [ ] keep improving when AIDM should stay silent vs acknowledge dropped notes/files
+  - [ ] test card targeting against natural phrases instead of exact card titles
+  - [ ] decide whether `Other` needs stronger common-entity examples beyond the current prompt few-shots
+  - [ ] decide whether other-workspace metadata ever needs a hidden non-message storage path later
 
 - [ ] Revisit `/create player`
-  - [ ] collect structured character fields that are useful for summaries and images
+  - [ ] validate the new markdown-first import/idea pipeline with real character sheets
+  - [ ] test heading/slot mapping against messy Gemini output from real PDFs
+  - [ ] verify summary card consistency on import:
+    - [ ] HP bar
+    - [ ] AC / DC / PB / speed snapshot
+    - [ ] hit dice
+    - [ ] player name fallback
+  - [ ] decide product behavior for player brainstorming vs canonical workspace editing
   - [ ] write clean, human-readable campaign context into `#context`
   - [ ] decide how character image references should be attached or linked
 
@@ -75,8 +84,8 @@
 
 ## Later
 
-- [ ] Revisit whether `/reference` should support more attachment/document types
 - [ ] Consider moving long stable workspace/system prompt bodies into dedicated files under `prompts/`
+- [ ] Revisit whether `/reference` should support more attachment/document types
 - [ ] Consider whether a separate art / gallery channel is worthwhile
 - [ ] Consider TTS story output later, with cost/server impact review
 - [ ] Compare `gemini-3-flash-preview` vs `gemini-3.1-flash-lite-preview` on real D&D audio

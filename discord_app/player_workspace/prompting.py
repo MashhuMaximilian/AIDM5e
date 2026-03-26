@@ -25,6 +25,83 @@ CARD_FORMATTING_PROMPT = dedent(
 ).strip()
 
 
+NPC_CARD_STRUCTURE_GUIDE = dedent(
+    """
+    Reference NPC card structure guidance:
+    - Summary card: name, role, faction or affiliation, CR, creature type, alignment, status, last known location, one-line hook
+    - Profile card: full name and aliases, race or type, apparent age, build, distinctive physical features, character quote or speech pattern
+    - Personality & Hooks card: personality traits, ideals, flaws, bonds, secrets (DM-only), hooks for the party
+    - Stat Block card: AC, HP with hit dice, speed, CR, proficiency bonus, ability scores, actions in combat, passive traits, features
+    - Relationships card: relationship to each party member, key NPC connections and nature of those connections, faction standing and role within it
+    - If the NPC is a spellcaster, add a compact spells subsection inside the Stat Block card rather than inventing a whole new card unless the user asks for it
+    """
+).strip()
+
+
+OTHER_PREPASS_EXAMPLES = dedent(
+    """
+    These are examples and suggestions, not a rigid registry.
+    Use them as a model for good output when the entity is similar.
+    If the entity is something new or unusual, do your best and invent the right cards.
+
+    Example — Spell ("a 3rd-level storm spell that pushes creatures with thunder damage"):
+    Cards:
+    - Summary Card: spell name, level, school, one-line tactical identity, current review status
+    - Spell Overview: casting time, range or area, components, duration, attack/save, damage or effect tags
+    - Mechanics & Scaling: full effect text, conditions, forced movement, scaling at higher levels
+    - Availability & Notes: classes or lists, source, edge cases, DM adjudication notes if needed
+    Cascade rules:
+    - Level, school, or spell list change → Summary Card, Spell Overview, Availability & Notes
+    - Core effect change → Spell Overview, Mechanics & Scaling
+    - Scaling or upcast change → Mechanics & Scaling, Summary Card if tactical identity changes
+
+    Example — Magic Item / Artifact ("a ring with charges that can make force attacks"):
+    Cards:
+    - Summary Card: name, item type, rarity, attunement, holder, location, one-line purpose
+    - Item Overview: type, rarity, attunement requirements, charges, recharge, activation pattern
+    - Mechanics: full properties, attack/save details, tables, charges spent, passive effects, curse or drawback if any
+    - Lore & Ownership: origin, notable owners, rumors, current holder, secrets (DM-only) if relevant
+    Cascade rules:
+    - Holder or location change → Summary Card, Lore & Ownership
+    - Charges, recharge, or activation change → Item Overview, Mechanics, Summary Card if resource tracking changes
+    - New lore discovered → Lore & Ownership
+
+    Example — Location ("a haunted lighthouse on a cliffside"):
+    Cards:
+    - Summary Card: name, type, region, controlling presence, status
+    - Description Card: appearance, atmosphere, distinctive features
+    - Secrets & Hooks: hidden dangers, what the party does not know, hooks (DM-only where needed)
+    - Map Card: map image or map notes
+    Cascade rules:
+    - Controlling presence change → Summary Card, Secrets & Hooks
+    - Status change → Summary Card
+    - New secret revealed → Secrets & Hooks
+
+    Example — Faction ("a thieves guild operating in the capital"):
+    Cards:
+    - Summary Card: name, type, reach, alignment, current goal, party standing
+    - Identity Card: founding story, beliefs, symbols, motto, public face versus true nature
+    - Structure Card: leadership, ranks, membership size
+    - Relationships Card: allies, enemies, party relationship, what they want, what they offer
+    Cascade rules:
+    - Leadership change → Structure Card, Relationships Card
+    - Allegiance shift → Summary Card, Relationships Card
+    - Party standing changes → Summary Card, Relationships Card
+
+    Example — Quest ("find the missing heir before the coronation"):
+    Cards:
+    - Summary Card: quest type, status, quest giver, objective, urgency
+    - Full Brief: what happened, known facts, stakes, false assumptions
+    - Progress: current leads, completed milestones, failed approaches, next likely lead
+    - Rewards & Consequences: promised rewards, political effects, fallout if failed
+    Cascade rules:
+    - Objective or quest giver changes → Summary Card, Full Brief
+    - New lead or milestone → Progress
+    - Stakes or rewards change → Summary Card, Rewards & Consequences
+    """
+).strip()
+
+
 PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     """
     You are AIDM, assisting with the character workspace for [CHARACTER NAME] ([PLAYER NAME]).
@@ -107,9 +184,11 @@ NPC_WORKSPACE_SYSTEM_PROMPT = dedent(
     - Adding abilities, spells, or items → Stat Block, Summary resources if they have charges
     - Party relationship changes → Relationships, Personality & Hooks
 
+    {npc_card_structure_guide}
+
     DM-private rule: the Secrets field in the Personality & Hooks card is never published to #context automatically. It stays in this thread only. Flag it clearly when editing.
     """
-).strip()
+).strip().format(npc_card_structure_guide=NPC_CARD_STRUCTURE_GUIDE)
 
 
 OTHER_WORKSPACE_SYSTEM_PROMPT = dedent(
@@ -150,10 +229,15 @@ OTHER_PREPASS_PROMPT = dedent(
     - Card 1 must be a Summary card.
     - The remaining cards should cover the most DM-relevant dimensions of this entity.
     - Think: what does a DM need to reference mid-session? What changes during play?
+    - These examples are suggestions, not a rigid registry. If the entity is unfamiliar, infer the right cards and do your best.
     - Use the formatting language of the workspace system, but do not return full card bodies.
     - Return only card titles plus one-sentence descriptions, and a short cascade-rules list.
     - Flag DM-private concerns in the card descriptions or cascade rules if needed.
     - Do not return explanations before or after the requested sections.
+
+    Here are examples of good output:
+
+    [OTHER_PREPASS_EXAMPLES]
 
     Return exactly this shape:
 
@@ -197,6 +281,7 @@ def build_other_workspace_system_prompt(
 
 def build_other_prepass_prompt(user_note: str | None) -> str:
     prompt = OTHER_PREPASS_PROMPT.replace("[USER NOTE]", (user_note or "Needs review.").strip())
+    prompt = prompt.replace("[OTHER_PREPASS_EXAMPLES]", OTHER_PREPASS_EXAMPLES)
     return _append_card_formatting_prompt(prompt)
 
 

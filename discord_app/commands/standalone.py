@@ -188,3 +188,21 @@ def register(tree, h) -> None:
         )
         if hasattr(interaction.channel, "send"):
             await h.send_response_in_chunks(interaction.channel, h._build_invite_onboarding_message(category))
+
+        help_channel = discord.utils.get(category.text_channels, name="help")
+        if help_channel is not None:
+            for section in h._build_help_guide_sections():
+                await h.send_response_in_chunks(help_channel, section)
+
+            assigned_memory = await h.get_assigned_memory(help_channel.id, category.id, thread_id=None)
+            if assigned_memory:
+                greeting_prompt = h._build_help_greeting_prompt(category)
+                greeting = await h.get_assistant_response(
+                    greeting_prompt,
+                    help_channel.id,
+                    category.id,
+                    None,
+                    assigned_memory,
+                )
+                if greeting:
+                    await h.send_response_in_chunks(help_channel, greeting)

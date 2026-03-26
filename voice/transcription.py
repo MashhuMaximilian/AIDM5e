@@ -31,6 +31,7 @@ from .transcript_manifest import TranscriptManifestStore
 from .transcript_outputs import TranscriptOutputService
 from .transcript_pipeline import TranscriptService
 from .voice_capture import VoiceCaptureService
+from .storage_uploads import upload_session_artifacts_for_guild
 
 
 recording_duration = AUDIO_CHUNK_SECONDS
@@ -61,6 +62,8 @@ class VoiceRecorder:
         )
         self.context_block = None
         self.context_packet = None
+        self.latest_objective_summary: str | None = None
+        self.latest_narrative_summary: str | None = None
         self.capture_service = VoiceCaptureService(audio_files_path)
         self.orchestrator = VoiceSessionOrchestrator()
 
@@ -368,7 +371,43 @@ class VoiceRecorder:
             logging.error("Could not find 'session-summary' channel in category %s.", category_id)
             return
 
+        audio_paths = sorted(path for path in audio_files_path.iterdir() if path.is_file()) if audio_files_path.exists() else []
+        try:
+            uploaded_paths = await asyncio.to_thread(
+                upload_session_artifacts_for_guild,
+                guild_id=guild.id,
+                audio_files=audio_paths,
+                transcript_path=self.transcript_path,
+                manifest_path=self.transcript_manifest_path,
+            )
+            if uploaded_paths:
+                logging.info(
+                    "Uploaded %s session artifacts to Supabase storage for guild %s.",
+                    len(uploaded_paths),
+                    guild.id,
+                )
+        except Exception as exc:
+            logging.error("Failed to upload session artifacts to Supabase storage: %s", exc)
+
         await self.output_service.post_transcript_to_channel(summary_channel)
+        if self.latest_objective_summary:
+            await summary_channel.send("**Objective Summary**")
+            await send_response_in_chunks(summary_channel, self.latest_objective_summary)
+        if self.latest_narrative_summary:
+            await summary_channel.send("**Narrative Summary**")
+            await send_response_in_chunks(summary_channel, self.latest_narrative_summary)
+
+        try:
+            await self._generate_and_post_session_images(
+                category=getattr(self.voice_client.channel, "category", None),
+                objective_summary=self.latest_objective_summary,
+                narrative_summary=self.latest_narrative_summary,
+                default_channel=summary_channel,
+            )
+        except Exception as exc:
+            logging.error("Error generating session images: %s", exc)
+            await summary_channel.send(f"Error generating session images: {exc}")
+
         await self.output_service.cleanup_live_artifacts(self.voice_client, self.reset_session_artifacts)
 
     async def send_to_openai(self, audio_filename, chunk_info):
@@ -387,6 +426,8 @@ class VoiceRecorder:
             return
 
         await self.refresh_context_from_category(getattr(self.voice_client.channel, "category", None))
+        self.latest_objective_summary = None
+        self.latest_narrative_summary = None
 
         guild = self.voice_client.guild
         summary_channel = discord.utils.get(guild.text_channels, name="session-summary", category_id=category_id)
@@ -399,37 +440,21 @@ class VoiceRecorder:
             logging.warning("No audio summary windows were produced. No summary generated.")
             return
 
-        await summary_channel.send("Generating session summaries from audio-derived notes...")
         objective_summary = None
         narrative_summary = None
         try:
             objective_summary, narrative_summary = await self.build_final_summaries_from_windows(window_summaries)
             if not objective_summary:
                 raise RuntimeError("Objective summary generation returned no content.")
-            await summary_channel.send("**Objective Summary**")
-            await send_response_in_chunks(summary_channel, objective_summary)
+            self.latest_objective_summary = objective_summary
         except Exception as exc:
             logging.error("Error generating objective session summary: %s", exc)
-            await summary_channel.send(f"Error generating objective session summary: {exc}")
 
         try:
             if not narrative_summary:
                 raise RuntimeError("Narrative summary generation returned no content.")
-            await summary_channel.send("**Narrative Summary**")
-            await send_response_in_chunks(summary_channel, narrative_summary)
+            self.latest_narrative_summary = narrative_summary
         except Exception as exc:
             logging.error("Error generating narrative session summary: %s", exc)
-            await summary_channel.send(f"Error generating narrative session summary: {exc}")
-
-        try:
-            await self._generate_and_post_session_images(
-                category=getattr(self.voice_client.channel, "category", None),
-                objective_summary=objective_summary,
-                narrative_summary=narrative_summary,
-                default_channel=summary_channel,
-            )
-        except Exception as exc:
-            logging.error("Error generating session images: %s", exc)
-            await summary_channel.send(f"Error generating session images: {exc}")
 
         logging.info("Audio-native transcript summarization completed.")

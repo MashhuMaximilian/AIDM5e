@@ -109,6 +109,14 @@ def _is_workspace_thread(channel: discord.abc.Messageable) -> bool:
     return isinstance(channel, discord.Thread) and parse_workspace_thread(channel.name)[0] is not None
 
 
+def _channel_system_prompt(channel_name: str | None) -> str | None:
+    if (channel_name or "").lower() == "help":
+        from discord_app.bot_commands import _build_help_channel_system_prompt
+
+        return _build_help_channel_system_prompt()
+    return None
+
+
 def _has_clear_question(text: str | None) -> bool:
     content = (text or "").strip().lower()
     if not content:
@@ -464,6 +472,7 @@ async def on_message(message):
                     thread_id,
                     assigned_memory,
                     context_block=context_block,
+                    system_prompt=_channel_system_prompt(channel_name),
                 )
                 response_sent = await send_response(response)
             else:
@@ -497,7 +506,14 @@ async def handle_attachments(attachment, user_message, channel_id, category_id, 
                 # IMAGE HANDLING
                 if content_type and "image" in content_type:
                     combined_message = f"{user_message}\n\nThe user attached an image here: {file_url}"
-                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    response = await get_assistant_response(
+                        combined_message,
+                        channel_id,
+                        category_id,
+                        thread_id,
+                        assigned_memory,
+                        system_prompt=_channel_system_prompt(channel.name if channel else None),
+                    )
                     if response:
                         await send_response_in_chunks(channel, response)
 
@@ -506,7 +522,14 @@ async def handle_attachments(attachment, user_message, channel_id, category_id, 
                     pdf_data = await resp.read()
                     text = extract_text_from_pdf(pdf_data)
                     combined_message = f"{user_message}\n\nExtracted text from PDF:\n{text}"
-                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    response = await get_assistant_response(
+                        combined_message,
+                        channel_id,
+                        category_id,
+                        thread_id,
+                        assigned_memory,
+                        system_prompt=_channel_system_prompt(channel.name if channel else None),
+                    )
                     if response:
                         await send_response_in_chunks(channel, response)
 
@@ -518,7 +541,14 @@ async def handle_attachments(attachment, user_message, channel_id, category_id, 
                 ]:
                     extracted_text = await extract_text_from_file(file_url, content_type)
                     combined_message = f"{user_message}\n\nExtracted text:\n{extracted_text}"
-                    response = await get_assistant_response(combined_message, channel_id, category_id, thread_id, assigned_memory)
+                    response = await get_assistant_response(
+                        combined_message,
+                        channel_id,
+                        category_id,
+                        thread_id,
+                        assigned_memory,
+                        system_prompt=_channel_system_prompt(channel.name if channel else None),
+                    )
                     if response:
                         await send_response_in_chunks(channel, response)
 

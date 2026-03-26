@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MEMORY_NAMES = ("gameplay", "out-of-game", "dm-private", "worldbuilding")
 DEFAULT_CHANNEL_SPECS = (
     {"name": "gameplay", "memory": "gameplay", "always_on": False, "is_dm_private": False},
+    {"name": "help", "memory": "out-of-game", "always_on": True, "is_dm_private": False},
     {"name": "telldm", "memory": "out-of-game", "always_on": True, "is_dm_private": False},
     {"name": "context", "memory": "out-of-game", "always_on": False, "is_dm_private": False},
     {"name": "session-summary", "memory": "gameplay", "always_on": False, "is_dm_private": False},

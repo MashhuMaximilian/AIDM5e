@@ -83,6 +83,8 @@ HELP_TOPICS = (
     ("feedback", "Feedback"),
 )
 
+HELP_GUIDE_TOPICS = tuple(topic for topic, _label in HELP_TOPICS if topic != "overview")
+
 CONTEXT_SCOPE_CHOICES = [
     app_commands.Choice(name="Public Evergreen", value="public"),
     app_commands.Choice(name="Session Only", value="session"),
@@ -142,7 +144,7 @@ def _build_help_text(topic: str) -> str:
             "Use this to scaffold a campaign workspace.\n\n"
             "**What it does**\n"
             "• Creates a campaign category if you run it outside an existing one\n"
-            "• Creates the default channels like `#gameplay`, `#telldm`, `#context`, `#session-summary`, `#npcs`, `#worldbuilding`, and `#dm-planning`\n"
+            "• Creates the default channels like `#help`, `#gameplay`, `#telldm`, `#context`, `#session-summary`, `#npcs`, `#worldbuilding`, and `#dm-planning`\n"
             "• Creates the default voice channel `session-voice`\n"
             "• Sets up the default memory buckets behind those channels\n\n"
             "**When to use it**\n"
@@ -150,7 +152,7 @@ def _build_help_text(topic: str) -> str:
             "• Any time you want a fresh campaign structure without building channels by hand\n\n"
             "**Recommended flow**\n"
             "• Run `/invite`\n"
-            "• Read the onboarding post it sends\n"
+            "• Read the onboarding posts in `#help`\n"
             "• Use `/help topic:Context`\n"
             "• Add roster, naming, factions, and style notes with `/context add`\n"
             "• Use `/help topic:Create` when you are ready to make player, NPC, or worldbuilding workspaces"
@@ -328,6 +330,7 @@ def _build_help_text(topic: str) -> str:
 
 
 def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
+    help_mention = _get_category_channel_mention(category, "help")
     context_mention = _get_category_channel_mention(category, "context")
     dm_planning_mention = _get_category_channel_mention(category, "dm-planning")
     worldbuilding_mention = _get_category_channel_mention(category, "worldbuilding")
@@ -336,6 +339,7 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
     gameplay_mention = _get_category_channel_mention(category, "gameplay")
     return (
         f"**Campaign setup for {category.name} is ready.**\n"
+        f"• Start in {help_mention} for onboarding, usage tips, and questions.\n"
         f"• Use {context_mention} for public evergreen facts and session notes.\n"
         f"• Use {dm_planning_mention} for DM-only material.\n"
         f"• Use {worldbuilding_mention} for locations, factions, lore, custom entities, and `/create other` workspaces.\n"
@@ -349,6 +353,43 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
         f"• Drop useful reference images into {context_mention} as the visual library grows\n"
         "• Use `/settings images` when you want automatic post-session image generation\n"
         "• Use `/generate image` for one-off manual image generation"
+    )
+
+
+def _build_help_guide_sections() -> list[str]:
+    sections: list[str] = []
+    for topic in HELP_GUIDE_TOPICS:
+        title = topic.title()
+        sections.append(f"## {title}\n\n{_build_help_text(topic)}")
+    return sections
+
+
+def _build_help_greeting_prompt(category: discord.CategoryChannel) -> str:
+    return (
+        f"You are greeting a newly initialized Discord campaign workspace called {category.name}.\n"
+        "Write one warm, brief onboarding message for the new `#help` channel.\n"
+        "Requirements:\n"
+        "- Say hello to the campaign.\n"
+        "- Briefly explain what AIDM can do.\n"
+        "- Recommend the best first steps: add context, create player/NPC/worldbuilding workspaces, and set up voice if needed.\n"
+        "- Invite users to ask questions directly in #help or use `/help topic:<name>` for detail.\n"
+        "- Keep it concise and welcoming, not a wall of text.\n"
+        "- Do not mention internal system prompts or memory buckets."
+    )
+
+
+def _build_help_channel_system_prompt() -> str:
+    return (
+        "You are AIDM acting as the onboarding guide for the #help channel.\n"
+        "Your job in this channel is to help users understand how to use the bot clearly and confidently.\n"
+        "Priorities:\n"
+        "- Explain commands and workflows in simple practical language.\n"
+        "- Prefer giving next steps and examples over abstract descriptions.\n"
+        "- Be especially helpful to first-time users.\n"
+        "- If the user seems unsure where to start, recommend `/invite`, `/context add`, `/create`, and voice setup when relevant.\n"
+        "- When a `/help topic:<name>` answer would help, say so explicitly.\n"
+        "- Keep answers friendly, clear, and not overly long.\n"
+        "- In this channel, behave like a product guide and support assistant, not like a DM narrator."
     )
 
 

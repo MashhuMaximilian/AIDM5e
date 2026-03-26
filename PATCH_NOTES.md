@@ -115,6 +115,29 @@ If `/invite` is run outside a category, it now creates a new category automatica
 - Workspace welcome messages for NPC/Other no longer need to expose the raw internal metadata block to the user.
 - Always-on message handling now ignores Discord system messages such as pin notifications.
 - Typing indicators for workspace and thread replies now target the active thread instead of the parent channel.
+- Workspace card targeting is now less rigid and can resolve more natural requests such as referencing a card by its main noun phrase instead of the full stored title.
+- `Other` workspace prompt guidance now includes typed few-shot examples for common D&D entity shapes such as spells, magic items/artifacts, locations, factions, and quests.
+- NPC workspace prompt guidance now includes a clearer NPC card-structure reference so blank-card threads fill more consistently.
+
+## Player Workspace Pipeline
+
+- The player workspace import/create flow was simplified into a markdown-first pipeline.
+- The old parser / renderer / validator stack under `discord_app/player_workspace/` was removed.
+- Player import now uses:
+  - Pass 1: Gemini draft generation
+  - Pass 2: Gemini format / fill / reference-link backfill normalization
+  - Final app-side split into six workspace cards
+- Added `discord_app/player_workspace/card_splitter.py` as the lightweight card-mapping layer.
+- Card splitting now relies on `###` headings and slot aggregation instead of deep draft reconstruction.
+- The player workspace bundle no longer depends on populated draft/validation objects at runtime.
+- Summary-card rebuild logic in slot sync was removed; slot sync now trusts the card bundle produced by the player pipeline.
+- The player summary formatting requirements were strengthened to explicitly preserve:
+  - build line
+  - spellcasting ability line
+  - AC / DC / PB / speed snapshot
+  - hit dice
+  - 45-block HP bar
+- `/create player` follow-up workspace edits now recover `player_name` from existing player cards and pass it back into the player workspace system prompt instead of dropping it.
 
 ## Model Configuration
 
