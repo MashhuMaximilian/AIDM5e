@@ -2,6 +2,7 @@ import asyncio
 import aiohttp
 import discord
 import logging
+import json
 import re
 from pathlib import Path
 from config import client
@@ -13,6 +14,28 @@ from ai_services.assistant_interactions import get_assistant_response
 from ai_services.gemini_client import gemini_client
 from content_retrieval import extract_public_url_text
 from data_store.memory_management import get_assigned_memory
+from data_store.db_repository import (
+    assign_memory_to_thread,
+    ensure_channel_for_category,
+    ensure_memory,
+    ensure_thread_for_channel,
+    get_or_create_campaign_context,
+    set_thread_always_on,
+)
+from config import DM_ROLE_NAME
+from discord_app.player_workspace.schema import (
+    PlayerWorkspaceBundle,
+    PlayerWorkspaceCardBundle,
+    PlayerWorkspaceRequest,
+    SourceBundle,
+)
+from discord_app.player_workspace.prompting import build_thread_welcome_text
+from discord_app.player_workspace.slots import (
+    find_or_create_player_thread,
+    iter_archived_threads,
+    slugify_player_key,
+    sync_workspace_slots,
+)
 from discord_app.player_workspace.prompting import (
     build_npc_workspace_system_prompt,
     build_other_workspace_system_prompt,
@@ -34,6 +57,7 @@ logging.basicConfig(level=logging.INFO)
 
 URL_RE = re.compile(r"https?://\S+")
 PLAYER_ROW_RE = re.compile(r"PLAYER\.*:\s*([^\n`]+)", re.IGNORECASE)
+GAMEPLAY_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _extract_urls(text: str | None) -> list[str]:
@@ -115,6 +139,354 @@ def _channel_system_prompt(channel_name: str | None) -> str | None:
 
         return _build_help_channel_system_prompt()
     return None
+
+
+def _has_workspace_apply_trigger(text: str | None) -> bool:
+    content = (text or "").lower()
+    trigger_phrases = (
+        "apply to character sheet",
+        "apply to workspace",
+        "update workspace",
+        "update the workspace",
+        "apply this to the sheet",
+        "push to workspace",
+        "update the character sheet",
+    )
+    return any(phrase in content for phrase in trigger_phrases)
+
+
+def _extract_json_payload(text: str) -> dict:
+    match = GAMEPLAY_JSON_RE.search(text or "")
+    if not match:
+        return {}
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _build_gameplay_workspace_analysis_prompt(*, user_message: str, assistant_response: str) -> str:
+    return (
+        "You are extracting possible character workspace updates from a D&D gameplay exchange.\n"
+        "Return JSON only.\n\n"
+        "Rules:\n"
+        "- Detect only explicit or very high-confidence character state changes.\n"
+        "- Auto-safe changes are transient combat-state changes such as HP damage/healing, temporary HP, conditions, exhaustion, hit dice, and similar explicit combat trackers.\n"
+        "- Confirmation-needed changes are inventory/items, spells known/prepared, level-ups, permanent stat/build/profile/canon changes.\n"
+        "- If a change implies downstream effects, include all affected cards.\n"
+        "- If nothing should be updated, return empty arrays.\n"
+        "- Use these player card names when relevant: Character Summary, Profile Card, Skills & Actions, Rules Card, Items Card, Reference Links.\n"
+        "- Keep `update_instruction` concise and imperative, as if it will be sent into the character workspace thread.\n\n"
+        "Return exactly this JSON shape:\n"
+        "{\n"
+        '  "auto_updates": [\n'
+        "    {\n"
+        '      "character_name": "Hanaho",\n'
+        '      "update_instruction": "Update Character Summary and Skills & Actions: Hanaho took 24 damage. HP is now 44/108. Add Restrained condition.",\n'
+        '      "affected_cards": ["Character Summary", "Skills & Actions"],\n'
+        '      "confidence": 0.95\n'
+        "    }\n"
+        "  ],\n"
+        '  "approval_requests": [\n'
+        "    {\n"
+        '      "character_name": "Hanaho",\n'
+        '      "update_instruction": "Update Items Card and Character Summary: add Ring of Protection to Hanaho.",\n'
+        '      "affected_cards": ["Items Card", "Character Summary"],\n'
+        '      "reason": "inventory/item change",\n'
+        '      "confidence": 0.88\n'
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        f"User message:\n{user_message.strip()}\n\n"
+        f"AIDM reply:\n{assistant_response.strip()}"
+    )
+
+
+async def _analyze_gameplay_workspace_updates(*, user_message: str, assistant_response: str) -> dict:
+    prompt = _build_gameplay_workspace_analysis_prompt(
+        user_message=user_message,
+        assistant_response=assistant_response,
+    )
+    raw = await asyncio.to_thread(
+        gemini_client.generate_text,
+        prompt,
+        "You extract gameplay state updates into strict JSON only.",
+    )
+    payload = _extract_json_payload(raw)
+    if not isinstance(payload, dict):
+        return {"auto_updates": [], "approval_requests": []}
+    auto_updates = payload.get("auto_updates")
+    approval_requests = payload.get("approval_requests")
+    return {
+        "auto_updates": auto_updates if isinstance(auto_updates, list) else [],
+        "approval_requests": approval_requests if isinstance(approval_requests, list) else [],
+    }
+
+
+def _build_player_tracker_cards(character_name: str) -> PlayerWorkspaceCardBundle:
+    return PlayerWorkspaceCardBundle(
+        character_card=(
+            f"**{character_name.upper()}**\n\n"
+            "> `BUILD`: Needs review.\n\n"
+            "**Tracker-only workspace created from gameplay.**\n\n"
+            "**💟 HP:** Needs review.\n"
+            "**Temp HP:** Needs review.\n"
+            "**Conditions:** Needs review.\n"
+            "**Exhaustion:** Needs review.\n"
+            "**Hit Dice:** Needs review."
+        ),
+        profile_card="**Tracker placeholder.**\n\nNeeds review.",
+        skills_actions_card="**Tracker placeholder.**\n\nNeeds review.",
+        rules_card="**Tracker placeholder.**\n\nNeeds review.",
+        items_card="**Tracker placeholder.**\n\nNeeds review.",
+        links_card="**Tracker placeholder.**\n\nNeeds review.",
+        welcome_text=build_thread_welcome_text(
+            PlayerWorkspaceRequest(
+                mode="idea",
+                character_name=character_name,
+                player_name=None,
+                source=SourceBundle(note="Auto-created tracker thread from gameplay."),
+                thread_name=f"Character - {character_name}",
+            )
+        ),
+    )
+
+
+async def _ensure_gameplay_player_tracker_thread(message: discord.Message, character_name: str) -> discord.Thread:
+    category = message.channel.category if hasattr(message.channel, "category") else None
+    if category is None:
+        raise ValueError("Gameplay updates require a campaign category.")
+
+    sheets_channel = discord.utils.get(category.text_channels, name="character-sheets")
+    if sheets_channel is None:
+        sheets_channel = await message.guild.create_text_channel(name="character-sheets", category=category)
+    await asyncio.to_thread(
+        ensure_channel_for_category,
+        category.id,
+        sheets_channel.id,
+        sheets_channel.name,
+        False,
+        False,
+    )
+
+    thread_name = f"Character - {character_name.strip()}"
+    player_thread, created_thread = await find_or_create_player_thread(sheets_channel, thread_name)
+
+    context = await asyncio.to_thread(
+        get_or_create_campaign_context,
+        message.guild.id,
+        message.guild.name,
+        category.id,
+        category.name,
+        DM_ROLE_NAME,
+    )
+    memory_name = f"player-{slugify_player_key(character_name)}"
+    memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
+    await asyncio.to_thread(ensure_thread_for_channel, sheets_channel.id, player_thread.id, player_thread.name, True)
+    await asyncio.to_thread(assign_memory_to_thread, player_thread.id, memory_id)
+    await asyncio.to_thread(set_thread_always_on, player_thread.id, True)
+
+    if created_thread:
+        cards = _build_player_tracker_cards(character_name)
+        bundle = PlayerWorkspaceBundle(
+            request=PlayerWorkspaceRequest(
+                mode="idea",
+                character_name=character_name,
+                player_name=None,
+                source=SourceBundle(note="Auto-created tracker thread from gameplay."),
+                thread_name=thread_name,
+            ),
+            cards=cards,
+        )
+        await player_thread.send(cards.welcome_text)
+        await sync_workspace_slots(player_thread, bundle)
+    return player_thread
+
+
+async def _resolve_player_workspace_thread(message: discord.Message, character_name: str) -> tuple[discord.Thread, bool]:
+    category = message.channel.category if hasattr(message.channel, "category") else None
+    if category is None:
+        raise ValueError("Gameplay updates require a campaign category.")
+    sheets_channel = discord.utils.get(category.text_channels, name="character-sheets")
+    if sheets_channel is None:
+        player_thread = await _ensure_gameplay_player_tracker_thread(message, character_name)
+        return player_thread, True
+
+    target_name = character_name.strip().lower()
+    for thread in list(sheets_channel.threads):
+        kind, entity_name = parse_workspace_thread(thread.name)
+        if kind == "player" and (entity_name or "").strip().lower() == target_name:
+            return thread, False
+    for thread in await iter_archived_threads(sheets_channel):
+        kind, entity_name = parse_workspace_thread(thread.name)
+        if kind == "player" and (entity_name or "").strip().lower() == target_name:
+            try:
+                await thread.edit(archived=False, locked=False)
+            except discord.HTTPException:
+                try:
+                    await thread.edit(archived=False)
+                except discord.HTTPException:
+                    pass
+            return thread, False
+
+    player_thread = await _ensure_gameplay_player_tracker_thread(message, character_name)
+    return player_thread, True
+
+
+async def _apply_workspace_update_instruction(
+    *,
+    thread: discord.Thread,
+    request_text: str,
+    target_titles: list[str],
+) -> list[str]:
+    card_messages = await discover_workspace_card_messages(thread)
+    if not card_messages:
+        return []
+    system_prompt = await _workspace_system_prompt(thread, card_messages)
+    if not system_prompt:
+        return []
+
+    parent_channel_id = thread.parent.id if thread.parent else thread.id
+    category_id = thread.parent.category.id if thread.parent and thread.parent.category else None
+    assigned_memory = await get_assigned_memory(parent_channel_id, category_id, thread.id)
+    if not assigned_memory:
+        return []
+
+    card_bodies = {
+        title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
+        for title, card_message in card_messages.items()
+    }
+    prompt_text = build_card_update_prompt(
+        request_text=request_text,
+        card_bodies=card_bodies,
+        target_titles=target_titles,
+    )
+    response = await get_assistant_response(
+        prompt_text,
+        parent_channel_id,
+        category_id,
+        thread.id,
+        assigned_memory,
+        system_prompt=system_prompt,
+    )
+    updates = parse_card_update_response(response)
+    if not updates:
+        return []
+
+    merged_cards = dict(card_bodies)
+    merged_cards.update(updates)
+    kind, entity_name = parse_workspace_thread(thread.name)
+    if kind == "player":
+        card_bundle = PlayerWorkspaceCardBundle(
+            character_card=merged_cards.get("Character Summary", merged_cards.get("Character Card", "Needs review.")),
+            profile_card=merged_cards.get("Profile Card", "Needs review."),
+            skills_actions_card=merged_cards.get("Skills & Actions", "Needs review."),
+            rules_card=merged_cards.get("Rules Card", "Needs review."),
+            items_card=merged_cards.get("Items Card", "Needs review."),
+            links_card=merged_cards.get("Reference Links", "Needs review."),
+            welcome_text=build_thread_welcome_text(
+                PlayerWorkspaceRequest(
+                    mode="idea",
+                    character_name=entity_name,
+                    player_name=None,
+                    source=SourceBundle(),
+                    thread_name=thread.name,
+                )
+            ),
+        )
+        bundle = PlayerWorkspaceBundle(
+            request=PlayerWorkspaceRequest(
+                mode="idea",
+                character_name=entity_name,
+                player_name=None,
+                source=SourceBundle(),
+                thread_name=thread.name,
+            ),
+            cards=card_bundle,
+        )
+        await sync_workspace_slots(thread, bundle)
+    else:
+        await sync_workspace_cards(thread, merged_cards)
+    return list(updates.keys())
+
+
+async def _post_gameplay_workspace_updates(
+    message: discord.Message,
+    *,
+    assistant_response: str,
+) -> None:
+    analysis = await _analyze_gameplay_workspace_updates(
+        user_message=message.content or "",
+        assistant_response=assistant_response,
+    )
+    auto_updates = analysis.get("auto_updates", [])
+    approval_requests = analysis.get("approval_requests", [])
+    explicit_apply = _has_workspace_apply_trigger(message.content)
+
+    updated_labels: list[str] = []
+    created_threads: list[str] = []
+
+    for entry in auto_updates:
+        character_name = (entry.get("character_name") or "").strip()
+        request_text = (entry.get("update_instruction") or "").strip()
+        target_titles = [title for title in (entry.get("affected_cards") or []) if isinstance(title, str)]
+        if not character_name or not request_text:
+            continue
+        thread, created = await _resolve_player_workspace_thread(message, character_name)
+        if created:
+            created_threads.append(character_name)
+        changed = await _apply_workspace_update_instruction(
+            thread=thread,
+            request_text=request_text,
+            target_titles=target_titles,
+        )
+        if changed:
+            updated_labels.append(f"{character_name}: {', '.join(changed)}")
+
+    if approval_requests:
+        if explicit_apply:
+            for entry in approval_requests:
+                character_name = (entry.get("character_name") or "").strip()
+                request_text = (entry.get("update_instruction") or "").strip()
+                target_titles = [title for title in (entry.get("affected_cards") or []) if isinstance(title, str)]
+                if not character_name or not request_text:
+                    continue
+                thread, created = await _resolve_player_workspace_thread(message, character_name)
+                if created:
+                    created_threads.append(character_name)
+                changed = await _apply_workspace_update_instruction(
+                    thread=thread,
+                    request_text=request_text,
+                    target_titles=target_titles,
+                )
+                if changed:
+                    updated_labels.append(f"{character_name}: {', '.join(changed)}")
+        else:
+            lines = []
+            for entry in approval_requests:
+                character_name = (entry.get("character_name") or "").strip() or "Unknown character"
+                affected_cards = [title for title in (entry.get("affected_cards") or []) if isinstance(title, str)]
+                reason = (entry.get("reason") or "non-transient change").strip()
+                card_text = ", ".join(affected_cards) if affected_cards else "the workspace"
+                lines.append(f"• {character_name}: {card_text} ({reason})")
+            if lines:
+                await send_response_in_chunks(
+                    message.channel,
+                    "These changes likely belong in character workspaces, but I need explicit permission before applying them:\n"
+                    + "\n".join(lines)
+                    + "\n\nSay `apply to character sheet` or `apply to workspace` in your gameplay message when you want me to push those non-transient updates.",
+                )
+
+    if updated_labels or created_threads:
+        summary_parts: list[str] = []
+        if updated_labels:
+            summary_parts.append("Workspace updates applied:\n" + "\n".join(f"• {line}" for line in updated_labels))
+        if created_threads:
+            unique_created = list(dict.fromkeys(created_threads))
+            summary_parts.append(
+                "Created lightweight tracker threads for:\n" + "\n".join(f"• {name}" for name in unique_created)
+            )
+        await send_response_in_chunks(message.channel, "\n\n".join(summary_parts))
 
 
 def _has_clear_question(text: str | None) -> bool:
@@ -475,6 +847,14 @@ async def on_message(message):
                     system_prompt=_channel_system_prompt(channel_name),
                 )
                 response_sent = await send_response(response)
+                if response_sent and channel_name == "gameplay" and thread_id is None:
+                    try:
+                        await _post_gameplay_workspace_updates(
+                            message,
+                            assistant_response=response,
+                        )
+                    except Exception as exc:
+                        logging.error("Failed to propagate gameplay workspace updates: %s", exc)
             else:
                 logging.error("Assigned memory ID is invalid or empty.")
 
