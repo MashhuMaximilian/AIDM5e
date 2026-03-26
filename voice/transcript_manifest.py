@@ -39,7 +39,16 @@ class TranscriptManifestStore:
     async def register_chunk(self, audio_filename: Path, duration: int) -> dict:
         return await self.register_external_chunk(audio_filename, duration, self.chunk_counter * duration)
 
-    async def register_external_chunk(self, audio_filename: Path, duration: int, start_offset_seconds: int) -> dict:
+    async def register_external_chunk(
+        self,
+        audio_filename: Path,
+        duration: int,
+        start_offset_seconds: int,
+        *,
+        source_user_id: int | None = None,
+        source_user_name: str | None = None,
+        capture_mode: str | None = None,
+    ) -> dict:
         async with self.lock:
             self.chunk_counter += 1
             chunk = {
@@ -52,6 +61,12 @@ class TranscriptManifestStore:
                 "roster_hints": [],
                 "segments": [],
             }
+            if source_user_id is not None:
+                chunk["source_user_id"] = source_user_id
+            if source_user_name:
+                chunk["source_user_name"] = source_user_name
+            if capture_mode:
+                chunk["capture_mode"] = capture_mode
             self.chunk_manifest.append(chunk)
             await self.persist()
             return chunk
@@ -85,7 +100,13 @@ class TranscriptManifestStore:
         return next((item for item in self.chunk_manifest if item["chunk_index"] == chunk_index), None)
 
     def sorted_chunks(self) -> list[dict]:
-        return sorted(self.chunk_manifest, key=lambda item: item["chunk_index"])
+        return sorted(
+            self.chunk_manifest,
+            key=lambda item: (
+                int(item.get("start_offset_seconds", 0)),
+                int(item.get("chunk_index", 0)),
+            ),
+        )
 
     def pending_recorded_chunks(self) -> list[dict]:
         return [chunk for chunk in self.chunk_manifest if chunk.get("status") == "recorded"]

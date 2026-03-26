@@ -38,6 +38,20 @@ class TranscriptService:
         prior_roster_context = manifest_store.build_roster_context(before_chunk_index=chunk_info["chunk_index"])
         if prior_roster_context:
             instructions.append(prior_roster_context)
+        source_user_name = chunk_info.get("source_user_name")
+        source_user_id = chunk_info.get("source_user_id")
+        if source_user_name:
+            source_hint = (
+                f"This file is a dedicated Discord voice stream from the Discord user {source_user_name}"
+            )
+            if source_user_id is not None:
+                source_hint += f" (user_id={source_user_id})"
+            source_hint += (
+                ". Use that Discord username as the default speaker label when the audio sounds like one person. "
+                f"If the stream seems to contain several real people sharing one microphone or device, prefer "
+                f"`{source_user_name} (possibly multiple speakers)` over generic Unknown labels whenever possible."
+            )
+            instructions.append(source_hint)
         if chunk_info.get("chunk_index") == 1:
             instructions.append(
                 "This is the opening chunk. Pay special attention to introductions, self-identification, "
@@ -329,7 +343,7 @@ class TranscriptService:
 
     async def rebuild_transcript_from_manifest(self, manifest_store: TranscriptManifestStore) -> str:
         warnings: list[str] = []
-        lines: list[str] = []
+        lines: list[tuple[int, int, str]] = []
 
         for chunk in manifest_store.sorted_chunks():
             chunk_index = chunk["chunk_index"]
@@ -355,7 +369,7 @@ class TranscriptService:
                 header += f"[Lang: {lang}]"
                 text = (segment.get("text") or "").strip()
                 if text:
-                    lines.append(f"{header} {text}")
+                    lines.append((absolute_seconds, chunk_index, f"{header} {text}"))
 
         transcript_parts: list[str] = []
         if manifest_store.session_started_at:
@@ -373,8 +387,10 @@ class TranscriptService:
             transcript_parts.extend(f"- {warning}" for warning in all_warnings)
 
         transcript_parts.append("\n=== SESSION TRANSCRIPT ===")
+        lines.sort(key=lambda item: (item[0], item[1], item[2]))
         transcript_parts.extend(
-            lines or ["[00:00:00][UNCLEAR][Speaker: Unknown][Lang: RO+EN] No transcript content captured."]
+            [line for _absolute_seconds, _chunk_index, line in lines]
+            or ["[00:00:00][UNCLEAR][Speaker: Unknown][Lang: RO+EN] No transcript content captured."]
         )
 
         transcript_content = "\n".join(transcript_parts).strip() + "\n"

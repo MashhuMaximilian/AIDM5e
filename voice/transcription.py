@@ -354,6 +354,9 @@ class VoiceRecorder:
 
     async def capture_audio(self, voice_client, duration=recording_duration):
         await self.refresh_context_from_category(getattr(voice_client.channel, "category", None))
+        if hasattr(voice_client, "listen") and hasattr(voice_client, "is_listening"):
+            await self.capture_service.capture_discord_streams(self, voice_client, duration)
+            return
         await self.capture_service.capture_audio(self, voice_client, duration)
 
     async def process_final_transcription(self):

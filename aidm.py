@@ -4,6 +4,10 @@ import asyncio
 import logging
 
 import discord
+try:
+    from discord.ext import voice_recv
+except Exception:  # pragma: no cover - optional runtime dependency guard
+    voice_recv = None
 
 from ai_services.assistant_interactions import get_assistant_response
 from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, client, tree
@@ -113,7 +117,10 @@ async def on_voice_state_update(member, before, after):
     if after.channel and member.id != client.user.id:
         if not any(vc.channel.id == after.channel.id for vc in client.voice_clients):
             try:
-                voice_client = await after.channel.connect()
+                if voice_recv is not None:
+                    voice_client = await after.channel.connect(cls=voice_recv.VoiceRecvClient)
+                else:
+                    voice_client = await after.channel.connect()
                 logging.info("Bot has joined the voice channel: %s", after.channel.name)
                 await recorder.capture_audio(voice_client)
             except discord.ClientException:
