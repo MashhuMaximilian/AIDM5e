@@ -10,11 +10,13 @@ import discord
 
 logger = logging.getLogger(__name__)
 
-WorkspaceKind = Literal["player", "npc", "other"]
+WorkspaceKind = Literal["player", "npc", "other", "monster", "encounter"]
 
 WORKSPACE_THREAD_PREFIXES: tuple[tuple[str, WorkspaceKind], ...] = (
     ("Character - ", "player"),
     ("NPC - ", "npc"),
+    ("Monster - ", "monster"),
+    ("Encounter - ", "encounter"),
     ("Other - ", "other"),
 )
 
@@ -24,6 +26,24 @@ NPC_DEFAULT_CARD_TITLES: tuple[str, ...] = (
     "Personality & Hooks",
     "Stat Block",
     "Relationships",
+)
+
+MONSTER_DEFAULT_CARD_TITLES: tuple[str, ...] = (
+    "Summary Card",
+    "Core Stat Block",
+    "Traits, Magic & Features",
+    "Actions, Reactions & Legendary",
+    "Tactics, Phases & Scaling",
+    "Lore, Hooks & Variants",
+)
+
+ENCOUNTER_DEFAULT_CARD_TITLES: tuple[str, ...] = (
+    "Summary Card",
+    "Enemy Roster",
+    "Balance & Threat",
+    "Battlefield & Hazards",
+    "Phases, Scripts & Triggers",
+    "Outcome, Rewards & Aftermath",
 )
 
 WORKSPACE_META_START = "[AIDM WORKSPACE META]"
@@ -80,7 +100,7 @@ def parse_workspace_metadata(text: str | None) -> WorkspaceDefinition | None:
     end = body.index(WORKSPACE_META_END)
     payload = body[start:end].strip()
 
-    kind_match = re.search(r"^type:\s*(player|npc|other)\s*$", payload, re.MULTILINE)
+    kind_match = re.search(r"^type:\s*(player|npc|other|monster|encounter)\s*$", payload, re.MULTILINE)
     entity_match = re.search(r"^entity:\s*(.+?)\s*$", payload, re.MULTILINE)
     if not kind_match or not entity_match:
         return None
@@ -220,6 +240,243 @@ def build_other_blank_cards(entity_name: str, card_titles: list[str]) -> dict[st
     return cards
 
 
+def build_monster_blank_cards(monster_name: str) -> dict[str, str]:
+    empty_bar = "░" * 45
+    return {
+        "Summary Card": dedent_block(
+            f"""
+            ### 🧩 SUMMARY — {monster_name}
+
+            **Type:** Needs review.
+            **CR:** `Needs review.` | **XP:** `Needs review.` | **PB:** `Needs review.`
+            **Role:** Needs review.
+            **Environment:** Needs review.
+            **Faction / Allegiance:** Needs review.
+            **Importance:** Needs review.
+
+            🛡️ **AC: `Needs review.`**  |  🎯 **DC: `—`** | 💎 **PB: `Needs review.`**  | 🏃 **SPD: `Needs review.`**
+
+            **💟 HP: [ Needs review. / Needs review. ]**
+            `{empty_bar}`
+
+            **🔋 RESOURCE TRACKING**
+            * **Legendary Resistances:** `Needs review.`
+            * **Recharge:** `Needs review.`
+            * **Other Resource:** `Needs review.`
+
+            **Hook:** Needs review.
+            """
+        ),
+        "Core Stat Block": dedent_block(
+            f"""
+            ### 📜 CORE STAT BLOCK — {monster_name}
+
+            **Armor Class:** `Needs review.`
+            **Hit Points:** `Needs review.`
+            **Hit Dice:** `Needs review.`
+            **Speed:** `Needs review.`
+
+            ```text
+            STR Needs review. | DEX Needs review. | CON Needs review.
+            INT Needs review. | WIS Needs review. | CHA Needs review.
+            ```
+
+            **Saving Throws:** Needs review.
+            **Skills:** Needs review.
+            **Damage Vulnerabilities:** Needs review.
+            **Damage Resistances:** Needs review.
+            **Damage Immunities:** Needs review.
+            **Condition Immunities:** Needs review.
+            **Senses:** Needs review.
+            **Languages:** Needs review.
+            **Challenge:** `Needs review.`
+            **Proficiency Bonus:** `Needs review.`
+            """
+        ),
+        "Traits, Magic & Features": dedent_block(
+            f"""
+            ### ✨ TRAITS, MAGIC & FEATURES — {monster_name}
+
+            **Traits:** Needs review.
+
+            **Innate Spellcasting / Spellcasting:** Needs review.
+
+            **Legendary Resistance:** Needs review.
+
+            **Lair Actions / Regional Effects / Group Rules:** Needs review.
+            """
+        ),
+        "Actions, Reactions & Legendary": dedent_block(
+            f"""
+            ### ⚔️ ACTIONS, REACTIONS & LEGENDARY — {monster_name}
+
+            **Actions:** Needs review.
+
+            **Bonus Actions:** Needs review.
+
+            **Reactions:** Needs review.
+
+            **Legendary Actions:** Needs review.
+            """
+        ),
+        "Tactics, Phases & Scaling": dedent_block(
+            f"""
+            ### 🧠 TACTICS, PHASES & SCALING — {monster_name}
+
+            **Behavior:** Needs review.
+            **Priority:** Needs review.
+            **Retreat / Frenzy:** Needs review.
+
+            **Phase Behavior**
+            - **100%–70%:** Needs review.
+            - **70%–30%:** Needs review.
+            - **<30%:** Needs review.
+
+            **Scaling**
+            - **Stronger:** Needs review.
+            - **Weaker:** Needs review.
+            - **Boss / Elite Notes:** Needs review.
+
+            **Balance Notes**
+            - **Action Economy:** Needs review.
+            - **Danger Spikes:** Needs review.
+            - **Counterplay:** Needs review.
+            """
+        ),
+        "Lore, Hooks & Variants": dedent_block(
+            f"""
+            ### 🕯️ LORE, HOOKS & VARIANTS — {monster_name}
+
+            **Origin / Theme:** Needs review.
+            **Rumors / Presence:** Needs review.
+            **Faction Ties:** Needs review.
+            **Recurring Use:** Needs review.
+            **Variant Forms:** Needs review.
+            **Encounter Seeds:** Needs review.
+            """
+        ),
+    }
+
+
+def build_encounter_blank_cards(encounter_name: str) -> dict[str, str]:
+    empty_bar = "░" * 45
+    return {
+        "Summary Card": dedent_block(
+            f"""
+            ### 🧩 SUMMARY — {encounter_name}
+
+            **Type:** Needs review.
+            **Location:** Needs review.
+            **Objective:** Needs review.
+            **Intended Party:** Needs review.
+            **Difficulty Target:** Needs review.
+            **Tone:** Needs review.
+
+            **Linked Monsters / NPCs**
+            - Needs review.
+
+            **Quick Notes**
+            - Needs review.
+            """
+        ),
+        "Enemy Roster": dedent_block(
+            f"""
+            ### 👥 ENEMY ROSTER — {encounter_name}
+
+            **Active Enemies**
+            - **Needs review.**
+              - AC `Needs review.` | HP `Needs review.` | SPD `Needs review.` | CR `Needs review.`
+              - Source: Needs review.
+              - Encounter-specific changes: Needs review.
+              - HP `{empty_bar}`
+
+            **Reinforcements**
+            - Needs review.
+
+            **Special Allies / Neutrals**
+            - Needs review.
+            """
+        ),
+        "Balance & Threat": dedent_block(
+            f"""
+            ### ⚖️ BALANCE & THREAT — {encounter_name}
+
+            **DMG Math**
+            - **Party XP Thresholds:** Needs review.
+            - **Monster Base XP:** Needs review.
+            - **Multiplier:** Needs review.
+            - **Adjusted XP:** Needs review.
+            - **RAW Difficulty:** Needs review.
+
+            **Practical Read**
+            - **Action Economy Pressure:** Needs review.
+            - **Nova Risk:** Needs review.
+            - **Save Pressure:** Needs review.
+            - **Terrain / Hazard Pressure:** Needs review.
+            - **Practical Difficulty:** Needs review.
+
+            **DM Notes**
+            - Needs review.
+            """
+        ),
+        "Battlefield & Hazards": dedent_block(
+            f"""
+            ### 🌋 BATTLEFIELD & HAZARDS — {encounter_name}
+
+            **Arena Overview:** Needs review.
+            **Movement Pressure:** Needs review.
+            **Cover / Verticality:** Needs review.
+            **Special Interactables:** Needs review.
+
+            | Hazard | Effect | Save / Check |
+            | --- | --- | --- |
+            | Needs review. | Needs review. | Needs review. |
+
+            **Initiative Count / Timed Events**
+            - Needs review.
+            """
+        ),
+        "Phases, Scripts & Triggers": dedent_block(
+            f"""
+            ### 🎭 PHASES, SCRIPTS & TRIGGERS — {encounter_name}
+
+            **Intro / Entrance**
+            Needs review.
+
+            **Phase 1**
+            - **Trigger:** Needs review.
+            - **Enemy Behavior:** Needs review.
+            - **Script / Dialogue:** Needs review.
+
+            **Phase 2**
+            - **Trigger:** Needs review.
+            - **Enemy Behavior:** Needs review.
+            - **Reinforcements / Shifts:** Needs review.
+
+            **Special Triggers**
+            - Needs review.
+
+            **Escape / Skill Challenge / Transition**
+            - Needs review.
+            """
+        ),
+        "Outcome, Rewards & Aftermath": dedent_block(
+            f"""
+            ### 🏁 OUTCOME, REWARDS & AFTERMATH — {encounter_name}
+
+            **Victory:** Needs review.
+            **Partial Success:** Needs review.
+            **Failure:** Needs review.
+
+            **Rewards / Loot:** Needs review.
+            **Consequences:** Needs review.
+            **Follow-up Hooks:** Needs review.
+            **Context Worth Publishing:** Needs review.
+            """
+        ),
+    }
+
+
 def dedent_block(text: str) -> str:
     lines = [line.rstrip() for line in text.strip().splitlines()]
     return "\n".join(lines).strip()
@@ -230,6 +487,8 @@ def build_workspace_welcome_text(definition: WorkspaceDefinition) -> str:
         "npc": f"NPC workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
         "other": f"Custom workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
         "player": f"Character workspace ready for {definition.entity_name}. Use this thread as the draft workspace. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
+        "monster": f"Monster workspace ready for {definition.entity_name}. Use this thread as the reusable creature source sheet. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
+        "encounter": f"Encounter workspace ready for {definition.entity_name}. Use this thread as the DM-only planning and tracking space. If not pinned already, I strongly advise you to pin all the relevant cards/messages for the best experience.",
     }[definition.kind]
     return f"{human}\nPost new notes and source material here as it evolves."
 

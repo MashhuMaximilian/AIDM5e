@@ -44,14 +44,20 @@ from discord_app.player_workspace import (
     slugify_player_key,
 )
 from discord_app.player_workspace.prompting import (
+    build_encounter_workspace_system_prompt,
+    build_monster_workspace_system_prompt,
     build_npc_workspace_system_prompt,
     build_other_prepass_prompt,
     build_other_workspace_system_prompt,
     build_player_workspace_system_prompt,
 )
 from discord_app.workspace_threads import (
+    ENCOUNTER_DEFAULT_CARD_TITLES,
+    MONSTER_DEFAULT_CARD_TITLES,
     NPC_DEFAULT_CARD_TITLES,
     WorkspaceDefinition,
+    build_encounter_blank_cards,
+    build_monster_blank_cards,
     build_npc_blank_cards,
     build_other_blank_cards,
     build_workspace_welcome_text,
@@ -144,7 +150,7 @@ def _build_help_text(topic: str) -> str:
             "Use this to scaffold a campaign workspace.\n\n"
             "**What it does**\n"
             "• Creates a campaign category if you run it outside an existing one\n"
-            "• Creates the default channels like `#help`, `#gameplay`, `#telldm`, `#context`, `#session-summary`, `#npcs`, `#worldbuilding`, and `#dm-planning`\n"
+            "• Creates the default channels like `#help`, `#gameplay`, `#telldm`, `#context`, `#session-summary`, `#npcs`, `#worldbuilding`, `#monsters`, `#encounters`, and `#dm-planning`\n"
             "• Creates the default voice channel `session-voice`\n"
             "• Sets up the default memory buckets behind those channels\n\n"
             "**When to use it**\n"
@@ -155,7 +161,7 @@ def _build_help_text(topic: str) -> str:
             "• Read the onboarding posts in `#help`\n"
             "• Use `/help topic:Context`\n"
             "• Add roster, naming, factions, and style notes with `/context add`\n"
-            "• Use `/help topic:Create` when you are ready to make player, NPC, or worldbuilding workspaces"
+            "• Use `/help topic:Create` when you are ready to make player, NPC, monster, encounter, or worldbuilding workspaces"
         )
     if topic == "create":
         return (
@@ -164,14 +170,19 @@ def _build_help_text(topic: str) -> str:
             "**Available workspace types**\n"
             "• `/create player`: player character workspace under `#character-sheets`\n"
             "• `/create npc`: NPC workspace under `#npcs`\n"
+            "• `/create monster`: monster workspace under `#monsters`\n"
+            "• `/create encounter`: encounter workspace under `#encounters`\n"
             "• `/create other`: custom worldbuilding workspace under `#worldbuilding`\n\n"
             "**How workspaces behave**\n"
             "• AIDM creates pinned card messages inside the thread\n"
             "• You can drop notes, URLs, and supported files into the thread\n"
             "• You can ask AIDM to update one card or all cards\n"
-            "• NPC and Other workspaces are draft spaces first; they are meant to be refined over time\n\n"
+            "• NPC, Monster, Encounter, and Other workspaces are draft spaces first; they are meant to be refined over time\n"
+            "• Encounter workspaces can also pull in monsters or NPCs with `/encounter add`\n\n"
             "**Good examples**\n"
             "• `/create npc npc_name:Master Ratta note:Awakened cat scholar and retired academic`\n"
+            "• `/create monster monster_name:Adult Red Dragon note:Canon dragon adapted for a level 15 party`\n"
+            "• `/create encounter encounter_name:The Cinder Throne note:Boss fight in a volcanic caldera`\n"
             "• `/create other entity_name:Huka Masala note:Location, city, sunken spire district`\n"
             "• In the thread: `update the cards using this PDF`\n\n"
             "**Tip**\n"
@@ -336,6 +347,8 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
     context_mention = _get_category_channel_mention(category, "context")
     dm_planning_mention = _get_category_channel_mention(category, "dm-planning")
     worldbuilding_mention = _get_category_channel_mention(category, "worldbuilding")
+    monsters_mention = _get_category_channel_mention(category, "monsters")
+    encounters_mention = _get_category_channel_mention(category, "encounters")
     session_summary_mention = _get_category_channel_mention(category, "session-summary")
     session_voice_mention = _get_category_channel_mention(category, "session-voice")
     gameplay_mention = _get_category_channel_mention(category, "gameplay")
@@ -345,12 +358,15 @@ def _build_invite_onboarding_message(category: discord.CategoryChannel) -> str:
         f"• Use {context_mention} for public evergreen facts and session notes.\n"
         f"• Use {dm_planning_mention} for DM-only material.\n"
         f"• Use {worldbuilding_mention} for locations, factions, lore, custom entities, and `/create other` workspaces.\n"
+        f"• Use {monsters_mention} for reusable monster source sheets.\n"
+        f"• Use {encounters_mention} for DM-only encounter planning and scripts.\n"
         f"• Live voice sessions should use {session_voice_mention}.\n"
         f"• Transcript and recap output will land in {session_summary_mention}.\n"
         f"• Session play/chat can happen in {gameplay_mention} and your other campaign channels.\n\n"
         "**Recommended first steps**\n"
         "• Run `/help topic:Context`\n"
         "• Add the party roster and naming/spelling clarifications with `/context add`\n"
+        "• Create player, NPC, monster, and encounter workspaces as your prep library grows\n"
         "• Use `Session Only` context for next-session notes, then replace or clear it manually when you are done with it\n"
         f"• Drop useful reference images into {context_mention} as the visual library grows\n"
         "• Use `/settings images` when you want automatic post-session image generation\n"
@@ -395,7 +411,7 @@ def _build_help_greeting_prompt(category: discord.CategoryChannel) -> str:
         "Requirements:\n"
         "- Say hello to the campaign.\n"
         "- Briefly explain what AIDM can do.\n"
-        "- Recommend the best first steps: add context, create player/NPC/worldbuilding workspaces, and set up voice if needed.\n"
+        "- Recommend the best first steps: add context, create player/NPC/monster/encounter/worldbuilding workspaces, and set up voice if needed.\n"
         "- Invite users to ask questions directly in #help or use `/help topic:<name>` for detail.\n"
         "- Keep it concise and welcoming, not a wall of text.\n"
         "- Do not mention internal system prompts or memory buckets."
@@ -410,7 +426,7 @@ def _build_help_channel_system_prompt() -> str:
         "- Explain commands and workflows in simple practical language.\n"
         "- Prefer giving next steps and examples over abstract descriptions.\n"
         "- Be especially helpful to first-time users.\n"
-        "- If the user seems unsure where to start, recommend `/invite`, `/context add`, `/create`, and voice setup when relevant.\n"
+        "- If the user seems unsure where to start, recommend `/invite`, `/context add`, `/create`, `/encounter add`, and voice setup when relevant.\n"
         "- When a `/help topic:<name>` answer would help, say so explicitly.\n"
         "- Keep answers friendly, clear, and not overly long.\n"
         "- In this channel, behave like a product guide and support assistant, not like a DM narrator."
@@ -763,6 +779,55 @@ def _default_npc_cascade_rules_text() -> str:
     )
 
 
+def _default_monster_card_inventory_text() -> str:
+    descriptions = {
+        "Summary Card": "Identity, CR, XP, PB, role, environment, hook, HP bar, and quick resource tracking.",
+        "Core Stat Block": "Compact 5e-style stat record with AC, HP, hit dice, speed, ability scores, saves, skills, senses, languages, and defenses.",
+        "Traits, Magic & Features": "Passive traits, spellcasting, legendary resistance, lair/regional effects, and special group rules.",
+        "Actions, Reactions & Legendary": "Actions, bonus actions, reactions, legendary actions, and table-facing combat options.",
+        "Tactics, Phases & Scaling": "How to run the monster, phase behavior, stronger/weaker variants, and balance notes.",
+        "Lore, Hooks & Variants": "Origin, rumors, faction ties, recurring use, variants, and encounter seeds.",
+    }
+    return "\n".join(f"- {title}: {descriptions[title]}" for title in MONSTER_DEFAULT_CARD_TITLES)
+
+
+def _default_monster_cascade_rules_text() -> str:
+    return "\n".join(
+        [
+            "- AC, HP, speed, ability score, save, or skill change -> Summary Card, Core Stat Block, Tactics, Phases & Scaling if behavior changes",
+            "- New trait, spellcasting, resistance, immunity, legendary resistance, lair effect, or regional effect -> Traits, Magic & Features and Summary Card when the quick snapshot should reflect it",
+            "- New action, reaction, legendary action, or recharge change -> Actions, Reactions & Legendary, Summary Card, and Tactics, Phases & Scaling if usage changes",
+            "- CR, XP, PB, or stronger/weaker tuning -> Summary Card, Core Stat Block, Tactics, Phases & Scaling",
+            "- Story role, faction, environment, or lore relevance -> Summary Card and Lore, Hooks & Variants",
+        ]
+    )
+
+
+def _default_encounter_card_inventory_text() -> str:
+    descriptions = {
+        "Summary Card": "Encounter concept, location, objective, intended party, difficulty target, and linked monsters or NPCs.",
+        "Enemy Roster": "Encounter-local snapshots of monsters and NPCs, counts, roles, key stats, and source references.",
+        "Balance & Threat": "DMG math, adjusted XP, action economy, practical difficulty, and risk notes.",
+        "Battlefield & Hazards": "Arena overview, movement pressure, interactables, hazards, and initiative-count events.",
+        "Phases, Scripts & Triggers": "Entrances, phase transitions, reinforcements, scripted beats, and challenge transitions.",
+        "Outcome, Rewards & Aftermath": "Success/failure branches, loot, consequences, and context worth publishing.",
+    }
+    return "\n".join(f"- {title}: {descriptions[title]}" for title in ENCOUNTER_DEFAULT_CARD_TITLES)
+
+
+def _default_encounter_cascade_rules_text() -> str:
+    return "\n".join(
+        [
+            "- Adding or removing monsters/NPCs -> Enemy Roster, Balance & Threat, and affected Phases, Scripts & Triggers",
+            "- Count changes or local stat overrides -> Enemy Roster, Balance & Threat, and Battlefield & Hazards or Phases, Scripts & Triggers if pacing changes",
+            "- Hazard or terrain changes -> Battlefield & Hazards, Balance & Threat, and Phases, Scripts & Triggers if timing changes",
+            "- New phase, reinforcement wave, transition, script beat, or fail-safe -> Phases, Scripts & Triggers and Summary Card if the concept changes",
+            "- Reward or aftermath change -> Outcome, Rewards & Aftermath",
+            "- Objective or tone change -> Summary Card and any affected script or outcome cards",
+        ]
+    )
+
+
 async def _ensure_workspace_thread(
     interaction: discord.Interaction,
     *,
@@ -771,6 +836,7 @@ async def _ensure_workspace_thread(
     memory_prefix: str,
     target_channel_name: str,
     reuse_channel_memory: bool = False,
+    is_dm_private: bool = False,
 ) -> tuple[discord.TextChannel, discord.Thread, bool]:
     category = get_interaction_category(interaction)
     if category is None:
@@ -778,7 +844,25 @@ async def _ensure_workspace_thread(
 
     sheets_channel = discord.utils.get(category.text_channels, name=target_channel_name)
     if sheets_channel is None:
-        sheets_channel = await interaction.guild.create_text_channel(name=target_channel_name, category=category)
+        create_kwargs = {"name": target_channel_name, "category": category}
+        if is_dm_private:
+            dm_role = discord.utils.get(interaction.guild.roles, name=DM_ROLE_NAME)
+            if dm_role is None:
+                raise ValueError(f"Missing required `{DM_ROLE_NAME}` role for DM-private workspace channel creation.")
+            bot_member = interaction.guild.me or interaction.guild.get_member(getattr(interaction.guild._state.user, "id", 0))
+            overwrites = {
+                interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                dm_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            }
+            if bot_member:
+                overwrites[bot_member] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    manage_channels=True,
+                )
+            create_kwargs["overwrites"] = overwrites
+        sheets_channel = await interaction.guild.create_text_channel(**create_kwargs)
 
     await asyncio.to_thread(
         ensure_channel_for_category,
@@ -786,7 +870,7 @@ async def _ensure_workspace_thread(
         sheets_channel.id,
         sheets_channel.name,
         False,
-        False,
+        is_dm_private,
     )
 
     thread_name = f"{thread_prefix} - {display_name}"

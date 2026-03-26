@@ -178,6 +178,98 @@ def register(create_group, h) -> None:
             ephemeral=True,
         )
 
+    @create_group.command(name="monster", description="Create or refresh a monster workspace.")
+    @app_commands.describe(
+        monster_name="Monster name. Used for the thread and card labels.",
+        note="Optional notes, source hints, or scaling instructions for the monster.",
+    )
+    async def create_monster(
+        interaction: discord.Interaction,
+        monster_name: str,
+        note: str | None = None,
+    ):
+        await h.send_command_ack(interaction, "Creating monster workspace... this should just take a moment.")
+
+        display_name = (monster_name or "New Monster").strip()
+        _, monster_thread, created_thread = await h._ensure_workspace_thread(
+            interaction,
+            display_name=display_name,
+            thread_prefix="Monster",
+            memory_prefix="monster",
+            target_channel_name="monsters",
+            is_dm_private=True,
+        )
+
+        definition = h.WorkspaceDefinition(
+            kind="monster",
+            entity_name=display_name,
+            user_note=(note or "").strip(),
+            card_inventory_text=h._default_monster_card_inventory_text(),
+            cascade_rules_text=h._default_monster_cascade_rules_text(),
+            card_titles=list(h.MONSTER_DEFAULT_CARD_TITLES),
+        )
+        cards = h.build_monster_blank_cards(display_name)
+
+        if created_thread:
+            await monster_thread.send(h.build_workspace_welcome_text(definition))
+
+        await h.sync_workspace_cards(monster_thread, cards)
+        if created_thread:
+            await h._pin_recent_bot_messages(monster_thread)
+
+        action_label = "created" if created_thread else "updated"
+        await h.send_interaction_message(
+            interaction,
+            f"Monster workspace {action_label} in {monster_thread.mention}.",
+            ephemeral=True,
+        )
+
+    @create_group.command(name="encounter", description="Create or refresh an encounter workspace.")
+    @app_commands.describe(
+        encounter_name="Encounter name. Used for the thread and card labels.",
+        note="Optional notes about the encounter concept, tone, or location.",
+    )
+    async def create_encounter(
+        interaction: discord.Interaction,
+        encounter_name: str,
+        note: str | None = None,
+    ):
+        await h.send_command_ack(interaction, "Creating encounter workspace... this should just take a moment.")
+
+        display_name = (encounter_name or "New Encounter").strip()
+        _, encounter_thread, created_thread = await h._ensure_workspace_thread(
+            interaction,
+            display_name=display_name,
+            thread_prefix="Encounter",
+            memory_prefix="encounter",
+            target_channel_name="encounters",
+            is_dm_private=True,
+        )
+
+        definition = h.WorkspaceDefinition(
+            kind="encounter",
+            entity_name=display_name,
+            user_note=(note or "").strip(),
+            card_inventory_text=h._default_encounter_card_inventory_text(),
+            cascade_rules_text=h._default_encounter_cascade_rules_text(),
+            card_titles=list(h.ENCOUNTER_DEFAULT_CARD_TITLES),
+        )
+        cards = h.build_encounter_blank_cards(display_name)
+
+        if created_thread:
+            await encounter_thread.send(h.build_workspace_welcome_text(definition))
+
+        await h.sync_workspace_cards(encounter_thread, cards)
+        if created_thread:
+            await h._pin_recent_bot_messages(encounter_thread)
+
+        action_label = "created" if created_thread else "updated"
+        await h.send_interaction_message(
+            interaction,
+            f"Encounter workspace {action_label} in {encounter_thread.mention}.",
+            ephemeral=True,
+        )
+
     @create_group.command(name="other", description="Create or refresh a custom workspace.")
     @app_commands.describe(
         entity_name="Entity name. Used for the thread and card labels.",

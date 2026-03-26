@@ -37,6 +37,8 @@ from discord_app.player_workspace.slots import (
     sync_workspace_slots,
 )
 from discord_app.player_workspace.prompting import (
+    build_encounter_workspace_system_prompt,
+    build_monster_workspace_system_prompt,
     build_npc_workspace_system_prompt,
     build_other_workspace_system_prompt,
     build_player_workspace_system_prompt,
@@ -681,6 +683,10 @@ async def _workspace_system_prompt(thread: discord.Thread, card_messages: dict[s
         return build_player_workspace_system_prompt(entity_name, _extract_player_name_from_workspace_cards(card_messages))
     if kind == "npc":
         return build_npc_workspace_system_prompt(entity_name)
+    if kind == "monster":
+        return build_monster_workspace_system_prompt(entity_name)
+    if kind == "encounter":
+        return build_encounter_workspace_system_prompt(entity_name)
 
     metadata = None
     async for thread_message in thread.history(limit=20, oldest_first=True):
