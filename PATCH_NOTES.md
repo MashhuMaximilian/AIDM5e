@@ -23,6 +23,8 @@ This file tracks the implemented state of the Gemini + Supabase rewrite and the 
 - `feedback`
 - `npcs`
 - `worldbuilding`
+- `monsters`
+- `encounters`
 - `character-sheets`
 - `lore-and-teasers`
 - `items`
@@ -107,8 +109,25 @@ If `/invite` is run outside a category, it now creates a new category automatica
 ## Workspace Threads
 
 - Added `/create npc` and `/create other` workspace scaffolding.
+- Added `/create monster` and `/create encounter` workspace scaffolding.
 - `/create npc` creates workspace threads under `#npcs` and assigns a dedicated NPC memory to the thread.
+- `/create monster` creates DM-private reusable monster source threads under `#monsters`.
+- `/create encounter` creates DM-private encounter planning threads under `#encounters`.
 - `/create other` creates workspace threads under `#worldbuilding` and reuses the parent channel's `worldbuilding` memory.
+- Monster workspaces use monster-specific cards and prompts from day one:
+  - `Summary Card`
+  - `Core Stat Block`
+  - `Traits, Magic & Features`
+  - `Actions, Reactions & Legendary`
+  - `Tactics, Phases & Scaling`
+  - `Lore, Hooks & Variants`
+- Encounter workspaces use encounter-specific cards and prompts from day one:
+  - `Summary Card`
+  - `Enemy Roster`
+  - `Balance & Threat`
+  - `Battlefield & Hazards`
+  - `Phases, Scripts & Triggers`
+  - `Outcome, Rewards & Aftermath`
 - NPC/Other workspace cards are created as blank cards and are no longer auto-filled immediately after thread creation.
 - Workspace card updates now:
   - work even when Discord pinning fails
@@ -126,6 +145,8 @@ If `/invite` is run outside a category, it now creates a new category automatica
 - Non-transient gameplay changes now require explicit workspace/apply wording before they are pushed into character workspaces.
 - If a referenced player character thread does not exist yet, AIDM can now create a lightweight tracker thread under `#character-sheets` and apply the update there.
 - Gameplay update propagation is currently player-thread focused; NPC/monster encounter integration remains a later follow-up.
+- Added `/encounter add` as the first DM-only encounter helper command.
+- `/encounter add` can snapshot an existing monster or NPC workspace thread into the current encounter thread and update the encounter's roster/balance cards without creating live sync back to the source thread.
 
 ## Player Workspace Pipeline
 
