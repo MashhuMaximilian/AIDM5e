@@ -100,6 +100,9 @@ If `/invite` is run outside a category, it now creates a new category automatica
 - Utility command error handling was improved and old command duplication issues were cleaned up.
 - Command registration was modularized out of `discord_app/bot_commands.py` into command-group modules under `/Users/max/Documents/Max/Projecs and Ideas/Discord AI DM FOR VM/discord_app/commands/`.
 - Any incoming message that contains a public URL can now trigger the same fetch-first URL reading path that `/reference` uses.
+- `/invite` now also creates `#help`, posts a structured onboarding guide there, and posts a short AI greeting after setup.
+- The `#help` guide now includes a Party Voice Roster Template users can fill in and store in `#context` for better transcript attribution.
+- `#help` now has a dedicated onboarding/support assistant prompt so normal help-channel conversation stays focused on using the bot.
 
 ## Workspace Threads
 
@@ -118,6 +121,11 @@ If `/invite` is run outside a category, it now creates a new category automatica
 - Workspace card targeting is now less rigid and can resolve more natural requests such as referencing a card by its main noun phrase instead of the full stored title.
 - `Other` workspace prompt guidance now includes typed few-shot examples for common D&D entity shapes such as spells, magic items/artifacts, locations, factions, and quests.
 - NPC workspace prompt guidance now includes a clearer NPC card-structure reference so blank-card threads fill more consistently.
+- `#gameplay` can now trigger cross-thread character workspace updates after AIDM replies.
+- Auto-safe gameplay updates now support transient combat-state changes such as HP, temporary HP, conditions, exhaustion, and hit dice.
+- Non-transient gameplay changes now require explicit workspace/apply wording before they are pushed into character workspaces.
+- If a referenced player character thread does not exist yet, AIDM can now create a lightweight tracker thread under `#character-sheets` and apply the update there.
+- Gameplay update propagation is currently player-thread focused; NPC/monster encounter integration remains a later follow-up.
 
 ## Player Workspace Pipeline
 
@@ -190,6 +198,11 @@ The old transcript flow has been substantially refactored.
   - session-start introduction handling when present
   - chunk-local `roster_hints` for later chunks
 - public and session context can now be mined for roster candidates such as `Phil playing Kogone`, which are fed back into transcript prompting as identification aids
+- Remote Discord voice capture now supports a per-user stream mode when `discord-ext-voice-recv` is available.
+- Per-user Discord stream chunks now carry upstream source hints such as Discord username and user ID into the transcription prompt.
+- Transcript labeling now prefers the Discord username for dedicated user streams and can fall back to labels like `Name (possibly multiple speakers)` when a shared microphone/device is likely.
+- Final transcript rebuilding now merges per-user stream chunks by absolute time so simultaneous speakers can interleave correctly in the final output.
+- The older FFmpeg room-capture path remains as a fallback when Discord receive mode is unavailable.
 
 ## Database Lifecycle
 

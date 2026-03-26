@@ -21,6 +21,18 @@
   - [ ] write clean, human-readable campaign context into `#context`
   - [ ] decide how character image references should be attached or linked
 
+- [ ] Validate gameplay -> workspace cross-thread updates in real Discord play
+  - [ ] verify auto-safe updates from `#gameplay`:
+    - [ ] HP damage / healing
+    - [ ] temporary HP
+    - [ ] conditions
+    - [ ] exhaustion
+    - [ ] hit dice and similar combat trackers
+  - [ ] verify confirmation prompts for inventory, spellbook, level-up, and major canon edits
+  - [ ] verify multiple affected characters in the same gameplay exchange
+  - [ ] verify lightweight tracker-thread creation when a character workspace does not exist yet
+  - [ ] extend later to NPCs / monsters once encounters are supported
+
 - [ ] Test the Discord-native context workflow end-to-end against the image pipeline
   - [ ] use real `#context` character descriptions and image references
   - [ ] verify scene selection quality against existing summaries
@@ -34,6 +46,14 @@
 
 ## Voice / Transcript
 
+- [ ] Validate Discord per-user speaker attribution
+  - [ ] verify one Discord user = one clear speaker
+  - [ ] verify several Discord users speaking in the same session
+  - [ ] verify one Discord user / one microphone capturing multiple real speakers
+  - [ ] verify mixed cases where some users are solo and one user is a room mic
+  - [ ] verify final transcript ordering when several per-user files share the same time window
+  - [ ] verify transcript labels prefer Discord usernames over generic `Unknown` when appropriate
+- [ ] Decide whether to enrich transcript prompts further with the party roster template from `#context`
 - [ ] Keep testing `AUDIO_SUMMARY_WINDOW_CHUNKS=1` vs `2`
 - [ ] Decide whether final audio-summary reduction should later receive merged transcript as secondary context
 - [ ] Revisit summary prompt instructions for tone, uncertainty, and delivery cues
@@ -72,6 +92,8 @@
   - [ ] decide whether API keys attach per guild or per campaign
   - [ ] likely handle this under `/settings global` for guild-level ownership
   - [ ] decide how the runtime resolves which key to use for a given request
+  - [ ] decide how guild-owned API keys are stored server-side for production use
+  - [ ] decide rotation / deletion / fallback behavior when a guild key is missing or revoked
 
 - [ ] Design campaign-level billing / monetization model
   - [ ] decide whether monetization is credit-based or flat monthly
@@ -84,6 +106,7 @@
 
 ## Later
 
+- [ ] Decide product behavior for brainstorming vs strict workspace editing before Dockerization
 - [ ] Consider moving long stable workspace/system prompt bodies into dedicated files under `prompts/`
 - [ ] Revisit whether `/reference` should support more attachment/document types
 - [ ] Consider whether a separate art / gallery channel is worthwhile
