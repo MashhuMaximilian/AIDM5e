@@ -20,6 +20,7 @@ cd AIDM5e
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 python3 aidm.py
 ```
 
@@ -61,6 +62,8 @@ GEMINI_IMAGE_DEFAULT_ASPECT_RATIO=4:3
 DIRECT_CONNECTION_STRING=
 # or the SUPABASE_DB_* variables instead
 ```
+
+Start from `.env.example` so local development and first VPS deployment use the same variable surface.
 
 ## Voice / Audio Settings
 
