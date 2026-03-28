@@ -1,5 +1,7 @@
 import logging
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -24,52 +26,115 @@ from config import (
 
 
 logger = logging.getLogger(__name__)
+_CURRENT_GEMINI_API_KEY: ContextVar[str | None] = ContextVar("current_gemini_api_key", default=None)
+
+
+def _client_error_status_code(exc: Exception) -> int | None:
+    return getattr(exc, "status_code", None) or getattr(exc, "code", None)
+
+
+def is_gemini_auth_error(exc: Exception) -> bool:
+    status_code = _client_error_status_code(exc)
+    if status_code in {401, 403}:
+        return True
+    message = str(exc).lower()
+    auth_markers = (
+        "api key not valid",
+        "invalid api key",
+        "api_key_invalid",
+        "permission denied",
+        "authentication",
+        "invalid argument",
+        "credentials",
+    )
+    return any(marker in message for marker in auth_markers)
+
+
+@contextmanager
+def use_gemini_api_key(api_key: str | None):
+    token = _CURRENT_GEMINI_API_KEY.set(api_key.strip() if isinstance(api_key, str) else api_key)
+    try:
+        yield
+    finally:
+        _CURRENT_GEMINI_API_KEY.reset(token)
 
 
 class GeminiClient:
     def __init__(self) -> None:
-        if not GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY is not configured.")
-        self.client = genai.Client(api_key=GEMINI_API_KEY)
+        self._client_cache: dict[str, genai.Client] = {}
+
+    def _resolve_api_key(self, api_key: str | None = None) -> str:
+        resolved = (api_key or _CURRENT_GEMINI_API_KEY.get() or GEMINI_API_KEY or "").strip()
+        if not resolved:
+            raise RuntimeError(
+                "No Gemini API key is configured. Add a guild key with `/settings global set-api-key` "
+                "or configure GEMINI_API_KEY for local/dev use."
+            )
+        return resolved
+
+    def _get_client(self, api_key: str | None = None) -> genai.Client:
+        resolved = self._resolve_api_key(api_key)
+        client = self._client_cache.get(resolved)
+        if client is None:
+            client = genai.Client(api_key=resolved)
+            self._client_cache[resolved] = client
+        return client
 
     def generate_text(
         self,
         prompt: str,
         system_instruction: str | None = None,
         model_name: str | None = None,
+        *,
+        api_key: str | None = None,
     ) -> str:
-        return self._generate_text_with_model(model_name or GEMINI_CHAT_MODEL, prompt, system_instruction)
+        return self._generate_text_with_model(
+            model_name or GEMINI_CHAT_MODEL,
+            prompt,
+            system_instruction,
+            api_key=api_key,
+        )
 
     def generate_summary_text(
         self,
         prompt: str,
         system_instruction: str | None = None,
+        *,
+        api_key: str | None = None,
     ) -> str:
-        return self._generate_text_with_model(GEMINI_SUMMARY_MODEL, prompt, system_instruction)
+        return self._generate_text_with_model(
+            GEMINI_SUMMARY_MODEL,
+            prompt,
+            system_instruction,
+            api_key=api_key,
+        )
 
     def generate_text_from_files(
         self,
         file_paths: list[str],
         prompt: str,
         model_name: str | None = None,
+        *,
+        api_key: str | None = None,
     ) -> str:
-        uploaded_files = [self.client.files.upload(file=Path(file_path)) for file_path in file_paths]
+        client = self._get_client(api_key)
+        uploaded_files = [client.files.upload(file=Path(file_path)) for file_path in file_paths]
         chosen_model = model_name or GEMINI_SUMMARY_MODEL
 
         try:
             for index, uploaded in enumerate(uploaded_files):
-                uploaded_files[index] = self._wait_for_file(uploaded)
+                uploaded_files[index] = self._wait_for_file(client, uploaded)
 
             try:
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=chosen_model,
                     contents=[prompt, *uploaded_files],
                 )
             except ClientError as exc:
-                status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+                status_code = _client_error_status_code(exc)
                 if status_code == 404 and chosen_model != GEMINI_FALLBACK_MODEL:
                     logger.warning("Gemini model %s unavailable for files; retrying with %s", chosen_model, GEMINI_FALLBACK_MODEL)
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=GEMINI_FALLBACK_MODEL,
                         contents=[prompt, *uploaded_files],
                     )
@@ -79,11 +144,11 @@ class GeminiClient:
         finally:
             for uploaded in uploaded_files:
                 try:
-                    self.client.files.delete(name=uploaded.name)
+                    client.files.delete(name=uploaded.name)
                 except Exception as exc:
                     logger.warning("Failed to delete uploaded Gemini file %s: %s", uploaded.name, exc)
 
-    def _wait_for_file(self, uploaded):
+    def _wait_for_file(self, client: genai.Client, uploaded):
         for _ in range(60):
             state = getattr(uploaded, "state", None)
             state_name = getattr(state, "name", None)
@@ -92,7 +157,7 @@ class GeminiClient:
             if state_name == "FAILED":
                 raise RuntimeError(f"Gemini file processing failed for {uploaded.name}.")
             time.sleep(1)
-            uploaded = self.client.files.get(name=uploaded.name)
+            uploaded = client.files.get(name=uploaded.name)
         return uploaded
 
     def generate_text_with_url_context(
@@ -100,6 +165,8 @@ class GeminiClient:
         prompt: str,
         urls: list[str],
         system_instruction: str | None = None,
+        *,
+        api_key: str | None = None,
     ) -> str:
         joined_urls = "\n".join(f"- {url}" for url in urls)
         contextual_prompt = f"{prompt}\n\nRelevant public URLs:\n{joined_urls}"
@@ -111,9 +178,16 @@ class GeminiClient:
             system_instruction=system_instruction,
             tools=[types.Tool(url_context=types.UrlContext())],
         )
-        return self._generate_with_config(GEMINI_CHAT_MODEL, contextual_prompt, config)
+        return self._generate_with_config(GEMINI_CHAT_MODEL, contextual_prompt, config, api_key=api_key)
 
-    def _generate_text_with_model(self, model_name: str, prompt: str, system_instruction: str | None = None) -> str:
+    def _generate_text_with_model(
+        self,
+        model_name: str,
+        prompt: str,
+        system_instruction: str | None = None,
+        *,
+        api_key: str | None = None,
+    ) -> str:
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
             top_p=GEMINI_TOP_P,
@@ -121,20 +195,28 @@ class GeminiClient:
             max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
             system_instruction=system_instruction,
         )
-        return self._generate_with_config(model_name, prompt, config)
+        return self._generate_with_config(model_name, prompt, config, api_key=api_key)
 
-    def _generate_with_config(self, model_name: str, prompt: str, config: types.GenerateContentConfig) -> str:
+    def _generate_with_config(
+        self,
+        model_name: str,
+        prompt: str,
+        config: types.GenerateContentConfig,
+        *,
+        api_key: str | None = None,
+    ) -> str:
+        client = self._get_client(api_key)
         try:
-            response = self.client.models.generate_content(
+            response = client.models.generate_content(
                 model=model_name,
                 contents=prompt,
                 config=config,
             )
         except ClientError as exc:
-            status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            status_code = _client_error_status_code(exc)
             if status_code == 404 and model_name != GEMINI_FALLBACK_MODEL:
                 logger.warning("Gemini model %s unavailable; retrying with %s", model_name, GEMINI_FALLBACK_MODEL)
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=GEMINI_FALLBACK_MODEL,
                     contents=prompt,
                     config=config,
@@ -143,23 +225,31 @@ class GeminiClient:
                 raise
         return (response.text or "").strip()
 
-    def transcribe_audio(self, audio_file_path: str, prompt: str, model_name: str | None = None) -> str:
-        uploaded = self.client.files.upload(file=Path(audio_file_path))
+    def transcribe_audio(
+        self,
+        audio_file_path: str,
+        prompt: str,
+        model_name: str | None = None,
+        *,
+        api_key: str | None = None,
+    ) -> str:
+        client = self._get_client(api_key)
+        uploaded = client.files.upload(file=Path(audio_file_path))
         chosen_model = model_name or GEMINI_TRANSCRIBE_MODEL
 
-        uploaded = self._wait_for_file(uploaded)
+        uploaded = self._wait_for_file(client, uploaded)
 
         try:
             try:
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=chosen_model,
                     contents=[prompt, uploaded],
                 )
             except ClientError as exc:
-                status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+                status_code = _client_error_status_code(exc)
                 if status_code == 404 and chosen_model != GEMINI_FALLBACK_MODEL:
                     logger.warning("Gemini model %s unavailable for audio; retrying with %s", chosen_model, GEMINI_FALLBACK_MODEL)
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=GEMINI_FALLBACK_MODEL,
                         contents=[prompt, uploaded],
                     )
@@ -168,7 +258,7 @@ class GeminiClient:
             return (response.text or "").strip()
         finally:
             try:
-                self.client.files.delete(name=uploaded.name)
+                client.files.delete(name=uploaded.name)
             except Exception as exc:
                 logger.warning("Failed to delete uploaded Gemini file %s: %s", uploaded.name, exc)
 
@@ -242,8 +332,10 @@ class GeminiClient:
         reference_images: list | None = None,
         negative_prompt: str | None = None,
         number_of_images: int = 1,
+        api_key: str | None = None,
     ) -> list[dict]:
         chosen_model = model_name or GEMINI_IMAGE_MODEL
+        client = self._get_client(api_key)
         refs = list(reference_images or [])
         use_generate_content = chosen_model.startswith("gemini-")
         effective_prompt = prompt.strip()
@@ -269,7 +361,7 @@ class GeminiClient:
                         )
                     )
 
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=chosen_model,
                     contents=content_parts,
                     config=types.GenerateContentConfig(
@@ -313,7 +405,7 @@ class GeminiClient:
                     logger.warning(
                         "Reference images are not supported for non-Gemini image generation path; using prompt-only generation."
                     )
-                response = self.client.models.generate_images(
+                response = client.models.generate_images(
                     model=chosen_model,
                     prompt=effective_prompt,
                     config=config,

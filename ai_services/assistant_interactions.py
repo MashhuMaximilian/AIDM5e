@@ -3,6 +3,11 @@
 import asyncio
 import logging
 
+from ai_services.guild_api_keys import (
+    raise_for_guild_gemini_exception,
+    record_guild_gemini_key_success,
+    use_guild_gemini_api_key,
+)
 from config import AIDM_PROMPT_PATH, client
 from data_store.db_repository import get_memory_name
 from discord_app.shared_functions import send_response_in_chunks
@@ -91,14 +96,31 @@ async def get_assistant_response(
         normalized_message = _normalize_user_message(user_message)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
         prompt = _build_prompt(memory_name, normalized_message, context_block=context_block)
+        guild = getattr(channel, "guild", None)
+        guild_id = getattr(guild, "id", None)
 
         async with channel.typing():
-            response_text = await asyncio.to_thread(
-                gemini_client.generate_text,
-                prompt,
-                _compose_system_prompt(system_prompt),
-                model_name,
-            )
+            try:
+                if guild_id is not None:
+                    with use_guild_gemini_api_key(guild_id):
+                        response_text = await asyncio.to_thread(
+                            gemini_client.generate_text,
+                            prompt,
+                            _compose_system_prompt(system_prompt),
+                            model_name,
+                        )
+                    await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                else:
+                    response_text = await asyncio.to_thread(
+                        gemini_client.generate_text,
+                        prompt,
+                        _compose_system_prompt(system_prompt),
+                        model_name,
+                    )
+            except Exception as exc:
+                if guild_id is not None:
+                    await asyncio.to_thread(raise_for_guild_gemini_exception, guild_id, exc)
+                raise
 
         if not response_text:
             return "No valid response received from Gemini."
@@ -110,4 +132,6 @@ async def get_assistant_response(
 
     except Exception as exc:
         logger.error("Error during the Gemini interaction: %s", exc)
+        if isinstance(exc, ValueError):
+            return str(exc)
         return f"Error during the Gemini interaction: {exc}"

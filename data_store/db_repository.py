@@ -1,11 +1,12 @@
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from config import DIRECT_CONNECTION_STRING, DM_ROLE_NAME, SUPABASE_URL
+from config import AIDM_KEY_ENCRYPTION_KEY, DIRECT_CONNECTION_STRING, DM_ROLE_NAME, SUPABASE_URL
 from config import (
     SUPABASE_DB_HOST,
     SUPABASE_DB_NAME,
@@ -54,6 +55,19 @@ class CampaignImageSettings:
     session_image_max_scenes: int | None = None
     session_image_include_dm_context: bool = False
     session_image_post_channel_id: int | None = None
+
+
+@dataclass
+class GuildApiKeyStatus:
+    provider: str
+    has_key: bool
+    key_last4: str | None = None
+    is_active: bool = False
+    last_validated_at: datetime | None = None
+    last_error_at: datetime | None = None
+    last_error_message: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 def _connect() -> psycopg.Connection:
@@ -123,6 +137,26 @@ def ensure_runtime_schema() -> None:
                 "alter table campaigns add column if not exists session_image_include_dm_context boolean not null default false"
             )
             cur.execute("alter table campaigns add column if not exists session_image_post_channel_id bigint")
+            cur.execute(
+                """
+                create table if not exists guild_api_keys (
+                  id uuid primary key default gen_random_uuid(),
+                  guild_id uuid not null references guilds(id) on delete cascade,
+                  provider text not null,
+                  encrypted_api_key bytea not null,
+                  key_last4 text not null,
+                  is_active boolean not null default true,
+                  created_by_discord_user_id bigint,
+                  updated_by_discord_user_id bigint,
+                  last_validated_at timestamptz,
+                  last_error_at timestamptz,
+                  last_error_message text,
+                  created_at timestamptz not null default now(),
+                  updated_at timestamptz not null default now(),
+                  unique (guild_id, provider)
+                )
+                """
+            )
         conn.commit()
 
 
@@ -158,6 +192,26 @@ def _ensure_campaign(cur: psycopg.Cursor, guild_id: str, discord_category_id: in
     return str(cur.fetchone()["id"])
 
 
+def _get_guild_db_id(cur: psycopg.Cursor, discord_guild_id: int) -> str | None:
+    cur.execute(
+        """
+        select id
+        from guilds
+        where discord_guild_id = %s
+        """,
+        (discord_guild_id,),
+    )
+    row = cur.fetchone()
+    return str(row["id"]) if row else None
+
+
+def _require_key_encryption_secret() -> str:
+    secret = (AIDM_KEY_ENCRYPTION_KEY or "").strip()
+    if not secret:
+        raise RuntimeError("AIDM_KEY_ENCRYPTION_KEY is not configured.")
+    return secret
+
+
 def get_or_create_campaign_context(
     discord_guild_id: int,
     guild_name: str,
@@ -188,6 +242,228 @@ def get_campaign_context_by_category(discord_category_id: int) -> CampaignContex
     if not row:
         return None
     return CampaignContext(guild_id=str(row["guild_id"]), campaign_id=str(row["campaign_id"]))
+
+
+def get_discord_guild_id_for_category(discord_category_id: int) -> int | None:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select guilds.discord_guild_id
+                from campaigns
+                join guilds on guilds.id = campaigns.guild_id
+                where campaigns.discord_category_id = %s
+                """,
+                (discord_category_id,),
+            )
+            row = cur.fetchone()
+    return int(row["discord_guild_id"]) if row and row["discord_guild_id"] is not None else None
+
+
+def set_guild_api_key(
+    discord_guild_id: int,
+    guild_name: str,
+    provider: str,
+    api_key: str,
+    *,
+    actor_discord_user_id: int | None = None,
+    dm_role_name: str | None = None,
+) -> GuildApiKeyStatus:
+    secret = _require_key_encryption_secret()
+    normalized_key = api_key.strip()
+    if not normalized_key:
+        raise ValueError("API key cannot be empty.")
+    provider_name = provider.strip().lower()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            guild_id = _ensure_guild(cur, discord_guild_id, guild_name, dm_role_name)
+            cur.execute(
+                """
+                insert into guild_api_keys (
+                  guild_id,
+                  provider,
+                  encrypted_api_key,
+                  key_last4,
+                  is_active,
+                  created_by_discord_user_id,
+                  updated_by_discord_user_id,
+                  last_validated_at,
+                  last_error_at,
+                  last_error_message,
+                  updated_at
+                )
+                values (
+                  %s,
+                  %s,
+                  pgp_sym_encrypt(%s, %s),
+                  %s,
+                  true,
+                  %s,
+                  %s,
+                  now(),
+                  null,
+                  null,
+                  now()
+                )
+                on conflict (guild_id, provider)
+                do update set
+                  encrypted_api_key = excluded.encrypted_api_key,
+                  key_last4 = excluded.key_last4,
+                  is_active = true,
+                  updated_by_discord_user_id = excluded.updated_by_discord_user_id,
+                  last_validated_at = now(),
+                  last_error_at = null,
+                  last_error_message = null,
+                  updated_at = now()
+                returning provider, key_last4, is_active, last_validated_at, last_error_at, last_error_message, created_at, updated_at
+                """,
+                (
+                    guild_id,
+                    provider_name,
+                    normalized_key,
+                    secret,
+                    normalized_key[-4:],
+                    actor_discord_user_id,
+                    actor_discord_user_id,
+                ),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return GuildApiKeyStatus(
+        provider=str(row["provider"]),
+        has_key=True,
+        key_last4=row["key_last4"],
+        is_active=bool(row["is_active"]),
+        last_validated_at=row["last_validated_at"],
+        last_error_at=row["last_error_at"],
+        last_error_message=row["last_error_message"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def get_guild_api_key(discord_guild_id: int, *, provider: str) -> str | None:
+    secret = _require_key_encryption_secret()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select pgp_sym_decrypt(gak.encrypted_api_key, %s)::text as api_key
+                from guild_api_keys gak
+                join guilds on guilds.id = gak.guild_id
+                where guilds.discord_guild_id = %s
+                  and gak.provider = %s
+                  and gak.is_active = true
+                """,
+                (secret, discord_guild_id, provider.strip().lower()),
+            )
+            row = cur.fetchone()
+    return str(row["api_key"]) if row and row["api_key"] else None
+
+
+def get_guild_api_key_status(discord_guild_id: int, *, provider: str) -> GuildApiKeyStatus:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                  gak.provider,
+                  gak.key_last4,
+                  gak.is_active,
+                  gak.last_validated_at,
+                  gak.last_error_at,
+                  gak.last_error_message,
+                  gak.created_at,
+                  gak.updated_at
+                from guild_api_keys gak
+                join guilds on guilds.id = gak.guild_id
+                where guilds.discord_guild_id = %s
+                  and gak.provider = %s
+                """,
+                (discord_guild_id, provider.strip().lower()),
+            )
+            row = cur.fetchone()
+    if not row:
+        return GuildApiKeyStatus(provider=provider.strip().lower(), has_key=False)
+    return GuildApiKeyStatus(
+        provider=str(row["provider"]),
+        has_key=True,
+        key_last4=row["key_last4"],
+        is_active=bool(row["is_active"]),
+        last_validated_at=row["last_validated_at"],
+        last_error_at=row["last_error_at"],
+        last_error_message=row["last_error_message"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def mark_guild_api_key_valid(discord_guild_id: int, *, provider: str) -> None:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update guild_api_keys
+                set
+                  is_active = true,
+                  last_validated_at = now(),
+                  last_error_at = null,
+                  last_error_message = null,
+                  updated_at = now()
+                where guild_id in (
+                  select id
+                  from guilds
+                  where discord_guild_id = %s
+                )
+                  and provider = %s
+                """,
+                (discord_guild_id, provider.strip().lower()),
+            )
+        conn.commit()
+
+
+def mark_guild_api_key_invalid(discord_guild_id: int, *, provider: str, error_message: str) -> None:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update guild_api_keys
+                set
+                  is_active = false,
+                  last_error_at = now(),
+                  last_error_message = %s,
+                  updated_at = now()
+                where guild_id in (
+                  select id
+                  from guilds
+                  where discord_guild_id = %s
+                )
+                  and provider = %s
+                """,
+                (error_message[:500], discord_guild_id, provider.strip().lower()),
+            )
+        conn.commit()
+
+
+def delete_guild_api_key(discord_guild_id: int, *, provider: str) -> bool:
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                delete from guild_api_keys
+                where guild_id in (
+                  select id
+                  from guilds
+                  where discord_guild_id = %s
+                )
+                  and provider = %s
+                returning id
+                """,
+                (discord_guild_id, provider.strip().lower()),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return row is not None
 
 
 def get_campaign_image_settings(discord_category_id: int) -> CampaignImageSettings:

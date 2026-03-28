@@ -2,8 +2,163 @@ from __future__ import annotations
 
 import discord
 
+from ai_services.gemini_client import is_gemini_auth_error
+from ai_services.guild_api_keys import GEMINI_PROVIDER
+
+
+def _member_can_manage_global_settings(interaction: discord.Interaction) -> bool:
+    if interaction.guild is None:
+        return False
+    if interaction.user.id == interaction.guild.owner_id:
+        return True
+    guild_permissions = getattr(interaction.user, "guild_permissions", None)
+    return bool(guild_permissions and guild_permissions.administrator)
+
 
 def register(settings_group, h) -> None:
+    global_group = discord.app_commands.Group(name="global", description="Guild-wide API key settings.")
+    settings_group.add_command(global_group)
+
+    async def _validate_and_store_guild_key(
+        interaction: discord.Interaction,
+        *,
+        api_key: str,
+        action_label: str,
+    ) -> None:
+        if not _member_can_manage_global_settings(interaction):
+            await h.send_interaction_message(
+                interaction,
+                "Only the server owner or an administrator can manage global API keys.",
+                ephemeral=True,
+            )
+            return
+
+        normalized_key = (api_key or "").strip()
+        if not normalized_key:
+            await h.send_interaction_message(interaction, "API key cannot be empty.", ephemeral=True)
+            return
+
+        await h.send_command_ack(interaction, f"{action_label} the guild Gemini API key...")
+        try:
+            await h.asyncio.to_thread(
+                h.gemini_client.generate_text,
+                "Reply with exactly OK.",
+                "Return exactly OK.",
+                None,
+                api_key=normalized_key,
+            )
+        except Exception as exc:
+            if is_gemini_auth_error(exc):
+                await h.send_interaction_message(
+                    interaction,
+                    "Gemini rejected that API key. Please check it and try again.",
+                    ephemeral=True,
+                )
+                return
+            raise
+
+        status = await h.asyncio.to_thread(
+            h.set_guild_api_key,
+            interaction.guild.id,
+            interaction.guild.name,
+            GEMINI_PROVIDER,
+            normalized_key,
+            actor_discord_user_id=interaction.user.id,
+            dm_role_name=h.DM_ROLE_NAME,
+        )
+        await h.send_interaction_message(
+            interaction,
+            (
+                f"Guild Gemini API key saved successfully.\n"
+                f"• provider: `{status.provider}`\n"
+                f"• last4: `****{status.key_last4}`\n"
+                f"• active: `{status.is_active}`"
+            ),
+            ephemeral=True,
+        )
+
+    @global_group.command(name="set-api-key", description="Set the Gemini API key for this server.")
+    @discord.app_commands.describe(api_key="The Gemini API key to store for this server.")
+    async def settings_global_set_api_key(interaction: discord.Interaction, api_key: str):
+        await _validate_and_store_guild_key(interaction, api_key=api_key, action_label="Validating and saving")
+
+    @global_group.command(name="rotate-api-key", description="Replace the current Gemini API key for this server.")
+    @discord.app_commands.describe(api_key="The replacement Gemini API key for this server.")
+    async def settings_global_rotate_api_key(interaction: discord.Interaction, api_key: str):
+        await _validate_and_store_guild_key(interaction, api_key=api_key, action_label="Validating and rotating")
+
+    @global_group.command(name="api-key-status", description="Show whether a Gemini API key is configured for this server.")
+    async def settings_global_api_key_status(interaction: discord.Interaction):
+        if not _member_can_manage_global_settings(interaction):
+            await h.send_interaction_message(
+                interaction,
+                "Only the server owner or an administrator can inspect global API key status.",
+                ephemeral=True,
+            )
+            return
+
+        status = await h.asyncio.to_thread(
+            h.get_guild_api_key_status,
+            interaction.guild.id,
+            provider=GEMINI_PROVIDER,
+        )
+        if not status.has_key:
+            await h.send_interaction_message(
+                interaction,
+                (
+                    "No Gemini API key is configured for this server yet.\n"
+                    "Use `/settings global set-api-key` to add one."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        last_validated = status.last_validated_at.isoformat() if status.last_validated_at else "never"
+        last_error = status.last_error_at.isoformat() if status.last_error_at else "none"
+        error_message = status.last_error_message or "none"
+        await h.send_interaction_message(
+            interaction,
+            (
+                f"**Guild Gemini API key status**\n"
+                f"• provider: `{status.provider}`\n"
+                f"• last4: `****{status.key_last4}`\n"
+                f"• active: `{status.is_active}`\n"
+                f"• last_validated_at: `{last_validated}`\n"
+                f"• last_error_at: `{last_error}`\n"
+                f"• last_error_message: `{error_message}`"
+            ),
+            ephemeral=True,
+        )
+
+    @global_group.command(name="remove-api-key", description="Remove the stored Gemini API key for this server.")
+    @discord.app_commands.describe(confirm="Set to true to confirm deleting the current stored key.")
+    async def settings_global_remove_api_key(interaction: discord.Interaction, confirm: bool = False):
+        if not _member_can_manage_global_settings(interaction):
+            await h.send_interaction_message(
+                interaction,
+                "Only the server owner or an administrator can remove global API keys.",
+                ephemeral=True,
+            )
+            return
+        if not confirm:
+            await h.send_interaction_message(
+                interaction,
+                "Re-run this with `confirm:true` to remove the stored Gemini API key for this server.",
+                ephemeral=True,
+            )
+            return
+
+        deleted = await h.asyncio.to_thread(
+            h.delete_guild_api_key,
+            interaction.guild.id,
+            provider=GEMINI_PROVIDER,
+        )
+        await h.send_interaction_message(
+            interaction,
+            "Removed the stored Gemini API key for this server." if deleted else "No stored Gemini API key was found for this server.",
+            ephemeral=True,
+        )
+
     @settings_group.command(name="images", description="Configure automatic post-session image generation for this campaign.")
     @discord.app_commands.describe(
         mode="Whether images are generated automatically after summaries.",

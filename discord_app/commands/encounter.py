@@ -5,6 +5,7 @@ import asyncio
 import discord
 from discord import app_commands
 
+from ai_services.guild_api_keys import raise_for_guild_gemini_exception, use_guild_gemini_api_key
 from discord_app.helper_functions import get_interaction_category
 from discord_app.player_workspace.prompting import build_encounter_workspace_system_prompt
 from discord_app.workspace_threads import (
@@ -151,7 +152,11 @@ def register(encounter_group, h) -> None:
             source_cards=source_cards,
         )
         system_prompt = build_encounter_workspace_system_prompt(encounter_name)
-        raw = await asyncio.to_thread(h.gemini_client.generate_text, prompt, system_prompt)
+        try:
+            with use_guild_gemini_api_key(interaction.guild.id):
+                raw = await asyncio.to_thread(h.gemini_client.generate_text, prompt, system_prompt)
+        except Exception as exc:
+            raise_for_guild_gemini_exception(interaction.guild.id, exc)
         updates = parse_card_update_response(raw)
         if not updates:
             raise ValueError("AIDM could not generate updated encounter cards from that source. Try again with a clearer note.")

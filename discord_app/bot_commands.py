@@ -22,12 +22,15 @@ from data_store.db_repository import (
     assign_memory_to_channel,
     assign_memory_to_thread,
     build_thread_data_snapshot,
+    delete_guild_api_key,
     ensure_channel_for_category,
     ensure_memory,
     ensure_thread_for_channel,
     fetch_memory_details,
     get_campaign_image_settings,
+    get_guild_api_key_status,
     get_or_create_campaign_context,
+    set_guild_api_key,
     set_thread_always_on,
     update_campaign_image_settings,
 )
@@ -222,8 +225,12 @@ def _build_help_text(topic: str) -> str:
         return (
             "**/settings**\n"
             "Use this to change campaign-level bot behavior.\n\n"
-            "**Current settings command**\n"
+            "**Current settings commands**\n"
             "• `/settings images`: controls automatic post-session image generation for this campaign\n\n"
+            "• `/settings global set-api-key`: add or replace the Gemini API key for this server\n"
+            "• `/settings global rotate-api-key`: rotate the server Gemini API key\n"
+            "• `/settings global api-key-status`: inspect whether a server Gemini API key is configured\n"
+            "• `/settings global remove-api-key`: remove the server Gemini API key\n\n"
             "**Current image settings**\n"
             "• `mode`: `off` or `auto`\n"
             "• `quality`: `auto`, `fast`, or `hq`\n"

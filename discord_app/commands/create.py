@@ -6,6 +6,8 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
+from ai_services.guild_api_keys import raise_for_guild_gemini_exception, use_guild_gemini_api_key
+
 
 def register(create_group, h) -> None:
     @create_group.command(name="player", description="Create or refresh a player character workspace.")
@@ -98,7 +100,11 @@ def register(create_group, h) -> None:
                 ),
                 thread_name=thread_name,
             )
-            bundle = await h.build_player_workspace(request, gemini=h.gemini_client)
+            try:
+                with use_guild_gemini_api_key(interaction.guild.id):
+                    bundle = await h.build_player_workspace(request, gemini=h.gemini_client)
+            except Exception as exc:
+                raise_for_guild_gemini_exception(interaction.guild.id, exc)
 
             if created_thread:
                 await player_thread.send(bundle.cards.welcome_text)
@@ -296,7 +302,11 @@ def register(create_group, h) -> None:
         )
 
         prepass_prompt = h.build_other_prepass_prompt(note)
-        prepass_output = await asyncio.to_thread(h.gemini_client.generate_text, prepass_prompt)
+        try:
+            with use_guild_gemini_api_key(interaction.guild.id):
+                prepass_output = await asyncio.to_thread(h.gemini_client.generate_text, prepass_prompt)
+        except Exception as exc:
+            raise_for_guild_gemini_exception(interaction.guild.id, exc)
         card_titles, card_inventory_text, cascade_rules_text = h.parse_other_prepass_output(prepass_output)
 
         definition = h.WorkspaceDefinition(
