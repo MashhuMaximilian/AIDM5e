@@ -511,7 +511,35 @@ def _is_workspace_card_action_request(text: str | None) -> bool:
         return False
     action_words = ("update", "change", "add", "edit", "create", "make")
     card_words = ("card", "cards")
-    return any(word in content for word in action_words) and any(word in content for word in card_words)
+    generic_card_targets = (
+        "summary",
+        "profile",
+        "rules",
+        "items",
+        "links",
+        "reference links",
+        "actions",
+        "skills",
+        "stat block",
+        "roster",
+        "battlefield",
+        "outcome",
+    )
+    explicit_workspace_phrases = (
+        "apply this to",
+        "apply this in",
+        "apply this",
+        "sync this",
+        "sync it",
+        "put this in",
+        "save this to",
+        "record this in",
+    )
+    if any(phrase in content for phrase in explicit_workspace_phrases):
+        return True
+    return any(word in content for word in action_words) and (
+        any(word in content for word in card_words) or any(target in content for target in generic_card_targets)
+    )
 
 
 def _is_new_card_request(text: str | None) -> bool:
@@ -523,6 +551,38 @@ def _is_new_card_request(text: str | None) -> bool:
         or "create new card" in content
         or "make a card" in content
     )
+
+
+def _is_lightweight_acknowledgment(text: str | None) -> bool:
+    content = (text or "").strip().lower()
+    if not content:
+        return False
+    lightweight = {
+        "ok",
+        "okay",
+        "kk",
+        "cool",
+        "nice",
+        "thanks",
+        "thank you",
+        "got it",
+        "yep",
+        "yes",
+        "no",
+        "maybe",
+        "hmm",
+        "huh",
+    }
+    return content in lightweight
+
+
+def _should_reply_conversationally_in_player_workspace(text: str | None) -> bool:
+    content = (text or "").strip()
+    if not content:
+        return False
+    if _is_lightweight_acknowledgment(content):
+        return False
+    return True
 
 
 def _card_aliases(title: str) -> set[str]:
@@ -707,9 +767,12 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
     system_prompt = await _workspace_system_prompt(message.channel, card_messages)
     if not system_prompt:
         return False
+    workspace_kind, _workspace_name = parse_workspace_thread(message.channel.name)
 
     target_titles = _target_card_titles(message.content, list(card_messages.keys()))
-    needs_assistant = _is_workspace_card_action_request(message.content) or _has_clear_question(message.content)
+    explicit_card_action = _is_workspace_card_action_request(message.content)
+    conversational_player_reply = workspace_kind == "player" and _should_reply_conversationally_in_player_workspace(message.content)
+    needs_assistant = explicit_card_action or _has_clear_question(message.content) or conversational_player_reply
     indicator_message = await _start_thinking_indicator(message) if needs_assistant else None
     try:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
@@ -722,7 +785,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
         recent_context = await _collect_recent_workspace_context(message)
 
-        if _is_workspace_card_action_request(message.content):
+        if explicit_card_action:
             card_bodies = {
                 title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
                 for title, card_message in card_messages.items()
@@ -765,7 +828,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
             return True
 
-        if _has_clear_question(message.content):
+        if _has_clear_question(message.content) or conversational_player_reply:
             card_context = "\n\n".join(
                 f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
                 for title, card_message in card_messages.items()
