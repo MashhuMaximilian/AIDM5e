@@ -624,7 +624,8 @@ def build_card_update_prompt(
         "If the user asked broadly to update the cards or workspace, update the affected existing cards only. "
         "Prefer updating existing cards over creating anything new. "
         "If only one existing card is affected, return only that card. "
-        "If multiple existing cards are genuinely affected, return each affected existing card."
+        "If multiple existing cards are genuinely affected, return each affected existing card. "
+        "If the existing cards are blank, skeletal, or mostly `Needs review.`, fill every supported existing card you can from the approved discussion and source context."
         if allow_affected_card_updates
         else "Only update the explicitly targeted existing cards. If the request is too ambiguous, return only the most clearly affected existing card."
     )

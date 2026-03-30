@@ -944,6 +944,8 @@ async def _pin_recent_bot_messages(thread: discord.Thread, *, limit: int = 20) -
     for message in reversed(recent_messages):
         if message.author.id != bot_id:
             continue
+        if message.is_system():
+            continue
         try:
             await message.pin(reason="AIDM workspace setup")
         except discord.HTTPException as exc:
