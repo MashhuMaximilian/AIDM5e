@@ -113,6 +113,8 @@ def register(create_group, h) -> None:
                         f"Imported source file from `/create player`: `{attachment.filename}`",
                         file=await attachment.to_file(),
                     )
+                if request.mode == "idea" and isinstance(bundle.draft, str) and bundle.draft.strip():
+                    await player_thread.send(bundle.draft.strip())
 
             await h.sync_workspace_slots(player_thread, bundle)
             if created_thread:

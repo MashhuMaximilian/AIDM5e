@@ -788,6 +788,17 @@ async def _workspace_system_prompt(thread: discord.Thread, card_messages: dict[s
     return build_other_workspace_system_prompt(entity_name, user_note, card_inventory_text, cascade_rules_text)
 
 
+def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "Runtime mode: conversation/workshop only.\n"
+        "- You are NOT editing cards in this reply.\n"
+        "- Do NOT claim that you updated, synced, changed, created, or applied card changes.\n"
+        "- If card changes would help, name the affected existing cards and ask for approval first.\n"
+        "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.\n"
+    )
+
+
 async def _handle_workspace_thread_message(message: discord.Message, channel_id: int, category_id: int | None, thread_id: int) -> bool:
     card_messages = await discover_workspace_card_messages(message.channel)
     if not card_messages:
@@ -872,7 +883,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 thread_id,
                 assigned_memory,
                 context_block=context_block,
-                system_prompt=system_prompt,
+                system_prompt=_conversation_only_workspace_system_prompt(system_prompt),
             )
             if response:
                 await send_response_in_chunks(message.channel, response)
