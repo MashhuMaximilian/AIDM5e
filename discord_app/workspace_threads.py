@@ -613,18 +613,29 @@ def build_card_update_prompt(
     request_text: str,
     card_bodies: dict[str, str],
     target_titles: list[str],
+    allow_affected_card_updates: bool = False,
 ) -> str:
     cards_block = "\n\n".join(
         f"### CURRENT CARD: {title}\n{body.strip() or 'Needs review.'}"
         for title, body in card_bodies.items()
     )
     target_block = "\n".join(f"- {title}" for title in target_titles) if target_titles else "- No existing card was explicitly named."
+    scope_rule = (
+        "If the user asked broadly to update the cards or workspace, update the affected existing cards only. "
+        "Prefer updating existing cards over creating anything new. "
+        "If only one existing card is affected, return only that card. "
+        "If multiple existing cards are genuinely affected, return each affected existing card."
+        if allow_affected_card_updates
+        else "Only update the explicitly targeted existing cards. If the request is too ambiguous, return only the most clearly affected existing card."
+    )
     return (
         "The user asked you to update workspace cards.\n\n"
         f"Target cards:\n{target_block}\n\n"
         f"User request:\n{request_text.strip()}\n\n"
         f"Current card contents:\n{cards_block}\n\n"
+        f"{scope_rule}\n"
         "Do not create new cards unless the user explicitly asked for a new separate card.\n"
+        "Prefer revising existing cards over creating replacement structures.\n"
         "Do not return explanations, chat, or analysis.\n"
         "Return only the full updated card bodies using exactly this format:\n"
         "### CARD: Card Title\n"

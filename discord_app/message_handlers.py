@@ -509,7 +509,7 @@ def _is_workspace_card_action_request(text: str | None) -> bool:
     content = (text or "").lower().strip()
     if not content:
         return False
-    action_words = ("update", "change", "add", "edit", "create", "make")
+    action_words = ("update", "change", "add", "edit", "create", "make", "sync", "apply", "reflect", "record", "revise")
     card_words = ("card", "cards")
     generic_card_targets = (
         "summary",
@@ -524,6 +524,8 @@ def _is_workspace_card_action_request(text: str | None) -> bool:
         "roster",
         "battlefield",
         "outcome",
+        "workspace",
+        "sheet",
     )
     explicit_workspace_phrases = (
         "apply this to",
@@ -534,6 +536,11 @@ def _is_workspace_card_action_request(text: str | None) -> bool:
         "put this in",
         "save this to",
         "record this in",
+        "reflect this in",
+        "update relevant cards",
+        "update all cards",
+        "update the cards",
+        "update cards",
     )
     if any(phrase in content for phrase in explicit_workspace_phrases):
         return True
@@ -654,6 +661,28 @@ def _target_card_titles(message_text: str, card_titles: list[str]) -> list[str]:
         if len(top_titles) == 1:
             return top_titles
     return []
+
+
+def _is_broad_workspace_sync_request(text: str | None) -> bool:
+    content = _normalize_match_text(text)
+    if not content:
+        return False
+    broad_phrases = (
+        "update cards",
+        "update the cards",
+        "update relevant cards",
+        "update all cards",
+        "update workspace",
+        "update the workspace",
+        "apply to workspace",
+        "apply this to workspace",
+        "sync the cards",
+        "sync cards",
+        "sync the workspace",
+        "reflect this in the cards",
+        "reflect this in the workspace",
+    )
+    return any(phrase in content for phrase in broad_phrases)
 
 
 async def _fetch_attachment_context(attachments: list[discord.Attachment]) -> str:
@@ -790,6 +819,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
                 for title, card_message in card_messages.items()
             }
+            broad_sync_request = _is_broad_workspace_sync_request(message.content)
             prompt_text = build_card_creation_prompt(
                 request_text=message.content,
                 card_bodies=card_bodies,
@@ -797,6 +827,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 request_text=message.content,
                 card_bodies=card_bodies,
                 target_titles=target_titles,
+                allow_affected_card_updates=not target_titles or broad_sync_request,
             )
             response = await get_assistant_response(
                 prompt_text,
@@ -811,13 +842,13 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             if not updates:
                 await send_response_in_chunks(
                     message.channel,
-                    "I could not turn that into card changes yet. Please mention which card to update, or say `create a new card for ...`."
+                    "I could not turn that into card changes yet. Name the card to update, say `update relevant cards`, or say `create a new card for ...`."
                 )
                 return True
-            if not _is_new_card_request(message.content) and not target_titles and len(updates) > 1:
+            if not _is_new_card_request(message.content) and not target_titles and len(updates) > 1 and not broad_sync_request:
                 await send_response_in_chunks(
                     message.channel,
-                    "I need a more specific target card for that update. Please name the card, or say `update all cards`."
+                    "I need a more specific target card for that update. Please name the card, or say `update relevant cards` / `update all cards`."
                 )
                 return True
             merged_cards = dict(card_bodies)
