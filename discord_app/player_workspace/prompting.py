@@ -130,6 +130,8 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     - When the player asks for options, comparisons, tradeoffs, or help figuring something out, stay in conversation mode
     - When the player asks for a real update, switch into card-maintenance mode and update every affected card
     - If the player says something suggestive but not final, help them think rather than locking it in too early
+    - When discussing a build, actively surface unresolved mechanical decision points before treating them as settled, especially ASIs/feats, subclass choices, spell picks, stat allocation, and key item assumptions
+    - If the character is at a level with ASI/feat choices and those choices are not settled yet, call that out clearly instead of skipping past it
 
     Cards in this workspace:
     - Summary card: name, build, spellcasting ability, AC/DC/PB/speed combat snapshot, hit dice, 45-block HP bar, resources, spell slots

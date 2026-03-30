@@ -831,6 +831,19 @@ def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
     )
 
 
+def _card_maintenance_workspace_system_prompt(base_prompt: str) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "Runtime mode: card maintenance.\n"
+        "- You ARE editing cards in this reply.\n"
+        "- Use the approved discussion context to populate or revise the existing cards.\n"
+        "- If cards are currently blank or say `Needs review.`, it is valid to fill them from the approved recent discussion and source context.\n"
+        "- Do not ask follow-up questions in this reply unless the request is truly too underspecified to update even one card.\n"
+        "- If some details are still unresolved, update what is supported and leave the rest as `Needs review.`.\n"
+        "- Return card bodies only through the requested update format. No conversational framing.\n"
+    )
+
+
 async def _recent_workspace_update_proposal(thread: discord.Thread, *, before: discord.Message, limit: int = 6) -> str | None:
     bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
     bot_id = bot_user.id if bot_user else None
@@ -890,7 +903,10 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         url_context = await _fetch_url_context(urls) if urls else ""
         attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
-        recent_context = await _collect_recent_workspace_context(message)
+        recent_context = await _collect_recent_workspace_context(
+            message,
+            limit=12 if (explicit_card_action or approved_recent_update) else 6,
+        )
 
         if explicit_card_action or approved_recent_update:
             card_bodies = {
@@ -921,7 +937,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 thread_id,
                 assigned_memory,
                 context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
-                system_prompt=system_prompt,
+                system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
             if not updates:
