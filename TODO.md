@@ -8,9 +8,9 @@
   - [ ] decide whether other-workspace metadata ever needs a hidden non-message storage path later
 
 - [ ] Revisit `/create player`
-  - [ ] decide product behavior for player brainstorming vs canonical workspace editing
   - [ ] write clean, human-readable campaign context into `#context`
   - [ ] decide how character image references should be attached or linked
+  - [ ] decide whether settled-but-unsynced character ideas need a lightweight reminder mechanism later
 
 - [ ] Extend gameplay sync beyond player sheets
   - [ ] update encounter-local monster state from gameplay
@@ -35,24 +35,17 @@
 - [ ] Decide the Docker / device strategy for live voice capture
 - [ ] Clarify VPS / server deployment expectations for voice recording
 - [ ] Design the production deploy flow for `development` -> `main`
+- [ ] Decide whether first production deployment stays on `.env` only or later migrates app-level secrets to Docker secrets
 
 ## Settings / Billing
 
 - [ ] Expand `/settings` beyond `/settings images`
   - [ ] define `/settings campaign`
-  - [ ] define `/settings global`
 
 - [ ] Keep settings split by responsibility
   - [ ] app defaults stay in `.env`
   - [ ] campaign behavior belongs in `/settings campaign`
   - [ ] creative style guidance stays in `#context` rather than `/settings`
-
-- [ ] Design creator-hosted API key support
-  - [ ] decide whether API keys attach per guild or per campaign
-  - [ ] likely handle this under `/settings global` for guild-level ownership
-  - [ ] decide how the runtime resolves which key to use for a given request
-  - [ ] decide how guild-owned API keys are stored server-side for production use
-  - [ ] decide rotation / deletion / fallback behavior when a guild key is missing or revoked
 
 - [ ] Design campaign-level billing / monetization model
   - [ ] decide whether monetization is credit-based or flat monthly
@@ -65,7 +58,6 @@
 
 ## Later
 
-- [ ] Decide product behavior for brainstorming vs strict workspace editing before deployment hardening
 - [ ] Consider moving long stable workspace/system prompt bodies into dedicated files under `prompts/`
 - [ ] Revisit whether `/reference` should support more attachment/document types
 - [ ] Consider whether a separate art / gallery channel is worthwhile
@@ -73,4 +65,3 @@
 - [ ] Compare `gemini-3-flash-preview` vs `gemini-3.1-flash-lite-preview` on real D&D audio
 - [ ] Decide whether chat should remain on `gemini-3-flash-preview`
 - [ ] Evaluate whether different providers/models should be used later for some tasks
-- [ ] Add a feature map document such as `map.md`

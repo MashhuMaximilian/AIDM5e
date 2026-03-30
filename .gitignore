@@ -18,6 +18,8 @@ aidm.log
 .vscode/
 scripts/import_legacy_category.py
 scripts/
+!scripts/
+!scripts/deploy_vps.sh
 sources/
 CODEX_HANDOFF.md
 TOTEST.md

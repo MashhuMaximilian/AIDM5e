@@ -40,6 +40,49 @@ Docker is a good fit for:
 
 Live host-audio capture in Docker is mainly a Linux deployment problem. macOS Docker Desktop is fine for bot runtime and offline tests, but not the final answer for host microphone/system-audio capture.
 
+## Hetzner / VPS Deploy
+
+First-time VPS setup example:
+
+```bash
+ssh root@YOUR_SERVER_IP
+mkdir -p /aidm
+cd /aidm
+git clone https://github.com/MashhuMaximilian/AIDM5e.git .
+mkdir -p audio_files voice_context offline_test_outputs
+touch transcript.txt transcript_manifest.json transcript_archive.txt
+cp .env.example .env
+nano .env
+docker compose up -d --build
+docker compose logs -f aidm
+```
+
+Normal manual redeploy:
+
+```bash
+cd /aidm
+bash scripts/deploy_vps.sh /aidm main
+```
+
+GitHub Actions auto-deploy:
+
+- This repo includes `.github/workflows/deploy-main.yml`
+- It deploys on pushes to `main`
+- It SSHes into the VPS and runs `scripts/deploy_vps.sh`
+
+Required GitHub repository secrets:
+
+- `HETZNER_HOST`
+- `HETZNER_USER`
+- `HETZNER_PROD_GITHUB` (preferred) or `HETZNER_SSH_KEY`
+- `HETZNER_PORT` (optional, defaults to `22`)
+
+Expected server layout:
+
+- repo checkout at `/aidm`
+- valid `/aidm/.env`
+- Docker + Docker Compose installed on the VPS
+
 ## Required Environment
 
 At minimum, configure:

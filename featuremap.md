@@ -72,6 +72,37 @@ Memory behavior includes:
 - always-on support for channels and threads
 - memory inspection/reset flows
 
+## BYOK / Global API Keys
+
+Guild-scoped BYOK is implemented for Gemini.
+
+Command surface:
+- `/settings global set-api-key`
+- `/settings global rotate-api-key`
+- `/settings global api-key-status`
+- `/settings global remove-api-key`
+
+Behavior:
+- key ownership is per guild
+- management is owner/admin-only
+- no creator-hosted fallback key is used for guild traffic
+- missing key returns setup instructions
+- invalid key fails gracefully
+
+Storage/runtime model:
+- guild keys are stored in Supabase/Postgres
+- keys are encrypted at rest
+- one app-level master encryption key is supplied by runtime config
+- runtime key resolution is guild-aware
+
+Runtime coverage:
+- normal assistant replies
+- player workspace creation/import
+- custom workspace prepass
+- encounter snapshot updates
+- image generation
+- live/offline voice transcription and session-image flows
+
 ## Workspace System
 
 General workspace model:
@@ -101,6 +132,10 @@ Pipeline:
 - idea mode
 - import mode from notes/files/messages
 - card splitting into managed slots
+- one canonical workspace thread by default
+- conversational-by-default workshop behavior inside the thread
+- explicit update/apply/sync wording controls card edits
+- brainstorming should stay conversational and AIDM should suggest card updates when something sounds settled
 
 Managed player cards:
 - Character Summary

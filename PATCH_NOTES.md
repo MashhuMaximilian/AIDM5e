@@ -105,6 +105,11 @@ If `/invite` is run outside a category, it now creates a new category automatica
 - `/invite` now also creates `#help`, posts a structured onboarding guide there, and posts a short AI greeting after setup.
 - The `#help` guide now includes a Party Voice Roster Template users can fill in and store in `#context` for better transcript attribution.
 - `#help` now has a dedicated onboarding/support assistant prompt so normal help-channel conversation stays focused on using the bot.
+- `/settings` now also includes a `global` subgroup for guild-wide API key management:
+  - `/settings global set-api-key`
+  - `/settings global rotate-api-key`
+  - `/settings global api-key-status`
+  - `/settings global remove-api-key`
 
 ## Workspace Threads
 
@@ -167,6 +172,28 @@ If `/invite` is run outside a category, it now creates a new category automatica
   - hit dice
   - 45-block HP bar
 - `/create player` follow-up workspace edits now recover `player_name` from existing player cards and pass it back into the player workspace system prompt instead of dropping it.
+- Player workspace threads are now softer and more conversational by default.
+- Normal exploratory messages in player workspace threads can now get a real conversational reply even when they are not phrased as a formal question.
+- Brainstorming in player workspace threads should no longer auto-edit cards.
+- Explicit update/apply/sync phrasing still switches player workspace threads into card-maintenance mode.
+- Card-edit targeting now also recognizes more natural phrasings such as `put this in the summary` or `sync this to the rules`.
+- Lightweight acknowledgments such as `ok`, `cool`, and `thanks` should no longer trigger unnecessary player-workspace replies.
+
+## BYOK / Key Management
+
+- Added guild-scoped Gemini BYOK support.
+- Guild-owned Gemini API keys are now stored in the runtime database and encrypted at rest with an app-level master secret.
+- Runtime now resolves Gemini credentials per guild instead of requiring one global key for all guild traffic.
+- There is currently no creator-hosted fallback key for guild traffic; a missing guild key returns setup instructions.
+- Invalid guild keys now fail gracefully and can be marked inactive after auth failures.
+- Guild BYOK runtime is now wired into:
+  - normal assistant replies
+  - player workspace create/import flow
+  - custom workspace prepass flow
+  - encounter snapshot updates
+  - image generation
+  - live/offline voice transcription and summary/image paths
+- Added `AIDM_KEY_ENCRYPTION_KEY` to runtime config and `.env.example`.
 
 ## Model Configuration
 
