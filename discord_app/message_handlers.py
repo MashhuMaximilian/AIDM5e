@@ -583,6 +583,30 @@ def _is_lightweight_acknowledgment(text: str | None) -> bool:
     return content in lightweight
 
 
+def _is_affirmative_workspace_approval(text: str | None) -> bool:
+    content = (text or "").strip().lower()
+    if not content:
+        return False
+    approval_phrases = (
+        "yes",
+        "yes please",
+        "please do",
+        "go ahead",
+        "do it",
+        "sounds good",
+        "looks good",
+        "i like them",
+        "i like it",
+        "that works",
+        "let's do it",
+        "lets do it",
+        "apply it",
+        "update them",
+        "update it",
+    )
+    return any(content == phrase or content.startswith(f"{phrase},") for phrase in approval_phrases)
+
+
 def _should_reply_conversationally_in_player_workspace(text: str | None) -> bool:
     content = (text or "").strip()
     if not content:
@@ -799,6 +823,36 @@ def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
     )
 
 
+async def _recent_workspace_update_proposal(thread: discord.Thread, *, before: discord.Message, limit: int = 6) -> str | None:
+    bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
+    bot_id = bot_user.id if bot_user else None
+    proposal_markers = (
+        "want me to update",
+        "want me to add",
+        "i can update",
+        "i can add",
+        "i can apply",
+        "shall i update",
+        "should i update",
+        "card updates",
+        "cards i would update",
+        "i'd update",
+        "i would update",
+    )
+    async for prior_message in thread.history(limit=limit, before=before, oldest_first=False):
+        if bot_id is not None and prior_message.author.id != bot_id:
+            continue
+        content = (prior_message.content or "").strip()
+        if not content and prior_message.embeds:
+            content = "\n".join(embed.description or "" for embed in prior_message.embeds if embed.description).strip()
+        if not content:
+            continue
+        lowered = content.lower()
+        if any(marker in lowered for marker in proposal_markers):
+            return content
+    return None
+
+
 async def _handle_workspace_thread_message(message: discord.Message, channel_id: int, category_id: int | None, thread_id: int) -> bool:
     card_messages = await discover_workspace_card_messages(message.channel)
     if not card_messages:
@@ -811,8 +865,13 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
 
     target_titles = _target_card_titles(message.content, list(card_messages.keys()))
     explicit_card_action = _is_workspace_card_action_request(message.content)
+    approved_recent_update = False
+    approval_request_text: str | None = None
+    if not explicit_card_action and _is_affirmative_workspace_approval(message.content):
+        approval_request_text = await _recent_workspace_update_proposal(message.channel, before=message)
+        approved_recent_update = approval_request_text is not None
     conversational_player_reply = workspace_kind == "player" and _should_reply_conversationally_in_player_workspace(message.content)
-    needs_assistant = explicit_card_action or _has_clear_question(message.content) or conversational_player_reply
+    needs_assistant = explicit_card_action or approved_recent_update or _has_clear_question(message.content) or conversational_player_reply
     indicator_message = await _start_thinking_indicator(message) if needs_assistant else None
     try:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
@@ -825,17 +884,24 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
         recent_context = await _collect_recent_workspace_context(message)
 
-        if explicit_card_action:
+        if explicit_card_action or approved_recent_update:
             card_bodies = {
                 title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
                 for title, card_message in card_messages.items()
             }
-            broad_sync_request = _is_broad_workspace_sync_request(message.content)
+            effective_request_text = message.content
+            if approved_recent_update and approval_request_text:
+                effective_request_text = (
+                    "The user explicitly approved the previously proposed workspace update.\n\n"
+                    f"Approved proposal:\n{approval_request_text.strip()}\n\n"
+                    f"User approval:\n{message.content.strip()}"
+                )
+            broad_sync_request = _is_broad_workspace_sync_request(message.content) or approved_recent_update
             prompt_text = build_card_creation_prompt(
-                request_text=message.content,
+                request_text=effective_request_text,
                 card_bodies=card_bodies,
             ) if _is_new_card_request(message.content) else build_card_update_prompt(
-                request_text=message.content,
+                request_text=effective_request_text,
                 card_bodies=card_bodies,
                 target_titles=target_titles,
                 allow_affected_card_updates=not target_titles or broad_sync_request,
