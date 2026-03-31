@@ -168,16 +168,6 @@ def _extract_json_payload(text: str) -> dict:
         return {}
 
 
-def _extract_loose_json_object(text: str) -> dict:
-    body = (text or "").strip()
-    if not body:
-        return {}
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError:
-        return _extract_json_payload(body)
-
-
 def _build_gameplay_workspace_analysis_prompt(*, user_message: str, assistant_response: str) -> str:
     return (
         "You are extracting possible character workspace updates from a D&D gameplay exchange.\n"
@@ -603,8 +593,6 @@ def _is_affirmative_workspace_approval(text: str | None) -> bool:
         "yes please",
         "yep",
         "yup",
-        "i confirm",
-        "confirmed",
         "please do",
         "go ahead",
         "go for it",
@@ -614,12 +602,6 @@ def _is_affirmative_workspace_approval(text: str | None) -> bool:
         "absolutely",
         "of course",
         "ofc",
-        "that's right",
-        "thats right",
-        "that's correct",
-        "thats correct",
-        "that all looks good",
-        "that looks good",
         "sounds good",
         "looks good",
         "i like them",
@@ -748,7 +730,7 @@ def _normalize_player_update_titles(updates: dict[str, str], canonical_titles: l
     return normalized
 
 
-def _player_missing_followup(cards: dict[str, str], state: dict | None = None) -> str | None:
+def _player_missing_followup(cards: dict[str, str]) -> str | None:
     prompts: list[str] = []
     summary = cards.get("Character Summary", "")
     profile = cards.get("Profile Card", "")
@@ -778,16 +760,6 @@ def _player_missing_followup(cards: dict[str, str], state: dict | None = None) -
         prompts.append("spell-source details and whether racial / feat / item spells count against prepared or known totals")
     if ("feat" in rules_lower or "asi" in rules_lower) and "needs review." in rules_lower and len(prompts) < 3:
         prompts.append("which ASI / feat choices are locked in at each level and whether any half-feat bonuses already changed ability scores")
-
-    if isinstance(state, dict):
-        for key in ("unresolved", "next_questions"):
-            values = state.get(key)
-            if not isinstance(values, list):
-                continue
-            for value in values:
-                cleaned = str(value).strip()
-                if cleaned and cleaned not in prompts and len(prompts) < 3:
-                    prompts.append(cleaned)
 
     if not prompts:
         return None
@@ -858,7 +830,15 @@ async def _collect_recent_workspace_context(message: discord.Message, *, limit: 
     attachments: list[discord.Attachment] = []
 
     async for prior_message in message.channel.history(limit=limit, before=message, oldest_first=True):
-        if prior_message.author == client.user or prior_message.is_system():
+        if prior_message.is_system():
+            continue
+        if prior_message.author == client.user:
+            if _is_workspace_card_embed_message(prior_message):
+                continue
+            content = (prior_message.content or "").strip()
+            if content:
+                note_lines.append(f"AIDM: {content}")
+                urls.extend(_extract_urls(content))
             continue
         content = (prior_message.content or "").strip()
         if content:
@@ -907,125 +887,6 @@ def _is_workspace_card_embed_message(message: discord.Message) -> bool:
     }
 
 
-async def _collect_player_thread_state_source(
-    thread: discord.Thread,
-    *,
-    before: discord.Message,
-    card_messages: dict[str, discord.Message],
-    limit: int = 28,
-) -> str:
-    bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
-    bot_id = bot_user.id if bot_user else None
-    transcript_lines: list[str] = []
-
-    async for prior_message in thread.history(limit=limit, before=before, oldest_first=True):
-        if prior_message.is_system():
-            continue
-        if bot_id is not None and prior_message.author.id == bot_id:
-            if _is_workspace_card_embed_message(prior_message):
-                continue
-            content = (prior_message.content or "").strip()
-            if content:
-                transcript_lines.append(f"AIDM: {content}")
-            continue
-
-        content = (prior_message.content or "").strip()
-        if content:
-            transcript_lines.append(f"{prior_message.author.display_name}: {content}")
-
-    card_blocks: list[str] = []
-    for title, card_message in card_messages.items():
-        body = card_message.embeds[0].description if card_message.embeds else (card_message.content or "")
-        if body and body.strip():
-            card_blocks.append(f"### CARD: {title}\n{body.strip()}")
-
-    sections: list[str] = []
-    if transcript_lines:
-        sections.append("[Recent Thread Discussion]\n" + "\n".join(transcript_lines))
-    if card_blocks:
-        sections.append("[Current Player Cards]\n" + "\n\n".join(card_blocks))
-    return "\n\n".join(section for section in sections if section.strip()).strip()
-
-
-def _build_player_thread_state_prompt(*, current_message: str, state_source: str) -> str:
-    return (
-        "You are extracting the current decision state for a D&D player-workspace thread.\n"
-        "Return JSON only.\n\n"
-        "Rules:\n"
-        "- Focus only on this specific character and this specific thread.\n"
-        "- Use both the recent thread discussion and the current cards.\n"
-        "- Distinguish between confirmed decisions, suggested-but-unconfirmed ideas, and unresolved decisions.\n"
-        "- Treat facts already present in cards and not marked `Needs review.` as confirmed.\n"
-        "- If the latest user message is a generic confirmation like `yes`, `i confirm`, or `that all looks good`, apply that confirmation to the most recent clearly enumerated AIDM proposal in the thread.\n"
-        "- Do not list the same topic in both confirmed and unresolved unless there is an explicit conflict.\n"
-        "- Keep entries concise and specific.\n"
-        "- `update_ready` should be true when enough information is already settled that the existing cards could be meaningfully updated now.\n\n"
-        "Return exactly this JSON shape:\n"
-        "{\n"
-        '  "confirmed": ["Level 12 Abjuration Wizard"],\n'
-        '  "suggested": ["Second Metamagic Adept option might be Distant Spell"],\n'
-        '  "unresolved": ["Choose the second Metamagic Adept option"],\n'
-        '  "next_questions": ["Which second Metamagic Adept option do you want?"],\n'
-        '  "update_ready": true\n'
-        "}\n\n"
-        f"Current user message:\n{current_message.strip()}\n\n"
-        f"Thread state source:\n{state_source.strip()}"
-    )
-
-
-async def _summarize_player_thread_state(
-    *,
-    message: discord.Message,
-    channel_id: int,
-    category_id: int | None,
-    thread_id: int,
-    assigned_memory: str,
-    card_messages: dict[str, discord.Message],
-) -> dict:
-    state_source = await _collect_player_thread_state_source(
-        message.channel,
-        before=message,
-        card_messages=card_messages,
-    )
-    if not state_source:
-        return {}
-
-    raw = await get_assistant_response(
-        _build_player_thread_state_prompt(current_message=message.content or "", state_source=state_source),
-        channel_id,
-        category_id,
-        thread_id,
-        assigned_memory,
-        system_prompt="You extract structured player-thread decision state. Return JSON only.",
-    )
-    payload = _extract_loose_json_object(raw)
-    return payload if isinstance(payload, dict) else {}
-
-
-def _format_player_thread_state_context(state: dict) -> str:
-    if not state:
-        return ""
-
-    blocks: list[str] = []
-    for key, title in (
-        ("confirmed", "Confirmed Decisions"),
-        ("suggested", "Suggested But Unconfirmed"),
-        ("unresolved", "Unresolved Decisions"),
-        ("next_questions", "Best Next Questions"),
-    ):
-        values = state.get(key)
-        if not isinstance(values, list):
-            continue
-        cleaned = [str(value).strip() for value in values if str(value).strip()]
-        if cleaned:
-            blocks.append(f"[{title}]\n" + "\n".join(f"- {item}" for item in cleaned))
-
-    if isinstance(state.get("update_ready"), bool):
-        blocks.append(f"[Update Ready]\n- {'yes' if state['update_ready'] else 'no'}")
-
-    return "\n\n".join(blocks).strip()
-
-
 def _extract_player_name_from_workspace_cards(card_messages: dict[str, discord.Message]) -> str | None:
     for title in ("Profile Card", "Character Card"):
         card_message = card_messages.get(title)
@@ -1067,23 +928,15 @@ async def _workspace_system_prompt(thread: discord.Thread, card_messages: dict[s
     return build_other_workspace_system_prompt(entity_name, user_note, card_inventory_text, cascade_rules_text)
 
 
-def _conversation_only_workspace_system_prompt(base_prompt: str, state: dict | None = None) -> str:
-    extra_rules = [
-        "Runtime mode: conversation/workshop only.",
-        "- You are NOT editing cards in this reply.",
-        "- Do NOT claim that you updated, synced, changed, created, or applied card changes.",
-        "- If card changes would help, name the affected existing cards and ask for approval first.",
-        "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.",
-    ]
-    if isinstance(state, dict) and state.get("update_ready") is True:
-        extra_rules.extend(
-            [
-                "- The thread appears update-ready. Move quickly toward a concrete proposed update instead of reopening broad planning.",
-                "- Prefer one short confirmation/proposal step such as naming the affected cards and asking for approval.",
-                "- Do not re-ask decisions that are already confirmed unless there is a real rules conflict or one precise blocker remains.",
-            ]
-        )
-    return f"{base_prompt}\n\n" + "\n".join(extra_rules) + "\n"
+def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
+    return (
+        f"{base_prompt}\n\n"
+        "Runtime mode: conversation/workshop only.\n"
+        "- You are NOT editing cards in this reply.\n"
+        "- Do NOT claim that you updated, synced, changed, created, or applied card changes.\n"
+        "- If card changes would help, name the affected existing cards and ask for approval first.\n"
+        "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.\n"
+    )
 
 
 def _card_maintenance_workspace_system_prompt(base_prompt: str) -> str:
@@ -1158,20 +1011,8 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         url_context = await _fetch_url_context(urls) if urls else ""
         attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
-        context_limit = 20 if workspace_kind == "player" and (explicit_card_action or approved_recent_update) else 12 if (explicit_card_action or approved_recent_update) else 12 if workspace_kind == "player" else 6
+        context_limit = 24 if workspace_kind == "player" else 12 if (explicit_card_action or approved_recent_update) else 6
         recent_context = await _collect_recent_workspace_context(message, limit=context_limit)
-        player_state: dict = {}
-        player_state_context = ""
-        if workspace_kind == "player":
-            player_state = await _summarize_player_thread_state(
-                message=message,
-                channel_id=channel_id,
-                category_id=category_id,
-                thread_id=thread_id,
-                assigned_memory=assigned_memory,
-                card_messages=card_messages,
-            )
-            player_state_context = _format_player_thread_state_context(player_state)
 
         if explicit_card_action or approved_recent_update:
             card_bodies = {
@@ -1210,7 +1051,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 category_id,
                 thread_id,
                 assigned_memory,
-                context_block="\n\n".join(block for block in [player_state_context, recent_context, extra_context] if block).strip() or None,
+                context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
@@ -1235,7 +1076,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             if changed_titles:
                 await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
                 if workspace_kind == "player":
-                    followup = _player_missing_followup(merged_cards, player_state)
+                    followup = _player_missing_followup(merged_cards)
                     if followup:
                         await send_response_in_chunks(message.channel, followup)
             return True
@@ -1245,7 +1086,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
                 for title, card_message in card_messages.items()
             )
-            context_block = "\n\n".join(block for block in [player_state_context, card_context, recent_context, extra_context] if block).strip() or None
+            context_block = "\n\n".join(block for block in [card_context, recent_context, extra_context] if block).strip() or None
             response = await get_assistant_response(
                 message.content,
                 channel_id,
@@ -1253,7 +1094,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 thread_id,
                 assigned_memory,
                 context_block=context_block,
-                system_prompt=_conversation_only_workspace_system_prompt(system_prompt, player_state if workspace_kind == "player" else None),
+                system_prompt=_conversation_only_workspace_system_prompt(system_prompt),
             )
             if response:
                 await send_response_in_chunks(message.channel, response)
