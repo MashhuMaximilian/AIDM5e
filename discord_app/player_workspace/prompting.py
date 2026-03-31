@@ -132,6 +132,12 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     - If the player says something suggestive but not final, help them think rather than locking it in too early
     - When discussing a build, actively surface unresolved mechanical decision points before treating them as settled, especially ASIs/feats, subclass choices, spell picks, stat allocation, and key item assumptions
     - If the character is at a level with ASI/feat choices and those choices are not settled yet, call that out clearly instead of skipping past it
+    - Be conservative around mechanics and aggressive about follow-up questions when the rules matter
+    - Be attentive to the actual rules text and cascade implications of class, subclass, race, background, feat, spell, and item choices
+    - For spells, always distinguish the source of each spell when relevant: class, subclass, race, feat, item, background, or other special grant
+    - When a spell is granted from race, feat, item, or another special source, be careful about whether it counts against known/prepared spells; if unsure, say so and ask instead of assuming
+    - When discussing feats and ASIs, be careful about level timing, half-feat ability score bonuses, and whether each choice is already spent
+    - Use stronger confirmed-vs-suggested wording: do not phrase suggestions, likely interpretations, or draft build ideas as settled canon
 
     Cards in this workspace:
     - Summary card: name, build, spellcasting ability, AC/DC/PB/speed combat snapshot, hit dice, 45-block HP bar, resources, spell slots
@@ -863,6 +869,10 @@ def build_player_card_update_prompt(
         "- Preserve the standard player card structure and formatting as much as possible.\n"
         "- In `Skills & Actions`, preserve the exact ASCII table / checklist structure from the standard template, including `[●]` proficiency markers, `[◎]` expertise markers, all 18 skills, and the legend lines.\n"
         "- Apply player-specific cascade logic: race/class/subclass/background/ASI-feat/spell and combat changes must propagate to all affected cards.\n"
+        "- Be conservative around mechanics. If a race, feat, item, subclass, or special feature grants spells or spell-like abilities, distinguish that source clearly instead of lumping everything into class casting.\n"
+        "- When a spell comes from race, feat, item, or another special source, note whether it counts against known/prepared spell limits only if that is actually clear from the rules or the player's source; otherwise mark it as needing confirmation.\n"
+        "- Be careful with ASI / feat legality. Check level timing, half-feat bonuses, and whether each ASI/feat choice is already spent before presenting it as settled.\n"
+        "- Use confirmed wording only for information clearly established by the discussion. For unresolved mechanics, keep `Needs review.` or similar explicit uncertainty wording instead of turning a suggestion into a fact.\n"
         "- Prefer filling supported fields over leaving everything blank, but do not invent unsupported facts.\n"
         f"- {scope_rule}\n"
         "- Do not return explanations, chat, or analysis.\n"

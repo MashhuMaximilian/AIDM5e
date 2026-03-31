@@ -140,6 +140,7 @@ def _build_player_template_skeleton_cards(character_name: str) -> PlayerWorkspac
             **✨ Spellbook / Known Spells**
             * **Cantrips:** Needs review.
             * **Lvl 1+:** Needs review.
+            * **Source / counting notes:** Needs review.
             """
         ).strip(),
         items_card=dedent(

@@ -752,6 +752,15 @@ def _player_missing_followup(cards: dict[str, str]) -> str | None:
     if "Needs review." in links and len(prompts) < 3:
         prompts.append("reference links for race, class, feat, or spells")
 
+    rules_lower = rules.lower()
+    summary_lower = summary.lower()
+    if (
+        "spellbook" in rules_lower or "known spells" in rules_lower or "spell slots" in summary_lower
+    ) and "needs review." in rules_lower and len(prompts) < 3:
+        prompts.append("spell-source details and whether racial / feat / item spells count against prepared or known totals")
+    if ("feat" in rules_lower or "asi" in rules_lower) and "needs review." in rules_lower and len(prompts) < 3:
+        prompts.append("which ASI / feat choices are locked in at each level and whether any half-feat bonuses already changed ability scores")
+
     if not prompts:
         return None
 
