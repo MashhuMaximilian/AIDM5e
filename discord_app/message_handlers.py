@@ -168,6 +168,16 @@ def _extract_json_payload(text: str) -> dict:
         return {}
 
 
+def _extract_loose_json_object(text: str) -> dict:
+    body = (text or "").strip()
+    if not body:
+        return {}
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return _extract_json_payload(body)
+
+
 def _build_gameplay_workspace_analysis_prompt(*, user_message: str, assistant_response: str) -> str:
     return (
         "You are extracting possible character workspace updates from a D&D gameplay exchange.\n"
@@ -730,7 +740,7 @@ def _normalize_player_update_titles(updates: dict[str, str], canonical_titles: l
     return normalized
 
 
-def _player_missing_followup(cards: dict[str, str]) -> str | None:
+def _player_missing_followup(cards: dict[str, str], state: dict | None = None) -> str | None:
     prompts: list[str] = []
     summary = cards.get("Character Summary", "")
     profile = cards.get("Profile Card", "")
@@ -760,6 +770,16 @@ def _player_missing_followup(cards: dict[str, str]) -> str | None:
         prompts.append("spell-source details and whether racial / feat / item spells count against prepared or known totals")
     if ("feat" in rules_lower or "asi" in rules_lower) and "needs review." in rules_lower and len(prompts) < 3:
         prompts.append("which ASI / feat choices are locked in at each level and whether any half-feat bonuses already changed ability scores")
+
+    if isinstance(state, dict):
+        for key in ("unresolved", "next_questions"):
+            values = state.get(key)
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                cleaned = str(value).strip()
+                if cleaned and cleaned not in prompts and len(prompts) < 3:
+                    prompts.append(cleaned)
 
     if not prompts:
         return None
@@ -852,6 +872,150 @@ async def _collect_recent_workspace_context(message: discord.Message, *, limit: 
         if recent_attachment_context:
             blocks.append("[Recent Workspace Attachments]\n" + recent_attachment_context)
     return "\n\n".join(block for block in blocks if block.strip()).strip()
+
+
+def _is_workspace_card_embed_message(message: discord.Message) -> bool:
+    if not message.embeds:
+        return False
+    title = (message.embeds[0].title or "").strip()
+    return title in {
+        "Character Summary",
+        "Profile Card",
+        "Skills & Actions",
+        "Rules Card",
+        "Items Card",
+        "Reference Links",
+        "Summary Card",
+        "Enemy Roster",
+        "Balance & Threat",
+        "Battlefield & Hazards",
+        "Phases, Scripts & Triggers",
+        "Outcome, Rewards & Aftermath",
+        "Core Stat Block",
+        "Traits, Magic & Features",
+        "Actions, Reactions & Legendary",
+        "Tactics, Phases & Scaling",
+        "Lore, Hooks & Variants",
+    }
+
+
+async def _collect_player_thread_state_source(
+    thread: discord.Thread,
+    *,
+    before: discord.Message,
+    card_messages: dict[str, discord.Message],
+    limit: int = 28,
+) -> str:
+    bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
+    bot_id = bot_user.id if bot_user else None
+    transcript_lines: list[str] = []
+
+    async for prior_message in thread.history(limit=limit, before=before, oldest_first=True):
+        if prior_message.is_system():
+            continue
+        if bot_id is not None and prior_message.author.id == bot_id:
+            if _is_workspace_card_embed_message(prior_message):
+                continue
+            content = (prior_message.content or "").strip()
+            if content:
+                transcript_lines.append(f"AIDM: {content}")
+            continue
+
+        content = (prior_message.content or "").strip()
+        if content:
+            transcript_lines.append(f"{prior_message.author.display_name}: {content}")
+
+    card_blocks: list[str] = []
+    for title, card_message in card_messages.items():
+        body = card_message.embeds[0].description if card_message.embeds else (card_message.content or "")
+        if body and body.strip():
+            card_blocks.append(f"### CARD: {title}\n{body.strip()}")
+
+    sections: list[str] = []
+    if transcript_lines:
+        sections.append("[Recent Thread Discussion]\n" + "\n".join(transcript_lines))
+    if card_blocks:
+        sections.append("[Current Player Cards]\n" + "\n\n".join(card_blocks))
+    return "\n\n".join(section for section in sections if section.strip()).strip()
+
+
+def _build_player_thread_state_prompt(*, current_message: str, state_source: str) -> str:
+    return (
+        "You are extracting the current decision state for a D&D player-workspace thread.\n"
+        "Return JSON only.\n\n"
+        "Rules:\n"
+        "- Focus only on this specific character and this specific thread.\n"
+        "- Use both the recent thread discussion and the current cards.\n"
+        "- Distinguish between confirmed decisions, suggested-but-unconfirmed ideas, and unresolved decisions.\n"
+        "- Treat facts already present in cards and not marked `Needs review.` as confirmed.\n"
+        "- If the latest user message is a generic confirmation like `yes`, `i confirm`, or `that all looks good`, apply that confirmation to the most recent clearly enumerated AIDM proposal in the thread.\n"
+        "- Do not list the same topic in both confirmed and unresolved unless there is an explicit conflict.\n"
+        "- Keep entries concise and specific.\n"
+        "- `update_ready` should be true when enough information is already settled that the existing cards could be meaningfully updated now.\n\n"
+        "Return exactly this JSON shape:\n"
+        "{\n"
+        '  "confirmed": ["Level 12 Abjuration Wizard"],\n'
+        '  "suggested": ["Second Metamagic Adept option might be Distant Spell"],\n'
+        '  "unresolved": ["Choose the second Metamagic Adept option"],\n'
+        '  "next_questions": ["Which second Metamagic Adept option do you want?"],\n'
+        '  "update_ready": true\n'
+        "}\n\n"
+        f"Current user message:\n{current_message.strip()}\n\n"
+        f"Thread state source:\n{state_source.strip()}"
+    )
+
+
+async def _summarize_player_thread_state(
+    *,
+    message: discord.Message,
+    channel_id: int,
+    category_id: int | None,
+    thread_id: int,
+    assigned_memory: str,
+    card_messages: dict[str, discord.Message],
+) -> dict:
+    state_source = await _collect_player_thread_state_source(
+        message.channel,
+        before=message,
+        card_messages=card_messages,
+    )
+    if not state_source:
+        return {}
+
+    raw = await get_assistant_response(
+        _build_player_thread_state_prompt(current_message=message.content or "", state_source=state_source),
+        channel_id,
+        category_id,
+        thread_id,
+        assigned_memory,
+        system_prompt="You extract structured player-thread decision state. Return JSON only.",
+    )
+    payload = _extract_loose_json_object(raw)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _format_player_thread_state_context(state: dict) -> str:
+    if not state:
+        return ""
+
+    blocks: list[str] = []
+    for key, title in (
+        ("confirmed", "Confirmed Decisions"),
+        ("suggested", "Suggested But Unconfirmed"),
+        ("unresolved", "Unresolved Decisions"),
+        ("next_questions", "Best Next Questions"),
+    ):
+        values = state.get(key)
+        if not isinstance(values, list):
+            continue
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        if cleaned:
+            blocks.append(f"[{title}]\n" + "\n".join(f"- {item}" for item in cleaned))
+
+    if isinstance(state.get("update_ready"), bool):
+        blocks.append(f"[Update Ready]\n- {'yes' if state['update_ready'] else 'no'}")
+
+    return "\n\n".join(blocks).strip()
 
 
 def _extract_player_name_from_workspace_cards(card_messages: dict[str, discord.Message]) -> str | None:
@@ -980,6 +1144,18 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
         context_limit = 20 if workspace_kind == "player" and (explicit_card_action or approved_recent_update) else 12 if (explicit_card_action or approved_recent_update) else 12 if workspace_kind == "player" else 6
         recent_context = await _collect_recent_workspace_context(message, limit=context_limit)
+        player_state: dict = {}
+        player_state_context = ""
+        if workspace_kind == "player":
+            player_state = await _summarize_player_thread_state(
+                message=message,
+                channel_id=channel_id,
+                category_id=category_id,
+                thread_id=thread_id,
+                assigned_memory=assigned_memory,
+                card_messages=card_messages,
+            )
+            player_state_context = _format_player_thread_state_context(player_state)
 
         if explicit_card_action or approved_recent_update:
             card_bodies = {
@@ -1018,7 +1194,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 category_id,
                 thread_id,
                 assigned_memory,
-                context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
+                context_block="\n\n".join(block for block in [player_state_context, recent_context, extra_context] if block).strip() or None,
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
@@ -1043,7 +1219,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             if changed_titles:
                 await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
                 if workspace_kind == "player":
-                    followup = _player_missing_followup(merged_cards)
+                    followup = _player_missing_followup(merged_cards, player_state)
                     if followup:
                         await send_response_in_chunks(message.channel, followup)
             return True
@@ -1053,7 +1229,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
                 for title, card_message in card_messages.items()
             )
-            context_block = "\n\n".join(block for block in [card_context, recent_context, extra_context] if block).strip() or None
+            context_block = "\n\n".join(block for block in [player_state_context, card_context, recent_context, extra_context] if block).strip() or None
             response = await get_assistant_response(
                 message.content,
                 channel_id,
