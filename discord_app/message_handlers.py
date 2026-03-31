@@ -41,6 +41,7 @@ from discord_app.player_workspace.prompting import (
     build_monster_workspace_system_prompt,
     build_npc_workspace_system_prompt,
     build_other_workspace_system_prompt,
+    build_player_card_update_prompt,
     build_player_workspace_system_prompt,
 )
 from discord_app.workspace_threads import (
@@ -695,6 +696,71 @@ def _target_card_titles(message_text: str, card_titles: list[str]) -> list[str]:
     return []
 
 
+def _normalize_player_update_titles(updates: dict[str, str], canonical_titles: list[str]) -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for title in canonical_titles:
+        for alias in _card_aliases(title):
+            alias_map[alias] = title
+    alias_map.update(
+        {
+            "character summary": "Character Summary",
+            "character card": "Character Summary",
+            "summary": "Character Summary",
+            "character profile": "Profile Card",
+            "profile": "Profile Card",
+            "stats and actions": "Skills & Actions",
+            "skills and actions": "Skills & Actions",
+            "skills": "Skills & Actions",
+            "actions": "Skills & Actions",
+            "rules": "Rules Card",
+            "features": "Rules Card",
+            "items": "Items Card",
+            "inventory": "Items Card",
+            "links": "Reference Links",
+            "reference links": "Reference Links",
+        }
+    )
+    normalized: dict[str, str] = {}
+    for raw_title, body in updates.items():
+        key = _normalize_match_text(raw_title).replace("&", "and")
+        mapped = alias_map.get(key)
+        if not mapped:
+            continue
+        normalized[mapped] = body
+    return normalized
+
+
+def _player_missing_followup(cards: dict[str, str]) -> str | None:
+    prompts: list[str] = []
+    summary = cards.get("Character Summary", "")
+    profile = cards.get("Profile Card", "")
+    skills = cards.get("Skills & Actions", "")
+    rules = cards.get("Rules Card", "")
+    items = cards.get("Items Card", "")
+    links = cards.get("Reference Links", "")
+
+    if "Needs review." in summary and len(prompts) < 3:
+        prompts.append("combat basics like AC, HP, speed, and spell DC")
+    if "Needs review." in profile and len(prompts) < 3:
+        prompts.append("identity / personality details or the Hermit discovery")
+    if "Needs review." in skills and len(prompts) < 3:
+        prompts.append("final ability scores, proficiency choices, or signature combat actions")
+    if "Needs review." in rules and len(prompts) < 3:
+        prompts.append("remaining class features, ASIs / feats, or spellbook choices")
+    if "Needs review." in items and len(prompts) < 3:
+        prompts.append("gear, attunement, or currency")
+    if "Needs review." in links and len(prompts) < 3:
+        prompts.append("reference links for race, class, feat, or spells")
+
+    if not prompts:
+        return None
+
+    return (
+        "I updated the cards with what we have so far. The main things still worth locking in are:\n"
+        + "\n".join(f"• {prompt}" for prompt in prompts[:3])
+    )
+
+
 def _is_broad_workspace_sync_request(text: str | None) -> bool:
     content = _normalize_match_text(text)
     if not content:
@@ -903,10 +969,8 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         url_context = await _fetch_url_context(urls) if urls else ""
         attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
-        recent_context = await _collect_recent_workspace_context(
-            message,
-            limit=12 if (explicit_card_action or approved_recent_update) else 6,
-        )
+        context_limit = 20 if workspace_kind == "player" and (explicit_card_action or approved_recent_update) else 12 if (explicit_card_action or approved_recent_update) else 12 if workspace_kind == "player" else 6
+        recent_context = await _collect_recent_workspace_context(message, limit=context_limit)
 
         if explicit_card_action or approved_recent_update:
             card_bodies = {
@@ -924,11 +988,20 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             prompt_text = build_card_creation_prompt(
                 request_text=effective_request_text,
                 card_bodies=card_bodies,
-            ) if _is_new_card_request(message.content) else build_card_update_prompt(
-                request_text=effective_request_text,
-                card_bodies=card_bodies,
-                target_titles=target_titles,
-                allow_affected_card_updates=not target_titles or broad_sync_request,
+            ) if _is_new_card_request(message.content) else (
+                build_player_card_update_prompt(
+                    request_text=effective_request_text,
+                    card_bodies=card_bodies,
+                    target_titles=target_titles,
+                    allow_affected_card_updates=not target_titles or broad_sync_request,
+                )
+                if workspace_kind == "player"
+                else build_card_update_prompt(
+                    request_text=effective_request_text,
+                    card_bodies=card_bodies,
+                    target_titles=target_titles,
+                    allow_affected_card_updates=not target_titles or broad_sync_request,
+                )
             )
             response = await get_assistant_response(
                 prompt_text,
@@ -940,6 +1013,8 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
+            if workspace_kind == "player" and not _is_new_card_request(message.content):
+                updates = _normalize_player_update_titles(updates, list(card_messages.keys()))
             if not updates:
                 await send_response_in_chunks(
                     message.channel,
@@ -958,6 +1033,10 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             changed_titles = [title for title in updates.keys() if title in resolved_messages]
             if changed_titles:
                 await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
+                if workspace_kind == "player":
+                    followup = _player_missing_followup(merged_cards)
+                    if followup:
+                        await send_response_in_chunks(message.channel, followup)
             return True
 
         if _has_clear_question(message.content) or conversational_player_reply:

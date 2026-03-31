@@ -827,6 +827,51 @@ def build_idea_prompt(request: PlayerWorkspaceRequest) -> str:
     return build_player_import_prompt(request)
 
 
+def build_player_card_update_prompt(
+    *,
+    request_text: str,
+    card_bodies: dict[str, str],
+    target_titles: list[str],
+    allow_affected_card_updates: bool = False,
+) -> str:
+    cards_block = "\n\n".join(
+        f"### CURRENT CARD: {title}\n{body.strip() or 'Needs review.'}"
+        for title, body in card_bodies.items()
+    )
+    target_block = "\n".join(f"- {title}" for title in target_titles) if target_titles else "- No existing player card was explicitly named."
+    scope_rule = (
+        "The player approved a broad update. Update every affected existing player card you can support from the approved discussion. "
+        "If the player cards are skeletal or mostly `Needs review.`, fill them according to the player workspace standard structure."
+        if allow_affected_card_updates
+        else "Update only the explicitly targeted existing player cards unless another player card must change for consistency."
+    )
+    return (
+        "You are updating a PLAYER workspace with a fixed canonical schema.\n\n"
+        "Canonical player cards:\n"
+        "- Character Summary\n"
+        "- Profile Card\n"
+        "- Skills & Actions\n"
+        "- Rules Card\n"
+        "- Items Card\n"
+        "- Reference Links\n\n"
+        f"Target cards:\n{target_block}\n\n"
+        f"User request:\n{request_text.strip()}\n\n"
+        f"Current card contents:\n{cards_block}\n\n"
+        "Rules:\n"
+        "- Use only the canonical player card titles listed above.\n"
+        "- Never invent a new player card title unless the user explicitly asked for a new separate card.\n"
+        "- Preserve the standard player card structure and formatting as much as possible.\n"
+        "- Apply player-specific cascade logic: race/class/subclass/background/ASI-feat/spell and combat changes must propagate to all affected cards.\n"
+        "- Prefer filling supported fields over leaving everything blank, but do not invent unsupported facts.\n"
+        f"- {scope_rule}\n"
+        "- Do not return explanations, chat, or analysis.\n"
+        "- Return only the full updated card bodies using exactly this format:\n"
+        "### CARD: Card Title\n"
+        "Full card body\n\n"
+        "Do not include commentary before or after the card bodies."
+    )
+
+
 def build_format_pass_prompt(raw_markdown: str) -> str:
     """
     Second-pass prompt. Takes the raw markdown from Pass 1
