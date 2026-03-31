@@ -861,6 +861,7 @@ def build_player_card_update_prompt(
         "- Use only the canonical player card titles listed above.\n"
         "- Never invent a new player card title unless the user explicitly asked for a new separate card.\n"
         "- Preserve the standard player card structure and formatting as much as possible.\n"
+        "- In `Skills & Actions`, preserve the exact ASCII table / checklist structure from the standard template, including `[●]` proficiency markers, `[◎]` expertise markers, all 18 skills, and the legend lines.\n"
         "- Apply player-specific cascade logic: race/class/subclass/background/ASI-feat/spell and combat changes must propagate to all affected cards.\n"
         "- Prefer filling supported fields over leaving everything blank, but do not invent unsupported facts.\n"
         f"- {scope_rule}\n"

@@ -211,21 +211,24 @@ async def iter_archived_threads(channel: discord.TextChannel) -> list[discord.Th
 async def find_or_create_player_thread(
     channel: discord.TextChannel,
     thread_name: str,
+    *,
+    reuse_archived: bool = True,
 ) -> tuple[discord.Thread, bool]:
     for thread in channel.threads:
         if thread.name == thread_name:
             return thread, False
 
-    for thread in await iter_archived_threads(channel):
-        if thread.name == thread_name:
-            try:
-                await thread.edit(archived=False, locked=False)
-            except discord.HTTPException:
+    if reuse_archived:
+        for thread in await iter_archived_threads(channel):
+            if thread.name == thread_name:
                 try:
-                    await thread.edit(archived=False)
+                    await thread.edit(archived=False, locked=False)
                 except discord.HTTPException:
-                    logger.warning("Could not unarchive thread %s; reusing archived state.", thread.id)
-            return thread, False
+                    try:
+                        await thread.edit(archived=False)
+                    except discord.HTTPException:
+                        logger.warning("Could not unarchive thread %s; reusing archived state.", thread.id)
+                return thread, False
 
     thread = await channel.create_thread(name=thread_name)
     return thread, True

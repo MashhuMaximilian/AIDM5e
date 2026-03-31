@@ -881,7 +881,11 @@ async def _ensure_workspace_thread(
     )
 
     thread_name = f"{thread_prefix} - {display_name}"
-    workspace_thread, created_thread = await find_or_create_player_thread(sheets_channel, thread_name)
+    workspace_thread, created_thread = await find_or_create_player_thread(
+        sheets_channel,
+        thread_name,
+        reuse_archived=False,
+    )
 
     context = await asyncio.to_thread(
         get_or_create_campaign_context,

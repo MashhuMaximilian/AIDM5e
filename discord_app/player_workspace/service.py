@@ -71,38 +71,45 @@ def _build_player_template_skeleton_cards(character_name: str) -> PlayerWorkspac
             +---------+-------+-----+------+
             | ABILITY | SCORE | MOD | SAVE |
             +---------+-------+-----+------+
-            | [ ] STR |  ?    |  ?  |  ?   |
-            | [ ] DEX |  ?    |  ?  |  ?   |
-            | [ ] CON |  ?    |  ?  |  ?   |
-            | [ ] INT |  ?    |  ?  |  ?   |
-            | [ ] WIS |  ?    |  ?  |  ?   |
-            | [ ] CHA |  ?    |  ?  |  ?   |
+            | [●] STR |  [#]  | [#] |  [#] |
+            | [●] DEX |  [#]  | [#] |  [#] |
+            | [●] CON |  [#]  | [#] |  [#] |
+            | [●] INT |  [#]  | [#] |  [#] |
+            | [●] WIS |  [#]  | [#] |  [#] |
+            | [●] CHA |  [#]  | [#] |  [#] |
             +---------+-------+-----+------+
+            ● -> Proficient
             ```
 
             ```
             SKILLS & SENSES
             -------------------------
-            Acrobatics .... Needs review.
-            Animal Hand ... Needs review.
-            Arcana ........ Needs review.
-            Athletics ..... Needs review.
-            Deception ..... Needs review.
-            History ....... Needs review.
-            Insight ....... Needs review.
-            Intimidation .. Needs review.
-            Investigation . Needs review.
-            Medicine ...... Needs review.
-            Nature ........ Needs review.
-            Perception .... Needs review.
-            Performance ... Needs review.
-            Persuasion .... Needs review.
-            Religion ...... Needs review.
-            Sleight Hand .. Needs review.
-            Stealth ....... Needs review.
-            Survival ...... Needs review.
-            PASSIVE PERCEPTION: Needs review.
-            PASSIVE INSIGHT: Needs review.
+            [ ] Acrobatics .... [#]
+            [ ] Animal Hand ... [#]
+            [ ] Arcana ........ [#]
+            [ ] Athletics ..... [#]
+            [ ] Deception ..... [#]
+            [ ] History ....... [#]
+            [ ] Insight ....... [#]
+            [ ] Intimidation .. [#]
+            [ ] Investigation . [#]
+            [ ] Medicine ...... [#]
+            [ ] Nature ........ [#]
+            [ ] Perception .... [#]
+            [ ] Performance ... [#]
+            [ ] Persuasion .... [#]
+            [ ] Religion ...... [#]
+            [ ] Sleight Hand .. [#]
+            [ ] Stealth ....... [#]
+            [ ] Survival ...... [#]
+            --------------------------
+            PASSIVE PERCEPTION: [#]
+            PASSIVE INSIGHT: [#]
+            ----------------------------
+            Legend:
+            [ ] None
+            [●] Proficient
+            [◎] Expertise
             ```
 
             **Actions**

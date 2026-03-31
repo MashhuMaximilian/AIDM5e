@@ -71,7 +71,11 @@ def register(create_group, h) -> None:
         display_name = (character_name or "New Character").strip()
         thread_name = f"Character - {display_name}"
         sheets_channel = await h.ensure_character_sheets_channel(interaction, category)
-        player_thread, created_thread = await h.find_or_create_player_thread(sheets_channel, thread_name)
+        player_thread, created_thread = await h.find_or_create_player_thread(
+            sheets_channel,
+            thread_name,
+            reuse_archived=False,
+        )
 
         context = await asyncio.to_thread(
             h.get_or_create_campaign_context,
