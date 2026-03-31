@@ -85,11 +85,13 @@ def register(create_group, h) -> None:
             category.name,
             h.DM_ROLE_NAME,
         )
-        memory_name = f"player-{h.slugify_player_key(display_name)}"
-        memory_id = await asyncio.to_thread(h.ensure_memory, context.campaign_id, memory_name)
         await asyncio.to_thread(h.ensure_thread_for_channel, sheets_channel.id, player_thread.id, player_thread.name, True)
-        await asyncio.to_thread(h.assign_memory_to_thread, player_thread.id, memory_id)
-        await asyncio.to_thread(h.set_thread_always_on, player_thread.id, True)
+        existing_memory_id = await h.get_assigned_memory(sheets_channel.id, category.id, player_thread.id)
+        if created_thread or not existing_memory_id:
+            memory_name = f"player-{h.slugify_player_key(display_name)}-{player_thread.id}"
+            memory_id = await asyncio.to_thread(h.ensure_memory, context.campaign_id, memory_name)
+            await asyncio.to_thread(h.assign_memory_to_thread, player_thread.id, memory_id)
+            await asyncio.to_thread(h.set_thread_always_on, player_thread.id, True)
 
         try:
             request = h.PlayerWorkspaceRequest(

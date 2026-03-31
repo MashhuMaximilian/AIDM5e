@@ -902,10 +902,12 @@ async def _ensure_workspace_thread(
         channel_memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, channel_memory_name)
         await asyncio.to_thread(assign_memory_to_channel, sheets_channel.id, channel_memory_id)
     else:
-        memory_name = f"{memory_prefix}-{slugify_player_key(display_name)}"
-        memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
-        await asyncio.to_thread(assign_memory_to_thread, workspace_thread.id, memory_id)
-        await asyncio.to_thread(set_thread_always_on, workspace_thread.id, True)
+        existing_memory_id = await get_assigned_memory(sheets_channel.id, category.id, workspace_thread.id)
+        if created_thread or not existing_memory_id:
+            memory_name = f"{memory_prefix}-{slugify_player_key(display_name)}-{workspace_thread.id}"
+            memory_id = await asyncio.to_thread(ensure_memory, context.campaign_id, memory_name)
+            await asyncio.to_thread(assign_memory_to_thread, workspace_thread.id, memory_id)
+            await asyncio.to_thread(set_thread_always_on, workspace_thread.id, True)
     return sheets_channel, workspace_thread, created_thread
 
 
