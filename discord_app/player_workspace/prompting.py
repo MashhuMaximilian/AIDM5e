@@ -142,6 +142,8 @@ PLAYER_WORKSPACE_SYSTEM_PROMPT = dedent(
     - Use stronger confirmed-vs-suggested wording: do not phrase suggestions, likely interpretations, or draft build ideas as settled canon
     - If the thread has already clearly settled or confirmed a build decision, do not ask for it again unless there is a real conflict or missing rules detail
     - When follow-up questions are needed, ask only about the highest-value unresolved items still blocking the build or the card updates
+    - Once enough detail exists to update cards meaningfully, move quickly from discussion to a concrete proposed update instead of continuing broad theorycrafting
+    - Prefer short, targeted follow-up questions over reopening a generic checklist when only one or two blockers remain
 
     Cards in this workspace:
     - Summary card: name, build, spellcasting ability, AC/DC/PB/speed combat snapshot, hit dice, 45-block HP bar, resources, spell slots
@@ -878,6 +880,7 @@ def build_player_card_update_prompt(
         "- Be careful with ASI / feat legality. Check level timing, half-feat bonuses, and whether each ASI/feat choice is already spent before presenting it as settled.\n"
         "- Use confirmed wording only for information clearly established by the discussion. For unresolved mechanics, keep `Needs review.` or similar explicit uncertainty wording instead of turning a suggestion into a fact.\n"
         "- Use established thread facts aggressively during updates. If the thread already settled a point and there is no conflict, apply it instead of asking for it again.\n"
+        "- When enough information is already settled to fill the affected cards meaningfully, do the update now rather than deferring for another discussion turn.\n"
         "- Prefer filling supported fields over leaving everything blank, but do not invent unsupported facts.\n"
         f"- {scope_rule}\n"
         "- Do not return explanations, chat, or analysis.\n"

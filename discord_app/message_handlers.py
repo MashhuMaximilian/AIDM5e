@@ -603,6 +603,8 @@ def _is_affirmative_workspace_approval(text: str | None) -> bool:
         "yes please",
         "yep",
         "yup",
+        "i confirm",
+        "confirmed",
         "please do",
         "go ahead",
         "go for it",
@@ -612,6 +614,12 @@ def _is_affirmative_workspace_approval(text: str | None) -> bool:
         "absolutely",
         "of course",
         "ofc",
+        "that's right",
+        "thats right",
+        "that's correct",
+        "thats correct",
+        "that all looks good",
+        "that looks good",
         "sounds good",
         "looks good",
         "i like them",
@@ -1059,15 +1067,23 @@ async def _workspace_system_prompt(thread: discord.Thread, card_messages: dict[s
     return build_other_workspace_system_prompt(entity_name, user_note, card_inventory_text, cascade_rules_text)
 
 
-def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
-    return (
-        f"{base_prompt}\n\n"
-        "Runtime mode: conversation/workshop only.\n"
-        "- You are NOT editing cards in this reply.\n"
-        "- Do NOT claim that you updated, synced, changed, created, or applied card changes.\n"
-        "- If card changes would help, name the affected existing cards and ask for approval first.\n"
-        "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.\n"
-    )
+def _conversation_only_workspace_system_prompt(base_prompt: str, state: dict | None = None) -> str:
+    extra_rules = [
+        "Runtime mode: conversation/workshop only.",
+        "- You are NOT editing cards in this reply.",
+        "- Do NOT claim that you updated, synced, changed, created, or applied card changes.",
+        "- If card changes would help, name the affected existing cards and ask for approval first.",
+        "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.",
+    ]
+    if isinstance(state, dict) and state.get("update_ready") is True:
+        extra_rules.extend(
+            [
+                "- The thread appears update-ready. Move quickly toward a concrete proposed update instead of reopening broad planning.",
+                "- Prefer one short confirmation/proposal step such as naming the affected cards and asking for approval.",
+                "- Do not re-ask decisions that are already confirmed unless there is a real rules conflict or one precise blocker remains.",
+            ]
+        )
+    return f"{base_prompt}\n\n" + "\n".join(extra_rules) + "\n"
 
 
 def _card_maintenance_workspace_system_prompt(base_prompt: str) -> str:
@@ -1237,7 +1253,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 thread_id,
                 assigned_memory,
                 context_block=context_block,
-                system_prompt=_conversation_only_workspace_system_prompt(system_prompt),
+                system_prompt=_conversation_only_workspace_system_prompt(system_prompt, player_state if workspace_kind == "player" else None),
             )
             if response:
                 await send_response_in_chunks(message.channel, response)
