@@ -862,6 +862,90 @@ async def _collect_recent_workspace_context(message: discord.Message, *, limit: 
     return "\n\n".join(block for block in blocks if block.strip()).strip()
 
 
+async def _collect_player_update_recap_source(
+    thread: discord.Thread,
+    *,
+    before: discord.Message,
+    card_messages: dict[str, discord.Message],
+    limit: int = 80,
+) -> str:
+    transcript_lines: list[str] = []
+
+    async for prior_message in thread.history(limit=limit, before=before, oldest_first=True):
+        if prior_message.is_system():
+            continue
+        if prior_message.author == client.user and _is_workspace_card_embed_message(prior_message):
+            continue
+        content = (prior_message.content or "").strip()
+        if not content:
+            continue
+        speaker = "AIDM" if prior_message.author == client.user else prior_message.author.display_name
+        transcript_lines.append(f"{speaker}: {content}")
+
+    card_blocks: list[str] = []
+    for title, card_message in card_messages.items():
+        body = card_message.embeds[0].description if card_message.embeds else (card_message.content or "")
+        if body and body.strip():
+            card_blocks.append(f"### CARD: {title}\n{body.strip()}")
+
+    sections: list[str] = []
+    if transcript_lines:
+        sections.append("[Thread Discussion So Far]\n" + "\n".join(transcript_lines))
+    if card_blocks:
+        sections.append("[Current Player Cards]\n" + "\n\n".join(card_blocks))
+    return "\n\n".join(section for section in sections if section.strip()).strip()
+
+
+def _build_player_update_recap_prompt(*, current_message: str, recap_source: str) -> str:
+    return (
+        "You are preparing a hidden recap for updating a D&D player workspace.\n"
+        "Do not answer the user directly.\n\n"
+        "Your job:\n"
+        "- Read the thread discussion and current cards.\n"
+        "- Identify what is already settled enough to apply to cards.\n"
+        "- Identify what is still unresolved.\n"
+        "- Be careful not to drop established decisions from earlier in the thread.\n"
+        "- Keep it concise and factual.\n"
+        "- Do not tell the assistant to ask for confirmation again unless there is a true conflict.\n\n"
+        "Return only this structure:\n"
+        "[Settled Facts]\n"
+        "- ...\n\n"
+        "[Still Unresolved]\n"
+        "- ...\n\n"
+        "[Apply To Cards Now]\n"
+        "- ...\n\n"
+        f"Current update request:\n{current_message.strip()}\n\n"
+        f"Source material:\n{recap_source.strip()}"
+    )
+
+
+async def _summarize_player_update_recap(
+    *,
+    message: discord.Message,
+    channel_id: int,
+    category_id: int | None,
+    thread_id: int,
+    assigned_memory: str,
+    card_messages: dict[str, discord.Message],
+) -> str:
+    recap_source = await _collect_player_update_recap_source(
+        message.channel,
+        before=message,
+        card_messages=card_messages,
+    )
+    if not recap_source:
+        return ""
+    raw = await get_assistant_response(
+        _build_player_update_recap_prompt(current_message=message.content or "", recap_source=recap_source),
+        channel_id,
+        category_id,
+        thread_id,
+        assigned_memory,
+        system_prompt="You create hidden update recaps for player workspaces. Return only the requested recap structure.",
+    )
+    return (raw or "").strip()
+
+
 def _is_workspace_card_embed_message(message: discord.Message) -> bool:
     if not message.embeds:
         return False
@@ -1019,6 +1103,16 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
                 for title, card_message in card_messages.items()
             }
+            player_update_recap = ""
+            if workspace_kind == "player" and not _is_new_card_request(message.content):
+                player_update_recap = await _summarize_player_update_recap(
+                    message=message,
+                    channel_id=channel_id,
+                    category_id=category_id,
+                    thread_id=thread_id,
+                    assigned_memory=assigned_memory,
+                    card_messages=card_messages,
+                )
             effective_request_text = message.content
             if approved_recent_update and approval_request_text:
                 effective_request_text = (
@@ -1051,7 +1145,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 category_id,
                 thread_id,
                 assigned_memory,
-                context_block="\n\n".join(block for block in [recent_context, extra_context] if block).strip() or None,
+                context_block="\n\n".join(block for block in [player_update_recap, recent_context, extra_context] if block).strip() or None,
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
