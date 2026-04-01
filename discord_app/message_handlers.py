@@ -951,6 +951,30 @@ def _build_player_workshop_recap_prompt(*, current_message: str, recap_source: s
     )
 
 
+def _build_workspace_workshop_recap_prompt(*, workspace_kind: str, current_message: str, recap_source: str) -> str:
+    label = workspace_kind.upper()
+    return (
+        f"You are preparing a hidden recap for a D&D {label} workspace conversation turn.\n"
+        "Do not answer the user directly.\n\n"
+        "Your job:\n"
+        "- Read the thread discussion and current cards.\n"
+        "- Treat the current cards as the settled baseline unless later discussion clearly changed something.\n"
+        "- Identify what is already settled, what is still open, and what the current design phase seems to be.\n"
+        "- Note the best kinds of suggestions or options to offer next.\n"
+        "- Avoid re-asking things already clearly established in cards or later discussion.\n"
+        "- Keep it concise and factual.\n\n"
+        "Return only this structure:\n"
+        "[Settled Baseline]\n"
+        "- ...\n\n"
+        "[Current Open Decisions]\n"
+        "- ...\n\n"
+        "[Best Next Suggestions]\n"
+        "- ...\n\n"
+        f"Current workshop request:\n{current_message.strip()}\n\n"
+        f"Source material:\n{recap_source.strip()}"
+    )
+
+
 async def _summarize_player_update_recap(
     *,
     message: discord.Message,
@@ -1002,6 +1026,82 @@ async def _summarize_player_workshop_recap(
         thread_id,
         assigned_memory,
         system_prompt="You create hidden player-workshop recaps. Return only the requested recap structure.",
+    )
+    return (raw or "").strip()
+
+
+async def _summarize_workspace_workshop_recap(
+    *,
+    workspace_kind: str,
+    message: discord.Message,
+    channel_id: int,
+    category_id: int | None,
+    thread_id: int,
+    assigned_memory: str,
+    card_messages: dict[str, discord.Message],
+) -> str:
+    recap_source = await _collect_player_update_recap_source(
+        message.channel,
+        before=message,
+        card_messages=card_messages,
+        limit=60 if workspace_kind == "player" else 50,
+    )
+    if not recap_source:
+        return ""
+    builder = _build_player_workshop_recap_prompt if workspace_kind == "player" else _build_workspace_workshop_recap_prompt
+    raw = await get_assistant_response(
+        builder(
+            current_message=message.content or "",
+            recap_source=recap_source,
+            **({"workspace_kind": workspace_kind} if builder is _build_workspace_workshop_recap_prompt else {}),
+        ),
+        channel_id,
+        category_id,
+        thread_id,
+        assigned_memory,
+        system_prompt="You create hidden workspace workshop recaps. Return only the requested recap structure.",
+    )
+    return (raw or "").strip()
+
+
+async def _summarize_workspace_update_recap(
+    *,
+    workspace_kind: str,
+    message: discord.Message,
+    channel_id: int,
+    category_id: int | None,
+    thread_id: int,
+    assigned_memory: str,
+    card_messages: dict[str, discord.Message],
+) -> str:
+    if workspace_kind == "player":
+        return await _summarize_player_update_recap(
+            message=message,
+            channel_id=channel_id,
+            category_id=category_id,
+            thread_id=thread_id,
+            assigned_memory=assigned_memory,
+            card_messages=card_messages,
+        )
+    recap_source = await _collect_player_update_recap_source(
+        message.channel,
+        before=message,
+        card_messages=card_messages,
+        limit=60,
+    )
+    if not recap_source:
+        return ""
+    raw = await get_assistant_response(
+        _build_workspace_workshop_recap_prompt(
+            workspace_kind=workspace_kind,
+            current_message=message.content or "",
+            recap_source=recap_source,
+        ).replace("[Best Next Suggestions]", "[Apply To Cards Now]"),
+        channel_id,
+        category_id,
+        thread_id,
+        assigned_memory,
+        system_prompt="You create hidden update recaps for workspace card maintenance. Return only the requested recap structure.",
     )
     return (raw or "").strip()
 
@@ -1149,6 +1249,42 @@ def _needs_player_workshop_recap(text: str | None) -> bool:
     return any(marker in content for marker in recap_markers)
 
 
+def _needs_workspace_workshop_recap(workspace_kind: str | None, text: str | None) -> bool:
+    content = (text or "").strip().lower()
+    if not content:
+        return False
+    if workspace_kind == "player":
+        return _needs_player_workshop_recap(text)
+    generic_markers = (
+        "what do you think",
+        "give me options",
+        "give me some options",
+        "what are my options",
+        "options",
+        "suggest",
+        "recommend",
+        "brainstorm",
+        "alternatives",
+        "which one",
+        "what would you pick",
+        "what would you do",
+        "compare",
+        "pros and cons",
+        "tradeoff",
+        "scale",
+        "stronger",
+        "weaker",
+        "relationship",
+        "relationships",
+        "hook",
+        "hooks",
+        "lore",
+        "stat block",
+        "cr ",
+    )
+    return any(marker in content for marker in generic_markers)
+
+
 async def _recent_workspace_update_proposal(thread: discord.Thread, *, before: discord.Message, limit: int = 6) -> str | None:
     bot_user = thread.guild.me or thread.guild.get_member(thread._state.user.id)
     bot_id = bot_user.id if bot_user else None
@@ -1216,9 +1352,10 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
                 for title, card_message in card_messages.items()
             }
-            player_update_recap = ""
-            if workspace_kind == "player" and not _is_new_card_request(message.content):
-                player_update_recap = await _summarize_player_update_recap(
+            workspace_update_recap = ""
+            if workspace_kind in {"player", "npc", "monster"} and not _is_new_card_request(message.content):
+                workspace_update_recap = await _summarize_workspace_update_recap(
+                    workspace_kind=workspace_kind,
                     message=message,
                     channel_id=channel_id,
                     category_id=category_id,
@@ -1258,7 +1395,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 category_id,
                 thread_id,
                 assigned_memory,
-                context_block="\n\n".join(block for block in [player_update_recap, recent_context, extra_context] if block).strip() or None,
+                context_block="\n\n".join(block for block in [workspace_update_recap, recent_context, extra_context] if block).strip() or None,
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
             )
             updates = parse_card_update_response(response)
@@ -1293,9 +1430,10 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
                 for title, card_message in card_messages.items()
             )
-            player_workshop_recap = ""
-            if workspace_kind == "player" and _needs_player_workshop_recap(message.content):
-                player_workshop_recap = await _summarize_player_workshop_recap(
+            workspace_workshop_recap = ""
+            if workspace_kind in {"player", "npc", "monster"} and _needs_workspace_workshop_recap(workspace_kind, message.content):
+                workspace_workshop_recap = await _summarize_workspace_workshop_recap(
+                    workspace_kind=workspace_kind,
                     message=message,
                     channel_id=channel_id,
                     category_id=category_id,
@@ -1304,7 +1442,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                     card_messages=card_messages,
                 )
             context_block = "\n\n".join(
-                block for block in [player_workshop_recap, card_context, recent_context, extra_context] if block
+                block for block in [workspace_workshop_recap, card_context, recent_context, extra_context] if block
             ).strip() or None
             response = await get_assistant_response(
                 message.content,
