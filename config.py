@@ -79,6 +79,7 @@ AUDIO_PROMPT = os.getenv(
     "AUDIO_PROMPT",
     DEFAULT_AUDIO_PROMPT,
 )
+VOICE_AUTOJOIN_CHANNEL_NAME = os.getenv("VOICE_AUTOJOIN_CHANNEL_NAME", "session-voice").strip()
 KEEP_AUDIO_FILES = os.getenv("KEEP_AUDIO_FILES", "false").lower() == "true"
 KEEP_TRANSCRIPT_FILES = os.getenv("KEEP_TRANSCRIPT_FILES", "false").lower() == "true"
 VOICE_PUBLIC_CONTEXT_PATH = os.getenv("VOICE_PUBLIC_CONTEXT_PATH", str(VOICE_CONTEXT_DIR / "summary_public.txt"))

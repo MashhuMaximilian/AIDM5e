@@ -119,6 +119,7 @@ AUDIO_SUMMARY_WINDOW_CHUNKS=1
 AUDIO_BITRATE=128k
 AUDIO_SAMPLE_RATE=44100
 AUDIO_CHANNELS=1
+VOICE_AUTOJOIN_CHANNEL_NAME=session-voice
 KEEP_AUDIO_FILES=false
 KEEP_TRANSCRIPT_FILES=false
 VOICE_INCLUDE_DM_CONTEXT=false
@@ -138,8 +139,11 @@ FFMPEG_INPUT_DEVICE=:0
 Notes:
 
 - `AUDIO_BITRATE`, `AUDIO_SAMPLE_RATE`, and `AUDIO_CHANNELS` control the recorded audio encoding.
-- The macOS defaults above are appropriate for local testing on a Mac.
-- Linux and Windows will usually need different capture backends and device names.
+- `VOICE_AUTOJOIN_CHANNEL_NAME` defaults to `session-voice`, so live auto-join is restricted to that channel unless you change it.
+- The macOS defaults above are appropriate only for local FFmpeg fallback testing on a Mac.
+- On Linux/VPS Docker, prefer Discord receive-mode and leave `FFMPEG_INPUT_FORMAT` / `FFMPEG_INPUT_DEVICE` unset unless you are intentionally wiring host audio devices into the container.
+- Linux FFmpeg fallback usually needs something like PulseAudio or ALSA plus explicit device/socket mounts in Docker.
+- If `discord-ext-voice-recv` is available, the live Discord path does not use these FFmpeg input settings and records per-user Discord streams directly instead.
 
 ## Campaign Setup Flow
 

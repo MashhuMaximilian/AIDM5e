@@ -413,8 +413,10 @@ class VoiceRecorder:
         self._gemini_guild_id = getattr(getattr(voice_client, "guild", None), "id", None)
         await self.refresh_context_from_category(getattr(voice_client.channel, "category", None))
         if hasattr(voice_client, "listen") and hasattr(voice_client, "is_listening"):
+            logging.info("Voice capture mode: Discord receive-mode stream capture.")
             await self.capture_service.capture_discord_streams(self, voice_client, duration)
             return
+        logging.info("Voice capture mode: FFmpeg fallback capture.")
         await self.capture_service.capture_audio(self, voice_client, duration)
 
     async def process_final_transcription(self):

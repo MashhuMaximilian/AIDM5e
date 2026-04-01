@@ -10,7 +10,7 @@ except Exception:  # pragma: no cover - optional runtime dependency guard
     voice_recv = None
 
 from ai_services.assistant_interactions import get_assistant_response
-from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, client, tree
+from config import DISCORD_BOT_TOKEN, DISCORD_GUILD_ID, VOICE_AUTOJOIN_CHANNEL_NAME, client, tree
 from data_store.db_repository import (
     delete_campaign_record,
     delete_channel_record,
@@ -115,6 +115,13 @@ async def on_guild_channel_delete(channel):
 @client.event
 async def on_voice_state_update(member, before, after):
     if after.channel and member.id != client.user.id:
+        if VOICE_AUTOJOIN_CHANNEL_NAME and after.channel.name != VOICE_AUTOJOIN_CHANNEL_NAME:
+            logging.info(
+                "Ignoring join in voice channel %s because auto-join is restricted to %s.",
+                after.channel.name,
+                VOICE_AUTOJOIN_CHANNEL_NAME,
+            )
+            return
         if not any(vc.channel.id == after.channel.id for vc in client.voice_clients):
             try:
                 if voice_recv is not None:
@@ -125,6 +132,12 @@ async def on_voice_state_update(member, before, after):
                 await recorder.capture_audio(voice_client)
             except discord.ClientException:
                 logging.info("Already connected to %s", after.channel.name)
+            except Exception as exc:
+                logging.exception("Voice capture failed after joining %s: %s", after.channel.name, exc)
+                voice_client = discord.utils.get(client.voice_clients, channel=after.channel)
+                if voice_client and voice_client.is_connected():
+                    await voice_client.disconnect(force=True)
+                    logging.info("Disconnected from %s after voice startup failure.", after.channel.name)
     elif before.channel and len(before.channel.members) == 1 and before.channel.members[0].id == client.user.id:
         voice_client = discord.utils.get(client.voice_clients, channel=before.channel)
         if voice_client:
