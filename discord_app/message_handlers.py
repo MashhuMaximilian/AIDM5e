@@ -1028,6 +1028,8 @@ def _conversation_only_workspace_system_prompt(base_prompt: str) -> str:
         "- You are NOT editing cards in this reply.\n"
         "- Do NOT claim that you updated, synced, changed, created, or applied card changes.\n"
         "- If card changes would help, name the affected existing cards and ask for approval first.\n"
+        "- Do NOT draft full replacement card contents, card previews, or final card text in chat.\n"
+        "- Do NOT output `### CARD:` blocks, full standardized sheet sections, or other card-body payloads in this mode.\n"
         "- Never output fake update confirmations like `Updated:` unless card edits actually happened through the card-maintenance path.\n"
     )
 
@@ -1043,6 +1045,26 @@ def _card_maintenance_workspace_system_prompt(base_prompt: str) -> str:
         "- If some details are still unresolved, update what is supported and leave the rest as `Needs review.`.\n"
         "- Return card bodies only through the requested update format. No conversational framing.\n"
     )
+
+
+def _looks_like_card_update_payload(text: str | None) -> bool:
+    content = (text or "").strip()
+    if not content:
+        return False
+    lowered = content.lower()
+    if "### card:" in lowered:
+        return True
+    payload_markers = (
+        "### 👤 character summary",
+        "### 👤 character profile",
+        "### ⚔️ actions & magic",
+        "### ⚔️ rules & features",
+        "### 🎒 inventory & attunement",
+        "### 🔗 reference links",
+        "ability scores & saving throws",
+        "skills & senses",
+    )
+    return any(marker in lowered for marker in payload_markers)
 
 
 async def _recent_workspace_update_proposal(thread: discord.Thread, *, before: discord.Message, limit: int = 6) -> str | None:
@@ -1199,6 +1221,53 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 context_block=context_block,
                 system_prompt=_conversation_only_workspace_system_prompt(system_prompt),
             )
+            if response and workspace_kind == "player" and _looks_like_card_update_payload(response) and _is_explicit_edit_request(message.content):
+                card_bodies = {
+                    title: (card_message.embeds[0].description if card_message.embeds else card_message.content or "")
+                    for title, card_message in card_messages.items()
+                }
+                player_update_recap = ""
+                if not _is_new_card_request(message.content):
+                    player_update_recap = await _summarize_player_update_recap(
+                        message=message,
+                        channel_id=channel_id,
+                        category_id=category_id,
+                        thread_id=thread_id,
+                        assigned_memory=assigned_memory,
+                        card_messages=card_messages,
+                    )
+                broad_sync_request = True if _is_broad_workspace_sync_request(message.content) or not target_titles else False
+                prompt_text = build_player_card_update_prompt(
+                    request_text=message.content,
+                    card_bodies=card_bodies,
+                    target_titles=target_titles,
+                    allow_affected_card_updates=not target_titles or broad_sync_request,
+                )
+                update_response = await get_assistant_response(
+                    prompt_text,
+                    channel_id,
+                    category_id,
+                    thread_id,
+                    assigned_memory,
+                    context_block="\n\n".join(block for block in [player_update_recap, recent_context, extra_context] if block).strip() or None,
+                    system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
+                )
+                updates = _normalize_player_update_titles(parse_card_update_response(update_response), list(card_messages.keys()))
+                if updates:
+                    merged_cards = dict(card_bodies)
+                    merged_cards.update(updates)
+                    resolved_messages = await sync_workspace_cards(message.channel, merged_cards)
+                    changed_titles = [title for title in updates.keys() if title in resolved_messages]
+                    if changed_titles:
+                        await send_response_in_chunks(message.channel, f"Updated: {', '.join(changed_titles)}.")
+                        followup = _player_missing_followup(merged_cards)
+                        if followup:
+                            await send_response_in_chunks(message.channel, followup)
+                        return True
+                response = (
+                    "I’m ready to update the cards directly, but I won’t paste card contents in chat. "
+                    "Ask me to `update relevant cards` or name the card you want changed, and I’ll apply it."
+                )
             if response:
                 await send_response_in_chunks(message.channel, response)
             return True
