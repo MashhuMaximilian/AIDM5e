@@ -1333,7 +1333,14 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         approval_request_text = await _recent_workspace_update_proposal(message.channel, before=message)
         approved_recent_update = approval_request_text is not None
     conversational_player_reply = workspace_kind == "player" and _should_reply_conversationally_in_player_workspace(message.content)
-    needs_assistant = explicit_card_action or approved_recent_update or _has_clear_question(message.content) or conversational_player_reply
+    conversational_other_reply = workspace_kind == "other" and _should_reply_conversationally_in_player_workspace(message.content)
+    needs_assistant = (
+        explicit_card_action
+        or approved_recent_update
+        or _has_clear_question(message.content)
+        or conversational_player_reply
+        or conversational_other_reply
+    )
     indicator_message = await _start_thinking_indicator(message) if needs_assistant else None
     try:
         assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
@@ -1353,7 +1360,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 for title, card_message in card_messages.items()
             }
             workspace_update_recap = ""
-            if workspace_kind in {"player", "npc", "monster"} and not _is_new_card_request(message.content):
+            if workspace_kind in {"player", "npc", "monster", "other"} and not _is_new_card_request(message.content):
                 workspace_update_recap = await _summarize_workspace_update_recap(
                     workspace_kind=workspace_kind,
                     message=message,
@@ -1425,13 +1432,13 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                         await send_response_in_chunks(message.channel, followup)
             return True
 
-        if _has_clear_question(message.content) or conversational_player_reply:
+        if _has_clear_question(message.content) or conversational_player_reply or conversational_other_reply:
             card_context = "\n\n".join(
                 f"[{title}]\n{(card_message.embeds[0].description if card_message.embeds else card_message.content or '').strip()}"
                 for title, card_message in card_messages.items()
             )
             workspace_workshop_recap = ""
-            if workspace_kind in {"player", "npc", "monster"} and _needs_workspace_workshop_recap(workspace_kind, message.content):
+            if workspace_kind in {"player", "npc", "monster", "other"} and _needs_workspace_workshop_recap(workspace_kind, message.content):
                 workspace_workshop_recap = await _summarize_workspace_workshop_recap(
                     workspace_kind=workspace_kind,
                     message=message,
