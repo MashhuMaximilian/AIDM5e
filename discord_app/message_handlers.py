@@ -764,8 +764,17 @@ def _player_missing_followup(cards: dict[str, str]) -> str | None:
     if not prompts:
         return None
 
+    if "Needs review." in profile:
+        phase_label = "core build frame"
+    elif "Needs review." in skills or ("feat" in rules_lower and "needs review." in rules_lower):
+        phase_label = "stats and progression"
+    elif "spellbook" in rules_lower or "known spells" in rules_lower or "spell slots" in summary_lower:
+        phase_label = "spells and features"
+    else:
+        phase_label = "gear and cleanup"
+
     return (
-        "I updated the cards with what we have so far. The main things still worth locking in are:\n"
+        f"I updated the cards with what we have so far. The next phase to lock in is {phase_label}. The main things still worth settling are:\n"
         + "\n".join(f"• {prompt}" for prompt in prompts[:3])
     )
 

@@ -241,7 +241,8 @@ def _build_empty_idea_bundle(request: PlayerWorkspaceRequest) -> PlayerWorkspace
                 f"**Starting note:** {note}",
                 "",
                 "Tell me what you want to establish first, and I will only update cards when you explicitly ask me to.",
-                "A good next step is usually: concept, class fantasy, tone, fighting style, or how close to the inspiration you want to stay.",
+                "We can build this step by step: first the core frame, then stats/feats, then spells/features, then gear and cleanup.",
+                "A good first step is usually: concept, class fantasy, race, background, level, or how close to the inspiration you want to stay.",
             ]
         )
 
