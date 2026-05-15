@@ -10,7 +10,13 @@ logger = logging.getLogger(__name__)
 class VoiceSessionOrchestrator:
     async def finalize_voice_session(self, recorder) -> None:
         if recorder.transcription_tasks:
-            await asyncio.gather(*recorder.transcription_tasks)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*recorder.transcription_tasks, return_exceptions=True),
+                    timeout=300.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Transcription tasks timed out after 300s, proceeding with finalization")
 
         category_id = get_category_id_voice(recorder.voice_client.channel)
         logger.info("Retrieved category ID: %s", category_id)

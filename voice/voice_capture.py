@@ -47,7 +47,10 @@ class _DiscordStreamChunkRecorder:
         if not data or not getattr(data, "pcm", b""):
             return
         source_user = user or getattr(data, "source", None)
-        user_id = int(getattr(source_user, "id", 0) or 0)
+        try:
+            user_id = int(getattr(source_user, "id", 0) or 0)
+        except (TypeError, ValueError):
+            user_id = 0
         display_name = (
             getattr(source_user, "display_name", None)
             or getattr(source_user, "global_name", None)
@@ -145,14 +148,15 @@ class VoiceCaptureService:
 
         try:
             while True:
-                if recorder.voice_client and recorder.voice_client.is_connected():
-                    members_count = len(recorder.voice_client.channel.members)
+                channel = recorder.voice_client.channel if recorder.voice_client else None
+                if channel and recorder.voice_client.is_connected():
+                    members_count = len(channel.members)
                     logger.info("Current members in voice channel: %s", members_count)
 
                     if members_count <= 1:
                         logger.info("No members left in the voice channel. Preparing to finalize recording...")
                         await asyncio.sleep(5)
-                        if len(recorder.voice_client.channel.members) == 1:
+                        if len(channel.members) == 1:
                             logger.info("No members have joined within the timeout period. Proceeding to finalize...")
                             actual_duration, window_files = stream_recorder.rotate_window()
                             await self._register_and_transcribe_stream_files(
@@ -161,8 +165,6 @@ class VoiceCaptureService:
                                 start_offset_seconds=current_offset,
                                 duration=actual_duration,
                             )
-                            if voice_client.is_listening():
-                                voice_client.stop_listening()
                             await recorder.orchestrator.finalize_voice_session(recorder)
                             break
 

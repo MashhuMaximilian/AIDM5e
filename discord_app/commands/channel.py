@@ -25,7 +25,8 @@ def register(channel_group, h) -> None:
         category_id = h.get_category_id(interaction)
 
         assigned_memory = await h.get_assigned_memory(channel_id, category_id, thread_id=thread_id)
-        conversation_history, options_or_error = await h.fetch_reference_material(interaction.channel, start, end, message_ids, last_n)
+        target_channel = interaction.guild.get_channel(channel_id)
+        conversation_history, options_or_error = await h.fetch_reference_material(target_channel, start, end, message_ids, last_n)
         if isinstance(options_or_error, str):
             await interaction.followup.send(options_or_error)
             return
@@ -69,14 +70,14 @@ def register(channel_group, h) -> None:
         thread_id = int(thread) if thread else None
         category_id = h.get_category_id(interaction)
 
-        conversation_history, options_or_error = await h.fetch_conversation_history(interaction.channel, start, end, message_ids, last_n)
-        if isinstance(options_or_error, str):
-            await interaction.followup.send(options_or_error)
-            return
-
         target_channel_obj = interaction.guild.get_channel(channel_id)
         if not target_channel_obj:
             await interaction.followup.send("Target channel not found.")
+            return
+
+        conversation_history, options_or_error = await h.fetch_conversation_history(target_channel_obj, start, end, message_ids, last_n)
+        if isinstance(options_or_error, str):
+            await interaction.followup.send(options_or_error)
             return
         if target_channel_obj.category_id != interaction.channel.category_id:
             await interaction.followup.send(f"Cannot send messages to {target_channel_obj.name}. Must be in the same category.")
@@ -85,6 +86,9 @@ def register(channel_group, h) -> None:
         target = target_channel_obj
         if thread:
             target = await interaction.guild.fetch_channel(thread_id)
+            if target.parent.category_id != interaction.channel.category_id:
+                await interaction.followup.send(f"Cannot send messages to thread {target.name}. Thread must be in the same category.")
+                return
 
         for message in conversation_history:
             await h.send_response_in_chunks(target, message)
@@ -180,6 +184,8 @@ def register(channel_group, h) -> None:
             memory_name,
             always_on
         )
+        if target_channel is None:
+            return
 
         if thread_obj:
             _, target_thread = await h.handle_memory_assignment(
@@ -190,6 +196,8 @@ def register(channel_group, h) -> None:
                 memory_name,
                 always_on
             )
+            if target_thread is None:
+                return
 
         always_on_status = "ON" if always_on.value.lower() == "on" else "OFF"
         followup_messages = [
@@ -238,7 +246,7 @@ def register(channel_group, h) -> None:
         await h.send_command_ack(interaction, "Updating always-on setting...")
 
         always_on_value = always_on and always_on.value == "on"
-        target_channel = interaction.guild.get_channel(int(channel)) if channel.isdigit() else None
+        target_channel = interaction.guild.get_channel(int(channel)) if channel and channel.isdigit() else None
         target_thread = await interaction.guild.fetch_channel(int(thread)) if thread else None
 
         if target_thread:

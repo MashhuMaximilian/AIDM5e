@@ -109,7 +109,12 @@ class TranscriptManifestStore:
         )
 
     def pending_recorded_chunks(self) -> list[dict]:
-        return [chunk for chunk in self.chunk_manifest if chunk.get("status") == "recorded"]
+        return [
+            chunk
+            for chunk in self.chunk_manifest
+            if chunk.get("status") == "recorded"
+            and Path(chunk["audio_file"]).exists()
+        ]
 
     def build_roster_context(self, *, before_chunk_index: int | None = None) -> str | None:
         lines: list[str] = []

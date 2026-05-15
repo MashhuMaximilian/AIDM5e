@@ -418,6 +418,7 @@ class VoiceRecorder:
             return
         logging.info("Voice capture mode: FFmpeg fallback capture.")
         await self.capture_service.capture_audio(self, voice_client, duration)
+        logging.warning("Speaker attribution is unavailable in FFmpeg fallback mode.")
 
     async def process_final_transcription(self):
         await self.capture_service.process_pending_transcriptions(self)
@@ -426,6 +427,9 @@ class VoiceRecorder:
         await self.output_service.archive_transcript(content)
 
     async def cleanup_files(self):
+        if not self.voice_client:
+            logging.warning("voice_client is None, skipping cleanup.")
+            return
         logging.info("Cleaning up transcript and audio files...")
         category_id = get_category_id_voice(self.voice_client.channel)
         guild = self.voice_client.guild
@@ -474,21 +478,28 @@ class VoiceRecorder:
         await self.output_service.cleanup_live_artifacts(self.voice_client, self.reset_session_artifacts)
 
     async def send_to_openai(self, audio_filename, chunk_info):
-        if self._gemini_guild_id is not None:
-            with use_guild_gemini_api_key(self._gemini_guild_id):
-                await self.transcript_service.transcribe_chunk(
-                    Path(audio_filename),
-                    chunk_info,
-                    self.manifest_store,
-                    self.context_block,
-                )
-            return
-        await self.transcript_service.transcribe_chunk(
-            Path(audio_filename),
-            chunk_info,
-            self.manifest_store,
-            self.context_block,
-        )
+        chunk_index = chunk_info.get("chunk_index")
+        try:
+            if self._gemini_guild_id is not None:
+                with use_guild_gemini_api_key(self._gemini_guild_id):
+                    await self.transcript_service.transcribe_chunk(
+                        Path(audio_filename),
+                        chunk_info,
+                        self.manifest_store,
+                        self.context_block,
+                    )
+                return
+            await self.transcript_service.transcribe_chunk(
+                Path(audio_filename),
+                chunk_info,
+                self.manifest_store,
+                self.context_block,
+            )
+        except Exception as exc:
+            logging.error("Error transcribing chunk %s: %s", chunk_index, exc)
+            await self.manifest_store.update_chunk_result(
+                chunk_index, status="failed", error=str(exc)
+            )
 
     async def summarize_transcript(self, category_id):
         logging.info("Starting audio-native session summarization...")

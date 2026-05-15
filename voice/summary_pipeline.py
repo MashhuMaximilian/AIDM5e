@@ -52,6 +52,7 @@ class AudioSummaryService:
         context_block: str | None = None,
     ) -> list[dict]:
         window_summaries = []
+        failed_count = 0
         windows = await self.build_audio_summary_windows(manifest_store)
         for window in windows:
             if not window["file_paths"]:
@@ -76,6 +77,7 @@ class AudioSummaryService:
                 window_summaries.append(payload)
             except Exception as exc:
                 logger.error("Audio summary window %s failed: %s", window["window_index"], exc)
+                failed_count += 1
                 window_summaries.append(
                     {
                         "window_index": window["window_index"],
@@ -87,6 +89,9 @@ class AudioSummaryService:
                         "uncertainties": [f"Window summary failed: {exc}"],
                     }
                 )
+        total_windows = len(windows)
+        if total_windows > 0 and failed_count == total_windows:
+            raise RuntimeError(f"All {total_windows} audio summary windows failed")
         return window_summaries
 
     def format_audio_summary_notes(self, window_summaries: list[dict]) -> str:

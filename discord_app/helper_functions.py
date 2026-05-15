@@ -80,7 +80,7 @@ async def fetch_conversation_history(channel, start=None, end=None, message_ids=
     messages, options_or_error = await select_messages(channel, start, end, message_ids, last_n)
     if isinstance(options_or_error, str):
         return None, options_or_error
-    conversation_history = await build_history_from_messages(messages, include_attachments=False)
+    conversation_history = await build_history_from_messages(messages, include_attachments=True)
     return conversation_history, options_or_error
 
 
@@ -302,7 +302,14 @@ async def thread_autocomplete(interaction: discord.Interaction, current: str):
             )
 
         # 2. Add active threads from Discord API
-        channel_obj = interaction.guild.get_channel(int(channel_id))
+        try:
+            channel_id_int = int(channel_id)
+        except (ValueError, TypeError):
+            logging.warning(f"thread_autocomplete: could not convert channel_id '{channel_id}' to int")
+            channel_obj = None
+        else:
+            logging.debug(f"thread_autocomplete: fetching channel {channel_id_int} for autocomplete")
+            channel_obj = interaction.guild.get_channel(channel_id_int)
         if channel_obj:
             # Get active threads
             active_threads = channel_obj.threads
@@ -349,16 +356,19 @@ async def memory_autocomplete(interaction: discord.Interaction, current: str):
 
     memory_names = await asyncio.to_thread(list_memory_names, int(category_id))
 
-    # Create list for matching memories, including "Create New Memory" option
-    matching_memories = [
-        discord.app_commands.Choice(name="CREATE A NEW MEMORY", value="CREATE NEW MEMORY")
-    ]
-
     # Filter memory names by input
-    matching_memories += [
+    filtered_memories = [
         discord.app_commands.Choice(name=memory_name, value=memory_name)
         for memory_name in memory_names if current.lower() in memory_name.lower()
     ]
+
+    # Only add "Create New Memory" option when input is empty or no matches found
+    if not current or not filtered_memories:
+        matching_memories = [
+            discord.app_commands.Choice(name="CREATE A NEW MEMORY", value="CREATE NEW MEMORY")
+        ] + filtered_memories
+    else:
+        matching_memories = filtered_memories
 
     return matching_memories[:50]  # Limit to 50 suggestions
 
@@ -388,7 +398,7 @@ async def process_query_command(
         thread_id = int(thread) if thread else None
 
     # Fetch memory based on parameters (either channel, thread, or backup)
-    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id) if thread_id else await get_assigned_memory(channel_id, category_id)
+    assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id=thread_id)
     if not assigned_memory:
         logging.info("No assigned memory found for the given parameters.")
         await interaction.followup.send("No memory found for the specified parameters.")

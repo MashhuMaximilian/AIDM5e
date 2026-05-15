@@ -60,8 +60,9 @@ def register(tree, h) -> None:
 
         reference_chunks: list[str] = []
         if any(value is not None for value in (start, end, message_ids, last_n)):
+            target_channel = interaction.guild.get_channel(channel_id)
             reference_material, options_or_error = await h.fetch_reference_material(
-                interaction.channel,
+                target_channel,
                 start,
                 end,
                 message_ids,
@@ -152,7 +153,7 @@ def register(tree, h) -> None:
         category_id = h.get_category_id(interaction)
         assigned_memory = await h.get_assigned_memory(feedback_channel.id, category_id, thread_id=None)
         prompt = h.build_feedback_prompt(conversation_history, last_message)
-        response = await h.get_assistant_response(prompt, feedback_channel.id, thread_id=None, assigned_memory=assigned_memory)
+        response = await h.get_assistant_response(prompt, feedback_channel.id, category_id, thread_id=None, assigned_memory=assigned_memory)
 
         await h.send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name="feedback")
         await interaction.followup.send(f"Feedback has been processed and a recap has been posted in {feedback_channel.mention}.")

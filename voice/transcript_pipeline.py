@@ -284,6 +284,7 @@ class TranscriptService:
         # better during review. We only do this when there are no named speakers and no
         # numbered unknowns already present.
         if not has_numbered_unknown and not has_named_speaker and plain_unknown_count >= 4:
+            logger.warning("Speaker attribution fallback triggered: %d Unknown segments → alternating Unknown 1/2", plain_unknown_count)
             unknown_index = 0
             for segment in normalized:
                 if segment.get("speaker") == "Unknown":

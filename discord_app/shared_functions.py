@@ -124,7 +124,29 @@ async def send_response_in_chunks(channel, response):
     if response is None:
         logging.error("Received None as response.")
         return
-    response = format_for_discord(response)
+
+    # Handle dict response with embed data
+    if isinstance(response, dict):
+        text_content = response.get("text", "")
+        embed = response.get("embed")
+        if text_content and embed:
+            # Send embed with text content
+            if len(text_content) > 2000:
+                for chunk in [text_content[i:i + 2000] for i in range(0, len(text_content), 2000)]:
+                    await channel.send(chunk, embed=embed)
+            else:
+                await channel.send(text_content, embed=embed)
+            return
+        elif embed:
+            await channel.send(embed=embed)
+            return
+        elif text_content:
+            response = text_content
+        else:
+            logging.warning("Received dict response with no text or embed: %s", response)
+            return
+
+    response = format_for_discord(str(response))
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
             await channel.send(chunk)
@@ -158,14 +180,22 @@ async def send_response(interaction, response, channel_id=None, thread_id=None, 
 
 async def send_interaction_message(interaction, content: str, **kwargs):
     """Send a reply through the initial interaction response when possible."""
-    if interaction.response.is_done():
-        return await interaction.followup.send(content, **kwargs)
-    return await interaction.response.send_message(content, **kwargs)
+    try:
+        if interaction.response.is_done():
+            return await interaction.followup.send(content, **kwargs)
+        return await interaction.response.send_message(content, **kwargs)
+    except discord.NotFound:
+        # Interaction expired or invalid — fall back to followup if possible
+        try:
+            return await interaction.followup.send(content, **kwargs)
+        except discord.NotFound:
+            return None
 
 
 async def send_command_ack(interaction, content: str = "Working...", **kwargs):
     """Acknowledge a potentially long-running command without showing the thinking state."""
     if interaction.response.is_done():
+        logging.warning(f"Interaction response already done for send_command_ack: {interaction.id}")
         return None
     return await interaction.response.send_message(content, ephemeral=True, **kwargs)
 

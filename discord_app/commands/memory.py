@@ -61,6 +61,10 @@ def register(memory_group, h) -> None:
     async def delete_memory_command(interaction, memory: str):
         await h.send_command_ack(interaction, "Deleting memory...")
 
+        if interaction.channel.category is None:
+            await h.send_error_message(interaction, "Unable to determine the channel category.")
+            return
+
         result = h.delete_memory(memory, interaction.channel.category.id)
         if "deleted successfully" in result.lower():
             await h.set_default_memory(str(interaction.channel.category.id))
@@ -232,7 +236,7 @@ def register(memory_group, h) -> None:
                     await interaction.followup.send("Invalid message ID — message not found.")
                     return
 
-            await h.reset_memory_history(assigned_memory)
+            deleted_memory_rows = await h.reset_memory_history(assigned_memory)
 
             deleted_discord_msgs = 0
             start_id = int(starting_with_message_id) if starting_with_message_id else None
@@ -255,7 +259,7 @@ def register(memory_group, h) -> None:
 
             await interaction.followup.send(
                 f"🧹 **Reset complete!**\n"
-                "• Stored memory rows deleted: `0` (chat transcript storage is disabled)\n"
+                f"• Stored memory rows deleted: `{deleted_memory_rows}` (chat transcript storage is disabled)\n"
                 f"• Discord messages deleted: `{deleted_discord_msgs}`"
             )
 
