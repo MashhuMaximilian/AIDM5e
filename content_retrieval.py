@@ -300,12 +300,24 @@ async def extract_public_url_text(url: str) -> str:
 
 
 def format_message_text(message: discord.Message) -> str:
-    body = message.content.strip() if message.content else "[No message text]"
+    body = message.content.strip() if message.content else ""
+    # Fall back to embed description if no text content
+    if not body and message.embeds:
+        embed = message.embeds[0]
+        body = embed.description or ""
+    if not body:
+        body = "[No message text]"
     return f"{message.author.display_name}: {body}"
 
 
 async def format_message_with_attachments(message: discord.Message) -> str:
     parts = [format_message_text(message)]
+    # Include embed description in parts if not already captured by format_message_text
+    if message.embeds:
+        embed = message.embeds[0]
+        # If embed has a description and it's different from what format_message_text captured
+        if embed.description and embed.description.strip() not in (message.content or ""):
+            parts.append(f"[Embed]: {embed.description.strip()}")
     if not message.attachments:
         return "\n".join(parts)
 

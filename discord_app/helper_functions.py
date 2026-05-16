@@ -358,6 +358,22 @@ async def channel_autocomplete(interaction: discord.Interaction, current: str):
         logging.error("Channel autocomplete error: %s", exc)
         return []
 
+
+async def channel_autocomplete_by_name(interaction: discord.Interaction, current: str):
+    """Returns channel name as value (for commands that pass channel name instead of ID)."""
+    try:
+        category = get_interaction_category(interaction)
+        if category is None:
+            return []
+        return [
+            app_commands.Choice(name=ch.name, value=ch.name)
+            for ch in interaction.guild.text_channels
+            if ch.category_id == category.id and current.lower() in ch.name.lower()
+        ][:25]
+    except Exception as exc:
+        logging.error("Channel by-name autocomplete error: %s", exc)
+        return []
+
 async def memory_autocomplete(interaction: discord.Interaction, current: str):
     category_id = get_category_id(interaction)
     if category_id is None:

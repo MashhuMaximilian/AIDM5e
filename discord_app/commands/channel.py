@@ -105,9 +105,23 @@ def register(channel_group, h) -> None:
                         pass
                 await target.send(content=msg.content, embeds=msg.embeds, files=files if files else None)
 
+        # Build imported_content from original messages (which include embed text)
+        if original_messages:
+            imported_parts = []
+            for msg in original_messages:
+                # Get content or embed description
+                text = msg.content.strip() if msg.content else ""
+                if not text and msg.embeds:
+                    embed = msg.embeds[0]
+                    text = embed.description or ""
+                if text:
+                    imported_parts.append(f"{msg.author.display_name}: {text}")
+            imported_content = "\n\n".join(imported_parts)
+        else:
+            imported_content = "\n\n".join(conversation_history)
+
         assigned_memory = await h.get_assigned_memory(channel_id, category_id, thread_id=thread_id)
         if assigned_memory:
-            imported_content = "\n\n".join(conversation_history)
             acknowledgment_prompt = (
                 "A user transferred the following Discord content into this channel or thread. "
                 "Acknowledge briefly what was added and mention the most important fact or takeaway "

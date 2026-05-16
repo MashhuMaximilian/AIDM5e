@@ -53,7 +53,21 @@ def register(tree, h) -> None:
         category_id = h.get_category_id(interaction)
 
         # Source channel for reading messages - defaults to target channel
-        source_channel_id = int(source_channel) if source_channel else channel_id
+        source_channel_id = None
+        if source_channel:
+            # If it looks numeric, use it directly as ID
+            if source_channel.isdigit():
+                source_channel_id = int(source_channel)
+            else:
+                # Try to resolve channel name to ID
+                resolved = discord.utils.get(interaction.guild.channels, name=source_channel)
+                if resolved:
+                    source_channel_id = resolved.id
+                else:
+                    await interaction.followup.send(f"Could not find channel '{source_channel}'. Please use a channel ID or select from autocomplete.")
+                    return
+        else:
+            source_channel_id = channel_id
         source_thread_id = int(source_thread) if source_thread else None
 
         # Fetch memory from SOURCE channel (where we're reading from), not destination
