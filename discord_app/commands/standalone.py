@@ -128,23 +128,21 @@ def register(tree, h) -> None:
 
         has_message_refs = any(value is not None for value in (start, end, message_ids, last_n))
 
-        # If source_channel or source_thread is provided but no selectors, fetch last_n=20
+        # If source_channel or source_thread is provided but no selectors, fetch ALL messages
         if not reference_chunks and not url:
             if source_channel or source_thread:
-                # Fetch last 20 messages as reference material
+                # Fetch ALL messages as reference material (no limit)
                 source_channel_obj = interaction.guild.get_channel(source_channel_id)
                 if source_thread_id:
                     source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
-                reference_material, options_or_error = await h.fetch_reference_material(
-                    source_channel_obj,
-                    None,
-                    None,
-                    None,
-                    20,  # Default to last 20 messages
-                )
-                if isinstance(options_or_error, str):
-                    await interaction.followup.send(options_or_error)
-                    return
+                all_messages = []
+                async for msg in source_channel_obj.history(limit=None):
+                    all_messages.append(msg)
+                all_messages.reverse()
+                reference_material = []
+                for msg in all_messages:
+                    formatted = await h.format_message_with_attachments(msg)
+                    reference_material.append(formatted)
                 reference_chunks.extend(reference_material)
             else:
                 await interaction.followup.send("You must provide message selectors and/or a public URL, or specify a source channel/thread.")

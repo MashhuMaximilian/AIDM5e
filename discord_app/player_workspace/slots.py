@@ -136,7 +136,7 @@ class CardEditModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         embed = _detail_embed(self.card_title, str(self.content_input.value))
-        await interaction.response.edit_message(content=f"**{self.card_title}**", embed=embed, view=CardDetailView(self.card_title))
+        await interaction.message.edit(content=f"**{self.card_title}**", embed=embed, view=CardDetailView(self.card_title))
 
 
 class CardDetailView(discord.ui.View):

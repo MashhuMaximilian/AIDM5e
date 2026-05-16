@@ -514,7 +514,7 @@ class WorkspaceCardEditModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         embed = build_workspace_embed(self.card_title, str(self.content_input.value), summary=False)
-        await interaction.response.edit_message(content="", embed=embed, view=WorkspaceCardDetailView(self.card_title))
+        await interaction.message.edit(content="", embed=embed, view=WorkspaceCardDetailView(self.card_title))
 
 
 class WorkspaceCardDetailView(discord.ui.View):
