@@ -70,14 +70,17 @@ def register(channel_group, h) -> None:
         thread_id = int(thread) if thread else None
         category_id = h.get_category_id(interaction)
 
+        # Read messages from the CURRENT channel (where command was run), not destination
+        source_channel_obj = interaction.channel
+        conversation_history, options_or_error = await h.fetch_conversation_history(source_channel_obj, start, end, message_ids, last_n)
+        if isinstance(options_or_error, str):
+            await interaction.followup.send(options_or_error)
+            return
+
+        # Destination channel (separate from source)
         target_channel_obj = interaction.guild.get_channel(channel_id)
         if not target_channel_obj:
             await interaction.followup.send("Target channel not found.")
-            return
-
-        conversation_history, options_or_error = await h.fetch_conversation_history(target_channel_obj, start, end, message_ids, last_n)
-        if isinstance(options_or_error, str):
-            await interaction.followup.send(options_or_error)
             return
         if target_channel_obj.category_id != interaction.channel.category_id:
             await interaction.followup.send(f"Cannot send messages to {target_channel_obj.name}. Must be in the same category.")
@@ -90,8 +93,8 @@ def register(channel_group, h) -> None:
                 await interaction.followup.send(f"Cannot send messages to thread {target.name}. Thread must be in the same category.")
                 return
 
-        # Re-fetch original messages for full embed/attachment/file preservation
-        original_messages, _ = await h.fetch_discord_messages(target_channel_obj, start, end, message_ids, last_n)
+        # Re-fetch original messages from source for full embed/attachment/file preservation
+        original_messages, _ = await h.fetch_discord_messages(source_channel_obj, start, end, message_ids, last_n)
         if original_messages:
             for msg in original_messages:
                 files = []

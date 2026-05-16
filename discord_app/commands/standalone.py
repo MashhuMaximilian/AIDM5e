@@ -56,16 +56,21 @@ def register(tree, h) -> None:
         source_channel_id = int(source_channel) if source_channel else channel_id
         source_thread_id = int(source_thread) if source_thread else None
 
-        assigned_memory = await h.get_assigned_memory(channel_id, category_id, thread_id=thread_id)
+        # Fetch memory from SOURCE channel (where we're reading from), not destination
+        assigned_memory = await h.get_assigned_memory(source_channel_id, category_id, thread_id=source_thread_id)
         if not assigned_memory:
             await interaction.followup.send("No memory found for the specified parameters.")
             return
 
-        context_block = await h.load_command_context_block(
-            interaction,
-            use_context=use_context.value if use_context else None,
-            default_when_auto=False,
-        )
+        # When reading from a different source channel, don't use current interaction context
+        # (source channel has its own context that should be used instead)
+        context_block = None
+        if not source_channel:
+            context_block = await h.load_command_context_block(
+                interaction,
+                use_context=use_context.value if use_context else None,
+                default_when_auto=False,
+            )
 
         reference_chunks: list[str] = []
         if any(value is not None for value in (start, end, message_ids, last_n)):
