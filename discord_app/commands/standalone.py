@@ -52,7 +52,7 @@ def register(tree, h) -> None:
         thread_id = int(thread) if thread else None
         category_id = h.get_category_id(interaction)
 
-        # Source channel for reading messages - defaults to target channel
+        # Source channel for reading messages - defaults to current channel
         source_channel_id = None
         if source_channel:
             # If it looks numeric, use it directly as ID
@@ -67,19 +67,29 @@ def register(tree, h) -> None:
                     await interaction.followup.send(f"Could not find channel '{source_channel}'. Please use a channel ID or select from autocomplete.")
                     return
         else:
-            source_channel_id = channel_id
+            source_channel_id = interaction.channel.id  # Default to current channel, not destination
+
         source_thread_id = None
         if source_thread:
             if source_thread.isdigit():
                 source_thread_id = int(source_thread)
             else:
-                # Try to resolve thread name to object, then get its ID
-                # First check if it's a channel name
-                resolved = discord.utils.get(interaction.guild.channels, name=source_thread)
-                if resolved:
-                    source_thread_id = resolved.id
-                else:
-                    await interaction.followup.send(f"Could not find thread '{source_thread}'. Please use a thread ID or select from autocomplete.")
+                # Resolve thread name within the source channel's threads
+                source_ch_obj = interaction.guild.get_channel(source_channel_id)
+                source_thread_id = None
+                # Check active threads first
+                for t in source_ch_obj.threads:
+                    if t.name == source_thread:
+                        source_thread_id = t.id
+                        break
+                # Check archived threads if not found
+                if not source_thread_id:
+                    async for t in source_ch_obj.archived_threads():
+                        if t.name == source_thread:
+                            source_thread_id = t.id
+                            break
+                if not source_thread_id:
+                    await interaction.followup.send(f"Could not find thread '{source_thread}' in channel {source_ch_obj.name}. Please use a thread ID or select from autocomplete.")
                     return
 
         # Fetch memory from SOURCE channel (where we're reading from), not destination
@@ -118,9 +128,27 @@ def register(tree, h) -> None:
 
         has_message_refs = any(value is not None for value in (start, end, message_ids, last_n))
 
+        # If source_channel or source_thread is provided but no selectors, fetch last_n=20
         if not reference_chunks and not url:
-            await interaction.followup.send("You must provide message selectors and/or a public URL.")
-            return
+            if source_channel or source_thread:
+                # Fetch last 20 messages as reference material
+                source_channel_obj = interaction.guild.get_channel(source_channel_id)
+                if source_thread_id:
+                    source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
+                reference_material, options_or_error = await h.fetch_reference_material(
+                    source_channel_obj,
+                    None,
+                    None,
+                    None,
+                    20,  # Default to last 20 messages
+                )
+                if isinstance(options_or_error, str):
+                    await interaction.followup.send(options_or_error)
+                    return
+                reference_chunks.extend(reference_material)
+            else:
+                await interaction.followup.send("You must provide message selectors and/or a public URL, or specify a source channel/thread.")
+                return
 
         if url and not has_message_refs:
             try:
