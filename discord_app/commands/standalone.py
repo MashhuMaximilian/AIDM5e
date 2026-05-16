@@ -150,7 +150,7 @@ def register(tree, h) -> None:
 
     @reference.autocomplete('source_thread')
     async def reference_source_thread_autocomplete(interaction: discord.Interaction, current: str):
-        return await h.thread_autocomplete(interaction, current)
+        return await h.thread_autocomplete(interaction, current, channel_param="source_channel")
 
     @tree.command(name="feedback", description="Send feedback to #feedback and generate a recap there.")
     async def feedback(interaction: discord.Interaction, suggestions: str):

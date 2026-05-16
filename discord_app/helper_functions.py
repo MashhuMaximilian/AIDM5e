@@ -262,7 +262,7 @@ async def load_command_context_block(
     packet = await compile_context_packet_from_category(category, include_dm_context=False)
     return packet.text_block
 
-async def thread_autocomplete(interaction: discord.Interaction, current: str):
+async def thread_autocomplete(interaction: discord.Interaction, current: str, channel_param: str = "channel"):
     try:
         def find_option_value(options, option_name):
             for option in options or []:
@@ -279,10 +279,10 @@ async def thread_autocomplete(interaction: discord.Interaction, current: str):
         if category is None:
             return []
         category_id = str(category.id)
-        channel_id = getattr(interaction.namespace, "channel", None)
+        channel_id = getattr(interaction.namespace, channel_param, None)
 
         if channel_id is None:
-            channel_id = find_option_value(interaction.data.get('options', []), 'channel')
+            channel_id = find_option_value(interaction.data.get('options', []), channel_param)
 
         if not channel_id:
             if isinstance(interaction.channel, discord.Thread) and interaction.channel.parent:
