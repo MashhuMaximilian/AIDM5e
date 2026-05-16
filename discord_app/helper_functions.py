@@ -49,6 +49,15 @@ async def build_history_from_messages(messages: list[discord.Message], include_a
         history.append(await formatter(message) if include_attachments else formatter(message))
     return history
 
+
+async def fetch_discord_messages(channel, start=None, end=None, message_ids=None, last_n=None):
+    """Fetch raw discord.Message objects (not formatted strings) for embed/attachment preservation."""
+    from content_retrieval import select_messages
+    messages, options_or_error = await select_messages(channel, start, end, message_ids, last_n)
+    if isinstance(options_or_error, str):
+        return None, options_or_error
+    return messages, options_or_error
+
 async def summarize_conversation(interaction, conversation_history, options, query, channel_id, thread_id, assigned_memory):
     if options['type'] == 'messages':
         history = "\n".join(conversation_history)

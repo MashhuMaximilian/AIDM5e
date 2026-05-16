@@ -90,8 +90,17 @@ def register(channel_group, h) -> None:
                 await interaction.followup.send(f"Cannot send messages to thread {target.name}. Thread must be in the same category.")
                 return
 
-        for message in conversation_history:
-            await h.send_response_in_chunks(target, message)
+        # Re-fetch original messages for full embed/attachment/file preservation
+        original_messages, _ = await h.fetch_discord_messages(target_channel_obj, start, end, message_ids, last_n)
+        if original_messages:
+            for msg in original_messages:
+                files = []
+                for attachment in msg.attachments:
+                    try:
+                        files.append(await attachment.to_file())
+                    except Exception:
+                        pass
+                await target.send(content=msg.content, embeds=msg.embeds, files=files if files else None)
 
         assigned_memory = await h.get_assigned_memory(channel_id, category_id, thread_id=thread_id)
         if assigned_memory:

@@ -20,6 +20,8 @@ def register(tree, h) -> None:
     @tree.command(name="reference", description="Read messages, files, or a URL and answer from them.")
     @app_commands.describe(
         query="What you want AIDM to extract, explain, or answer from the references.",
+        source_channel="Channel to read messages from. Defaults to the current channel.",
+        source_thread="Thread to read messages from. Defaults to the current thread.",
         start="Message ID to start from (if applicable).",
         end="Message ID to end at (if applicable).",
         message_ids="Individual message IDs to read.",
@@ -33,6 +35,8 @@ def register(tree, h) -> None:
     async def reference(
         interaction: discord.Interaction,
         query: str,
+        source_channel: str = None,
+        source_thread: str = None,
         start: str = None,
         end: str = None,
         message_ids: str = None,
@@ -47,6 +51,11 @@ def register(tree, h) -> None:
         channel_id = int(channel) if channel else interaction.channel.id
         thread_id = int(thread) if thread else None
         category_id = h.get_category_id(interaction)
+
+        # Source channel for reading messages - defaults to target channel
+        source_channel_id = int(source_channel) if source_channel else channel_id
+        source_thread_id = int(source_thread) if source_thread else None
+
         assigned_memory = await h.get_assigned_memory(channel_id, category_id, thread_id=thread_id)
         if not assigned_memory:
             await interaction.followup.send("No memory found for the specified parameters.")
@@ -60,9 +69,12 @@ def register(tree, h) -> None:
 
         reference_chunks: list[str] = []
         if any(value is not None for value in (start, end, message_ids, last_n)):
-            target_channel = interaction.guild.get_channel(channel_id)
+            source_channel_obj = interaction.guild.get_channel(source_channel_id)
+            # If source_thread specified, fetch from that thread instead
+            if source_thread_id:
+                source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
             reference_material, options_or_error = await h.fetch_reference_material(
-                target_channel,
+                source_channel_obj,
                 start,
                 end,
                 message_ids,
@@ -125,6 +137,14 @@ def register(tree, h) -> None:
 
     @reference.autocomplete('thread')
     async def reference_thread_autocomplete(interaction: discord.Interaction, current: str):
+        return await h.thread_autocomplete(interaction, current)
+
+    @reference.autocomplete('source_channel')
+    async def reference_source_channel_autocomplete(interaction: discord.Interaction, current: str):
+        return await h.channel_autocomplete(interaction, current)
+
+    @reference.autocomplete('source_thread')
+    async def reference_source_thread_autocomplete(interaction: discord.Interaction, current: str):
         return await h.thread_autocomplete(interaction, current)
 
     @tree.command(name="feedback", description="Send feedback to #feedback and generate a recap there.")
