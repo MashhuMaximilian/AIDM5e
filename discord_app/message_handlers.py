@@ -1533,8 +1533,30 @@ async def on_message(message):
         return
     logging.info(f"Received message from {message.author}")
 
-    user_message = f"{message.author.display_name} said: {message.content.strip()}" if message.content else "No message provided."
-    logging.info(f"User message (first 100 characters): {user_message[:100]}")
+    # Handle forwarded messages (Discord "Forward" feature)
+    # forwarded messages have type name containing "forward" or special reference embeds
+    is_forward = False
+    try:
+        msg_type = message.type
+        # Discord MessageType enum - check name contains 'forward' as fallback
+        if hasattr(msg_type, 'name') and 'forward' in msg_type.name.lower():
+            is_forward = True
+    except Exception:
+        pass
+    if is_forward:
+        # Forwarded messages have embeds with the original message content
+        forwarded_texts = []
+        for embed in message.embeds:
+            if embed.description:
+                forwarded_texts.append(embed.description)
+        if forwarded_texts:
+            user_message = " [Forwarded messages] ".join(forwarded_texts)
+        else:
+            user_message = "Received a forwarded message with no embed content."
+        logging.info(f"Forwarded message content (first 100 chars): {user_message[:100]}")
+    else:
+        user_message = f"{message.author.display_name} said: {message.content.strip()}" if message.content else "No message provided."
+        logging.info(f"User message (first 100 characters): {user_message[:100]}")
 
     channel_name = message.channel.name
     channel_id = message.channel.id
