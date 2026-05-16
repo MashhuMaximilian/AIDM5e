@@ -68,7 +68,19 @@ def register(tree, h) -> None:
                     return
         else:
             source_channel_id = channel_id
-        source_thread_id = int(source_thread) if source_thread else None
+        source_thread_id = None
+        if source_thread:
+            if source_thread.isdigit():
+                source_thread_id = int(source_thread)
+            else:
+                # Try to resolve thread name to object, then get its ID
+                # First check if it's a channel name
+                resolved = discord.utils.get(interaction.guild.channels, name=source_thread)
+                if resolved:
+                    source_thread_id = resolved.id
+                else:
+                    await interaction.followup.send(f"Could not find thread '{source_thread}'. Please use a thread ID or select from autocomplete.")
+                    return
 
         # Fetch memory from SOURCE channel (where we're reading from), not destination
         assigned_memory = await h.get_assigned_memory(source_channel_id, category_id, thread_id=source_thread_id)
