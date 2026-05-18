@@ -90,6 +90,11 @@ VOICE_INCLUDE_DM_CONTEXT = os.getenv("VOICE_INCLUDE_DM_CONTEXT", "false").lower(
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+# Chat history configuration
+CHAT_HISTORY_LOOKBACK = int(os.getenv("CHAT_HISTORY_LOOKBACK", "20"))
+CHAT_HISTORY_ENABLED = os.getenv("CHAT_HISTORY_ENABLED", "true").lower() == "true"
+CHAT_HISTORY_SKIP_BOT = os.getenv("CHAT_HISTORY_SKIP_BOT", "true").lower() == "true"
+
 
 intents = discord.Intents.default()
 intents.message_content = True

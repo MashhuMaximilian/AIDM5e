@@ -45,22 +45,32 @@ def _normalize_user_message(user_message) -> str:
     return str(user_message)
 
 
-def _build_prompt(memory_name: str | None, user_message: str, context_block: str | None = None) -> str:
+def _build_prompt(
+    memory_name: str | None,
+    user_message: str,
+    context_block: str | None = None,
+    conversation_history: str | None = None,
+) -> str:
     memory_label = memory_name or "unassigned"
-    prompt = (
-        f"Current memory bucket: {memory_label}\n\n"
-        "Persistent chat transcript history is disabled for this bot. "
-        "Use the assigned memory bucket and the current request only.\n\n"
-        f"Current user request:\n{user_message}"
-    )
+    parts = []
+
+    if conversation_history:
+        parts.append(
+            f"--- Recent Conversation ---\n{conversation_history}\n--- End Recent Conversation ---\n"
+        )
+
+    parts.append(f"Current memory bucket: {memory_label}")
+    parts.append("Use the assigned memory bucket, conversation history, and the current request.\n")
+
     if context_block:
-        prompt = (
+        parts.append(
             f"Campaign reference context:\n{context_block}\n\n"
             "Use campaign reference context only when it is relevant to the current request. "
-            "If the memory/current request and the campaign context conflict, say so clearly instead of silently merging them.\n\n"
-            + prompt
+            "If the memory/current request and the campaign context conflict, say so clearly instead of silently merging them.\n"
         )
-    return prompt
+
+    parts.append(f"Current user request:\n{user_message}")
+    return "\n".join(parts)
 
 
 def _compose_system_prompt(system_prompt: str | None = None) -> str:
@@ -79,6 +89,7 @@ async def get_assistant_response(
     model_name=None,
     context_block: str | None = None,
     system_prompt: str | None = None,
+    conversation_history: str | None = None,
 ):
     try:
         target_id = thread_id or channel_id
@@ -95,7 +106,7 @@ async def get_assistant_response(
 
         normalized_message = _normalize_user_message(user_message)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
-        prompt = _build_prompt(memory_name, normalized_message, context_block=context_block)
+        prompt = _build_prompt(memory_name, normalized_message, context_block=context_block, conversation_history=conversation_history)
         guild = getattr(channel, "guild", None)
         guild_id = getattr(guild, "id", None)
 

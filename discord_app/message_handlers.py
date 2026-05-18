@@ -1590,6 +1590,17 @@ async def on_message(message):
 
     try:
         if should_respond:
+            # Import here to avoid circular dependency issues at module load time
+            from discord_app.history import build_conversation_context
+            from config import CHAT_HISTORY_ENABLED, CHAT_HISTORY_LOOKBACK
+
+            # Build conversation context if enabled
+            conversation_history = ""
+            if CHAT_HISTORY_ENABLED:
+                # Use smaller lookback for normal channels, larger for workspace/always-on
+                lookback = CHAT_HISTORY_LOOKBACK if (channel_always_on or thread_id is not None) else min(CHAT_HISTORY_LOOKBACK, 10)
+                conversation_history = await build_conversation_context(message.channel, message, lookback=lookback)
+
             assigned_memory = await get_assigned_memory(channel_id, category_id, thread_id)
             if assigned_memory:
                 context_block = await _fetch_url_context(urls) if urls else None
@@ -1601,6 +1612,7 @@ async def on_message(message):
                     assigned_memory,
                     context_block=context_block,
                     system_prompt=_channel_system_prompt(channel_name),
+                    conversation_history=conversation_history,
                 )
                 response_sent = await send_response(response)
                 # Check for tool invocations in the response
