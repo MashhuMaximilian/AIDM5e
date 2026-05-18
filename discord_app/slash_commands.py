@@ -451,11 +451,11 @@ SLASH_TOOLS_DECLARATION = [
     ),
     types.FunctionDeclaration(
         name="context_add",
-        description="Add text to the active memory context for a Discord thread.",
+        description="Add text to the active memory context for a Discord thread. IMPORTANT: thread_id must be a numeric Discord thread ID (e.g. '1505887942822858764'), NOT a memory name like 'test2new'.",
         parameters=types.Schema(
             type="object",
             properties={
-                "thread_id": types.Schema(type="string", description="The Discord thread ID."),
+                "thread_id": types.Schema(type="string", description="The Discord thread ID as a numeric string (e.g. '1505887942822858764'). Do NOT use memory names."),
                 "text": types.Schema(type="string", description="The text to add to the memory context."),
             },
             required=["thread_id", "text"],
@@ -463,11 +463,11 @@ SLASH_TOOLS_DECLARATION = [
     ),
     types.FunctionDeclaration(
         name="get_context",
-        description="Get the current memory context for a Discord thread.",
+        description="Get the current memory context for a Discord thread. IMPORTANT: thread_id must be a numeric Discord thread ID (e.g. '1505887942822858764'), NOT a memory name like 'test2new'.",
         parameters=types.Schema(
             type="object",
             properties={
-                "thread_id": types.Schema(type="string", description="The Discord thread ID."),
+                "thread_id": types.Schema(type="string", description="The Discord thread ID as a numeric string (e.g. '1505887942822858764'). Do NOT use memory names like 'test2new'."),
             },
             required=["thread_id"],
         ),

@@ -334,12 +334,14 @@ async def get_assistant_response(
                 logger.info("Function calls detected: %s", function_calls)
                 tool_results = await handle_function_calls(response, channel)
                 if tool_results:
+                    # List the specific messages that need editing based on what was read
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
-                        "IMPORTANT: Based on the tool results, if you need to edit any messages "
-                        "or perform additional actions, call the appropriate tool now. "
-                        "Then provide your final response."
+                        "CRITICAL: Based on the tool results above, you MUST call edit_message for EACH message that needs updating. "
+                        "Look at the message_id values in the conversation history - those are the messages you must edit. "
+                        "Call edit_message for every card that needs changes, then once all edits are done, provide your response. "
+                        "Do NOT send new cards when existing cards need to be edited."
                     )
                     async with channel.typing():
                         if guild_id is not None:
