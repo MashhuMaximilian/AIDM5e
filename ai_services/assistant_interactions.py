@@ -63,12 +63,20 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
 
         # Call the function with appropriate args
         if func_name in ("edit_message",):
-            result = await edit_message(
-                int(args["message_id"]),
-                args["new_content"],
-                int(args.get("channel_id", channel.id)),
-            )
-            return f"Edited message {args['message_id']}" if result else f"Failed to edit message {args['message_id']}"
+            message_id = int(args["message_id"])
+            channel_id = int(args.get("channel_id", channel.id))
+            new_content = args["new_content"]
+            result = await edit_message(message_id, new_content, channel_id)
+            if result:
+                # Fetch the edited message to confirm actual content
+                try:
+                    ch = client.get_channel(channel_id)
+                    msg = await ch.fetch_message(message_id)
+                    return f"Successfully edited message {message_id}. New content: {msg.content}"
+                except Exception:
+                    return f"Successfully edited message {message_id}."
+            else:
+                return f"Failed to edit message {message_id}."
         elif func_name == "reply_to_message":
             result = await reply_to_message(
                 int(args["message_id"]),
@@ -308,7 +316,9 @@ async def get_assistant_response(
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
-                        "Based on the tool results above, provide your final response."
+                        "IMPORTANT: Based on the tool results, if you need to edit any messages "
+                        "or perform additional actions, call the appropriate tool now. "
+                        "Then provide your final response."
                     )
                     async with channel.typing():
                         if guild_id is not None:
@@ -318,6 +328,7 @@ async def get_assistant_response(
                                     follow_up_prompt,
                                     _compose_system_prompt(system_prompt),
                                     model_name,
+                                    tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
                                 )
                             await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                         else:
@@ -326,6 +337,7 @@ async def get_assistant_response(
                                 follow_up_prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
+                                tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
                             )
                 else:
                     response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
