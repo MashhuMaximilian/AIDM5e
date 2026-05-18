@@ -103,9 +103,13 @@ async def build_conversation_context(
             if msg.id == current_message.id:
                 continue
 
-            # Skip bot messages
+            # Bot messages: only skip after first 3 (so AI sees its own recent sent messages,
+            # which is critical for edit_message to work). Cap at 3 to avoid token bloat.
             if bot_user_id and msg.author.id == bot_user_id:
-                continue
+                bot_count = getattr(channel, '_bot_msg_count', 0)
+                if bot_count >= 3:
+                    continue
+                setattr(channel, '_bot_msg_count', bot_count + 1)
 
             # Skip duplicates
             if msg.id in seen_ids:
@@ -128,7 +132,7 @@ async def build_conversation_context(
                     if embed.title:
                         embed_note += f" [embed: {embed.title[:200]}]"
 
-            filtered.append(f"[{msg.author.display_name}]: {content}{reference_note}{embed_note}")
+            filtered.append(f"[{msg.author.display_name}]: {content}{reference_note}{embed_note} [message_id:{msg.id}]")
 
         # Reverse to chronological order (oldest first)
         filtered.reverse()

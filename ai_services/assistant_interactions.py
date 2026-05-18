@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from pathlib import Path
 
 from ai_services.guild_api_keys import (
     raise_for_guild_gemini_exception,
@@ -17,10 +18,13 @@ from .gemini_client import gemini_client
 logger = logging.getLogger(__name__)
 
 
+_MESSAGE_TOOLS_PATH = Path(__file__).parent.parent / "prompts" / "system" / "message_tools_prompt.txt"
 try:
     SYSTEM_PROMPT = AIDM_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    _MESSAGE_TOOLS_PROMPT = _MESSAGE_TOOLS_PATH.read_text(encoding="utf-8").strip()
 except FileNotFoundError:
     SYSTEM_PROMPT = "You are AIDM, an AI Dungeon Master for D&D 5e."
+    _MESSAGE_TOOLS_PROMPT = ""
 
 
 def _normalize_user_message(user_message) -> str:
@@ -74,9 +78,14 @@ def _build_prompt(
 
 
 def _compose_system_prompt(system_prompt: str | None = None) -> str:
-    if not system_prompt:
-        return SYSTEM_PROMPT
-    return f"{SYSTEM_PROMPT}\n\n{system_prompt.strip()}".strip()
+    parts = []
+    if SYSTEM_PROMPT:
+        parts.append(SYSTEM_PROMPT)
+    if _MESSAGE_TOOLS_PROMPT:
+        parts.append(_MESSAGE_TOOLS_PROMPT)
+    if system_prompt:
+        parts.append(system_prompt.strip())
+    return "\n\n".join(parts)
 
 
 async def get_assistant_response(

@@ -18,15 +18,17 @@ Include tool invocations in your response like this:
 
 Edit a previously sent message. Use this when you want to correct, update, or clarify something you already said.
 
+**IMPORTANT - Before editing:** If you don't know the exact current content of the message, use `get_message_content` first to read it. Then you can modify it and use `edit_message`.
+
 **Arguments:**
-- `message_id` (required): The Discord message ID to edit. Find this from conversation context.
+- `message_id` (required): The Discord message ID to edit. Find this from conversation context (messages include `[message_id:XXXXXXXXXX]`).
 - `new_content` (required): The corrected or updated text.
 - `channel_id` (optional): The channel ID where the message exists. Defaults to the current channel if omitted.
 
 **Example:**
 ```
-The answer is actually 42, not 43. Let me correct that:
-[AIDM-TOOL: edit_message | message_id=123456789012345678 | new_content=42 | channel_id=987654321098765432]
+I'll update that card now:
+[AIDM-TOOL: edit_message | message_id=123456789012345678 | new_content=Updated card content here]
 ```
 
 ### reply_to_message
