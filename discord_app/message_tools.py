@@ -24,14 +24,26 @@ TOOL_INVOCATION_RE = re.compile(
 )
 
 
-async def edit_message(message_id: int, new_content: str, channel_id: int) -> bool:
-    """Edit an existing message in a channel.
-    
+async def edit_message(
+    message_id: int,
+    new_content: str,
+    channel_id: int,
+    *,
+    embed_title: str | None = None,
+    embed_description: str | None = None,
+    embed_color: int | None = None,
+) -> bool:
+    """Edit an existing message in a channel, including optionally updating its embed.
+
     Args:
         message_id: The Discord message ID to edit.
-        new_content: The new content for the message.
+        new_content: The new content for the message (plain text, the line above the card).
         channel_id: The channel ID where the message exists.
-    
+        embed_title: Optional new title for the embed card.
+        embed_description: Optional new description/body for the embed card.
+        embed_color: Optional color as an integer (e.g. 0x1f8b4c for green, 0xe74c3c for red).
+                     Common colors: DarkGreen=0x1f8b4c, Red=0xe74c3c, DarkBlue=0x3498db, Gold=0xf1c40f.
+
     Returns:
         True if the edit was successful, False otherwise.
     """
@@ -40,12 +52,41 @@ async def edit_message(message_id: int, new_content: str, channel_id: int) -> bo
         if not channel:
             logger.error("edit_message: Could not find channel %s", channel_id)
             return False
-        
+
         message = await channel.fetch_message(message_id)
-        await message.edit(content=new_content)
-        logger.info("Edited message %s in channel %s", message_id, channel_id)
+
+        edit_kwargs: dict[str, str | discord.Embed | None] = {"content": new_content}
+
+        # Build updated embed if any embed params are provided
+        embed: discord.Embed | None = None
+        if embed_title is not None or embed_description is not None:
+            current_embed = message.embeds[0] if message.embeds else None
+            embed = discord.Embed()
+            if current_embed:
+                embed.title = embed_title if embed_title is not None else (current_embed.title or "")
+                embed.description = embed_description if embed_description is not None else (current_embed.description or "")
+                embed.color = discord.Color(embed_color) if embed_color is not None else current_embed.color
+                # Preserve existing fields unless description replaced them entirely
+                if embed_description is None and current_embed.fields:
+                    for field in current_embed.fields:
+                        embed.add_field(name=field.name, value=field.value, inline=field.inline)
+                if current_embed.footer:
+                    embed.set_footer(text=current_embed.footer.text, icon_url=current_embed.footer.icon_url)
+                if current_embed.thumbnail:
+                    embed.set_thumbnail(url=current_embed.thumbnail.url)
+                if current_embed.image:
+                    embed.set_image(url=current_embed.image.url)
+            else:
+                embed.title = embed_title or "Card"
+                embed.description = embed_description or new_content or "No content"
+                if embed_color is not None:
+                    embed.color = discord.Color(embed_color)
+            edit_kwargs["embed"] = embed
+
+        await message.edit(**edit_kwargs)
+        logger.info("Edited message %s in channel %s (embed=%s)", message_id, channel_id, bool(embed))
         return True
-    
+
     except discord.NotFound:
         logger.warning("edit_message: Message %s not found in channel %s", message_id, channel_id)
         return False
@@ -380,13 +421,16 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
 TOOLS_DECLARATION = [
     types.FunctionDeclaration(
         name="edit_message",
-        description="Edit an existing message in a Discord channel.",
+        description="Edit an existing message AND its embed card in a Discord channel. Use when you need to update a card's title, body text, color, or any field.",
         parameters=types.Schema(
             type="object",
             properties={
                 "message_id": types.Schema(type="string", description="The Discord message ID to edit."),
-                "new_content": types.Schema(type="string", description="The new content for the message."),
+                "new_content": types.Schema(type="string", description="The new plain-text content for the message (line above the card)."),
                 "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID where the message exists. Defaults to current channel."),
+                "embed_title": types.Schema(type="string", description="Optional: New title for the embed card."),
+                "embed_description": types.Schema(type="string", description="Optional: New body/description text for the embed card. Supports full card content."),
+                "embed_color": types.Schema(type="string", description="Optional: Color as hex string (e.g. '0x1f8b4c' for green, '0xe74c3c' for red, '0x3498db' for blue)."),
             },
             required=["message_id", "new_content"],
         ),

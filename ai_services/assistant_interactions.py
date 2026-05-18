@@ -66,7 +66,20 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             message_id = int(args["message_id"])
             channel_id = int(args.get("channel_id", channel.id))
             new_content = args["new_content"]
-            result = await edit_message(message_id, new_content, channel_id)
+            embed_title = args.get("embed_title")
+            embed_description = args.get("embed_description")
+            embed_color = None
+            if args.get("embed_color"):
+                try:
+                    embed_color = int(args["embed_color"], 16)
+                except ValueError:
+                    pass
+            result = await edit_message(
+                message_id, new_content, channel_id,
+                embed_title=embed_title,
+                embed_description=embed_description,
+                embed_color=embed_color,
+            )
             if result:
                 # Fetch the edited message to confirm actual content
                 try:
@@ -97,7 +110,15 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
                 int(args["message_id"]),
                 int(args.get("channel_id", channel.id)),
             )
-            return f"Message content: {result}" if result else f"Failed to get message {args['message_id']}"
+            parts = [f"Message content: {result['text'] or '(no text)'} | Embeds: {len(result['embeds'])} card(s)"]
+            if result.get("embeds"):
+                for i, e in enumerate(result["embeds"]):
+                    parts.append(f"  Card {i+1}: title='{e['title']}', description='{e['description'][:200]}...' color={e['color']}")
+                    if e.get("fields"):
+                        for f in e["fields"]:
+                            parts.append(f"    Field: {f['name']} = {f['value'][:100]}")
+            parts.append(f"Attachments: {len(result['attachments'])}")
+            return "\n".join(parts) if result else f"Failed to get message {args['message_id']}"
         elif func_name == "send_card":
             result = await send_card(
                 int(args["channel_id"]),
