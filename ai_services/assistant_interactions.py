@@ -334,12 +334,32 @@ async def get_assistant_response(
                 logger.info("Function calls detected: %s", function_calls)
                 tool_results = await handle_function_calls(response, channel)
                 if tool_results:
+                    # Build the explicit directive with examples — the AI must act, not narrate
+                    mentioned_ids = []
+                    for line in tool_results.split('\n'):
+                        if '[message_id:' in line:
+                            mid = line.split('[message_id:')[1].split(']')[0].strip()
+                            if mid not in mentioned_ids:
+                                mentioned_ids.append(mid)
+
+                    ids_examples = ", ".join(f"`{mid}`" for mid in mentioned_ids) if mentioned_ids else "[message_id]"
+
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
-                        "IMPORTANT: Based on the tool results, if you need to edit any messages "
-                        "or perform additional actions, call the appropriate tool now. "
-                        "Then provide your final response."
+                        "EXPLICIT INSTRUCTION: You have just read the content of message(s) with ID(s): "
+                        f"{ids_examples}. These are Discord cards you need to update.\n\n"
+                        "Action required: For EACH message that needs updating, you MUST call "
+                        "the `edit_message` tool with the correct message_id — do NOT call "
+                        "`get_message_content` again, you already have the content.\n\n"
+                        "Correct sequence:\n"
+                        "  1. Call `edit_message` for each message ID from the tool results above\n"
+                        "  2. Stop calling tools once all edits are done\n"
+                        "  3. Give a one-line confirmation\n\n"
+                        "Do NOT: re-read content, ask questions, narrate character stats, "
+                        "or send new messages. ONLY call `edit_message` then confirm.\n\n"
+                        "Example of wrong behavior: \"Veton takes 80 damage! Here's the updated card...\"\n"
+                        "Example of correct behavior: call `edit_message(message_id=150..., embed_title=..., embed_description=...)` then say \"Cards updated.\""
                     )
                     async with channel.typing():
                         if guild_id is not None:
@@ -370,7 +390,10 @@ async def get_assistant_response(
                             if extra_results:
                                 follow_up_prompt2 = (
                                     f"Previous tool results:\n{extra_results}\n\n"
-                                    "Provide your final response based on all tool results above."
+                                    "FINAL INSTRUCTION: All edits should now be complete. "
+                                    "If any `edit_message` calls were made above, confirm what was changed "
+                                    "with a single short reply (e.g. 'Updated 2 cards.'). "
+                                    "Do NOT narrate, describe stats, or generate new content."
                                 )
                                 async with channel.typing():
                                     if guild_id is not None:
