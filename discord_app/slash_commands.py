@@ -294,17 +294,23 @@ async def context_add(thread_id: int, text: str) -> str:
         return f"Error adding context: {e}"
 
 
-async def get_context(thread_id: int) -> str:
+async def get_context(thread_id: int | str) -> str:
     """Get the current memory context for a thread.
-    
+
     Args:
-        thread_id: The Discord thread ID to get context for.
-        
+        thread_id: The Discord thread ID to get context for (int or numeric string).
+
     Returns:
         The current context text for the thread.
     """
+    # Accept both int and string (Gemini may pass either)
+    try:
+        thread_id = int(thread_id)
+    except (ValueError, TypeError):
+        return f"Error: Invalid thread ID '{thread_id}'. Expected a numeric Discord thread ID (e.g. 1505887942822858764)."
+
     logger.info("get_context: thread=%s", thread_id)
-    
+
     try:
         # Get the thread to find its parent channel and category
         thread = client.get_channel(thread_id)

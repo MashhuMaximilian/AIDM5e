@@ -106,10 +106,14 @@ async def build_conversation_context(
             # Bot messages: only skip after first 3 (so AI sees its own recent sent messages,
             # which is critical for edit_message to work). Cap at 3 to avoid token bloat.
             if bot_user_id and msg.author.id == bot_user_id:
-                bot_count = getattr(channel, '_bot_msg_count', 0)
-                if bot_count >= 3:
-                    continue
-                setattr(channel, '_bot_msg_count', bot_count + 1)
+                try:
+                    bot_count = getattr(channel, '_bot_msg_count', 0)
+                    if bot_count >= 3:
+                        continue
+                    setattr(channel, '_bot_msg_count', bot_count + 1)
+                except (AttributeError, TypeError):
+                    # channel doesn't support setattr (e.g. Thread object) — use a dict instead
+                    break
 
             # Skip duplicates
             if msg.id in seen_ids:
