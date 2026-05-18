@@ -98,13 +98,15 @@ class GeminiClient:
         *,
         api_key: str | None = None,
         tools: list | None = None,
-    ) -> str:
+        return_raw_response: bool = False,
+    ) -> str | object:
         return self._generate_text_with_model(
             model_name or GEMINI_CHAT_MODEL,
             prompt,
             system_instruction,
             api_key=api_key,
             tools=tools,
+            return_raw_response=return_raw_response,
         )
 
     def generate_text_with_reasoning(
@@ -116,7 +118,8 @@ class GeminiClient:
         api_key: str | None = None,
         thinking_budget: int = 1024,
         tools: list | None = None,
-    ) -> str:
+        return_raw_response: bool = False,
+    ) -> str | object:
         """Generate text with reasoning budget enabled.
         
         Args:
@@ -127,9 +130,10 @@ class GeminiClient:
             thinking_budget: Token budget for reasoning (default 1024). Higher values
                 enable more extensive reasoning on supported models.
             tools: Optional list of tools for function calling.
+            return_raw_response: If True, returns the full response object.
         
         Returns:
-            Generated text string.
+            Generated text string, or full response object if return_raw_response=True.
         """
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
@@ -141,7 +145,7 @@ class GeminiClient:
             tools=tools,
         )
         try:
-            return self._generate_with_config(model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key)
+            return self._generate_with_config(model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key, return_raw_response=return_raw_response)
         except Exception as exc:
             logger.warning("generate_text_with_reasoning failed, falling back to regular generate_text: %s", exc)
             return self._generate_text_with_model(
@@ -150,6 +154,7 @@ class GeminiClient:
                 system_instruction,
                 api_key=api_key,
                 tools=tools,
+                return_raw_response=return_raw_response,
             )
 
     def generate_text_with_reasoning_raw(
@@ -285,7 +290,8 @@ class GeminiClient:
         *,
         api_key: str | None = None,
         tools: list | None = None,
-    ) -> str:
+        return_raw_response: bool = False,
+    ) -> str | object:
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
             top_p=GEMINI_TOP_P,
@@ -294,7 +300,7 @@ class GeminiClient:
             system_instruction=system_instruction,
             tools=tools,
         )
-        return self._generate_with_config(model_name, prompt, config, api_key=api_key)
+        return self._generate_with_config(model_name, prompt, config, api_key=api_key, return_raw_response=return_raw_response)
 
     def _generate_with_config(
         self,
