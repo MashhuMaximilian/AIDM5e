@@ -344,22 +344,55 @@ async def get_assistant_response(
                     async with channel.typing():
                         if guild_id is not None:
                             with use_guild_gemini_api_key(guild_id):
-                                response_text = await asyncio.to_thread(
+                                follow_up_response = await asyncio.to_thread(
                                     gemini_client.generate_text,
                                     follow_up_prompt,
                                     _compose_system_prompt(system_prompt),
                                     model_name,
                                     tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
+                                    return_raw_response=True,
                                 )
                             await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                         else:
-                            response_text = await asyncio.to_thread(
+                            follow_up_response = await asyncio.to_thread(
                                 gemini_client.generate_text,
                                 follow_up_prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
                                 tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
+                                return_raw_response=True,
                             )
+                        # Parse and handle any follow-up function calls (e.g. edit_message after reading)
+                        extra_calls = gemini_client.parse_function_calls(follow_up_response)
+                        if extra_calls:
+                            logger.info("Follow-up function calls: %s", extra_calls)
+                            extra_results = await handle_function_calls(follow_up_response, channel)
+                            if extra_results:
+                                follow_up_prompt2 = (
+                                    f"Previous tool results:\n{extra_results}\n\n"
+                                    "Provide your final response based on all tool results above."
+                                )
+                                async with channel.typing():
+                                    if guild_id is not None:
+                                        with use_guild_gemini_api_key(guild_id):
+                                            response_text = await asyncio.to_thread(
+                                                gemini_client.generate_text,
+                                                follow_up_prompt2,
+                                                _compose_system_prompt(system_prompt),
+                                                model_name,
+                                            )
+                                        await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                                    else:
+                                        response_text = await asyncio.to_thread(
+                                            gemini_client.generate_text,
+                                            follow_up_prompt2,
+                                            _compose_system_prompt(system_prompt),
+                                            model_name,
+                                        )
+                            else:
+                                response_text = (follow_up_response.text or "").strip() if hasattr(follow_up_response, "text") else str(follow_up_response)
+                        else:
+                            response_text = (follow_up_response.text or "").strip() if hasattr(follow_up_response, "text") else str(follow_up_response)
                 else:
                     response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
             else:
