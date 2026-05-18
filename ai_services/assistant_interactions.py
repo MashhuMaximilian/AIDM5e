@@ -334,19 +334,12 @@ async def get_assistant_response(
                 logger.info("Function calls detected: %s", function_calls)
                 tool_results = await handle_function_calls(response, channel)
                 if tool_results:
-                    # Strip DM roleplay framing from system prompt for the edit-pass.
-                    # The AI must call edit_message — not narrate, not greet, not ask questions.
-                    edit_system = (
-                        "You are AIDM, a Discord bot that edits message cards using tools.\n"
-                        "When a user asks you to edit cards, you MUST call edit_message with the correct message_id.\n"
-                        "After calling edit_message, simply confirm what you changed. Do NOT narrate, do NOT greet, do NOT ask questions.\n"
-                        "Only output plain text or call tools. Never write DM-style narration."
-                    )
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
-                        "CRITICAL: You MUST call edit_message for EACH message_id listed above that needs updating. "
-                        "Do this NOW. Do not write narration, do not greet, do not ask questions. Call edit_message immediately."
+                        "IMPORTANT: Based on the tool results, if you need to edit any messages "
+                        "or perform additional actions, call the appropriate tool now. "
+                        "Then provide your final response."
                     )
                     async with channel.typing():
                         if guild_id is not None:
@@ -354,7 +347,7 @@ async def get_assistant_response(
                                 follow_up_response = await asyncio.to_thread(
                                     gemini_client.generate_text,
                                     follow_up_prompt,
-                                    edit_system,
+                                    _compose_system_prompt(system_prompt),
                                     model_name,
                                     tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
                                     return_raw_response=True,
@@ -364,7 +357,7 @@ async def get_assistant_response(
                             follow_up_response = await asyncio.to_thread(
                                 gemini_client.generate_text,
                                 follow_up_prompt,
-                                edit_system,
+                                _compose_system_prompt(system_prompt),
                                 model_name,
                                 tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
                                 return_raw_response=True,
