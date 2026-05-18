@@ -103,7 +103,7 @@ def register(channel_group, h) -> None:
                         files.append(await attachment.to_file())
                     except Exception:
                         pass
-                await target.send(content=msg.content, embeds=msg.embeds, files=files if files else None)
+                await target.send(content=msg.content if msg.content else None, embeds=msg.embeds, files=files if files else None)
 
         # Build imported_content from original messages (which include embed text)
         if original_messages:
@@ -241,13 +241,13 @@ def register(channel_group, h) -> None:
     async def start_channel_autocomplete(interaction, current: str):
         choices = await h.channel_autocomplete(interaction, current)
         choices.append(discord.app_commands.Choice(name="CREATE A NEW CHANNEL", value="NEW CHANNEL"))
-        return choices[:50]
+        return (choices + [discord.app_commands.Choice(name="CREATE A NEW CHANNEL", value="NEW CHANNEL")])[:25]
 
     @startnew_command.autocomplete('thread')
     async def start_thread_autocomplete(interaction, current: str):
         choices = await h.thread_autocomplete(interaction, current)
         choices.append(discord.app_commands.Choice(name="CREATE A NEW THREAD", value="NEW THREAD"))
-        return choices[:50]
+        return choices[:25]
 
     @startnew_command.autocomplete('memory')
     async def start_memory_autocomplete(interaction, current: str):
