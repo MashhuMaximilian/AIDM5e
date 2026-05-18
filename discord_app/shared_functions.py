@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from datetime import datetime
 
 import discord
 
@@ -16,6 +17,7 @@ from data_store.db_repository import (
 
 
 always_on_channels = {}
+sent_messages: dict[int, list[dict]] = {}  # channel_id -> list of sent message records
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 BULLET_ONLY_RE = re.compile(r"^\s*(?:[-*•]|o)\s*$")
 LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*•]|o)\s+(.*\S.*)$")
@@ -120,10 +122,13 @@ async def check_always_on(channel_id, category_id, thread_id):
         return False
 
 
-async def send_response_in_chunks(channel, response):
+async def send_response_in_chunks(channel, response, description: str | None = None):
     if response is None:
         logging.error("Received None as response.")
-        return
+        return None
+
+    channel_id = channel.id
+    sent_ids: list[int] = []
 
     # Handle dict response with embed data
     if isinstance(response, dict):
@@ -133,25 +138,65 @@ async def send_response_in_chunks(channel, response):
             # Send embed with text content
             if len(text_content) > 2000:
                 for chunk in [text_content[i:i + 2000] for i in range(0, len(text_content), 2000)]:
-                    await channel.send(chunk, embed=embed)
+                    msg = await channel.send(chunk, embed=embed)
+                    sent_ids.append(msg.id)
             else:
-                await channel.send(text_content, embed=embed)
-            return
+                msg = await channel.send(text_content, embed=embed)
+                sent_ids.append(msg.id)
+            _record_sent_messages(channel_id, sent_ids, description)
+            return sent_ids[-1] if sent_ids else None
         elif embed:
-            await channel.send(embed=embed)
-            return
+            msg = await channel.send(embed=embed)
+            sent_ids.append(msg.id)
+            _record_sent_messages(channel_id, sent_ids, description)
+            return sent_ids[-1] if sent_ids else None
         elif text_content:
             response = text_content
         else:
             logging.warning("Received dict response with no text or embed: %s", response)
-            return
+            return None
 
     response = format_for_discord(str(response))
     if len(response) > 2000:
         for chunk in [response[i:i + 2000] for i in range(0, len(response), 2000)]:
-            await channel.send(chunk)
+            msg = await channel.send(chunk)
+            sent_ids.append(msg.id)
     else:
-        await channel.send(response)
+        msg = await channel.send(response)
+        sent_ids.append(msg.id)
+
+    _record_sent_messages(channel_id, sent_ids, description)
+    return sent_ids[-1] if sent_ids else None
+
+
+def _record_sent_messages(channel_id: int, message_ids: list[int], description: str | None) -> None:
+    """Record sent message IDs for later retrieval."""
+    if channel_id not in sent_messages:
+        sent_messages[channel_id] = []
+    for msg_id in message_ids:
+        record = {
+            "message_id": msg_id,
+            "channel_id": channel_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "description": (description or "")[:100],
+        }
+        sent_messages[channel_id].append(record)
+
+
+def get_sent_messages(channel_id: int, thread_id: int | None = None) -> list[dict]:
+    """Get all sent message records for a channel (optionally filtered by thread)."""
+    records = sent_messages.get(channel_id, [])
+    if thread_id is not None:
+        # For thread messages, the channel_id is the parent channel,
+        # but messages are sent in the thread. We track by parent channel.
+        return records  # Could filter by thread_id if stored in record
+    return records
+
+
+def get_last_sent_message(channel_id: int, thread_id: int | None = None) -> dict | None:
+    """Get the most recent sent message record for a channel."""
+    records = sent_messages.get(channel_id, [])
+    return records[-1] if records else None
 
 
 async def send_response(interaction, response, channel_id=None, thread_id=None, backup_channel_name=None):

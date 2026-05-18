@@ -1,0 +1,106 @@
+# Message Tools
+
+The assistant can invoke message editing and manipulation tools by including special markers in the response text. These tools allow the assistant to edit previously sent messages, reply to them, or forward content to other channels.
+
+## Tool Invocation Format
+
+Include tool invocations in your response like this:
+
+```
+[AIDM-TOOL: tool_name | arg1=value | arg2=value]
+```
+
+**Important**: Tool invocations must be on their own line, not mixed with regular text. The markers `[AIDM-TOOL:` and `]` are required. Arguments are separated by `|` pipes.
+
+## Available Tools
+
+### edit_message
+
+Edit a previously sent message. Use this when you want to correct, update, or clarify something you already said.
+
+**Arguments:**
+- `message_id` (required): The Discord message ID to edit. Find this from conversation context.
+- `new_content` (required): The corrected or updated text.
+- `channel_id` (optional): The channel ID where the message exists. Defaults to the current channel if omitted.
+
+**Example:**
+```
+The answer is actually 42, not 43. Let me correct that:
+[AIDM-TOOL: edit_message | message_id=123456789012345678 | new_content=42 | channel_id=987654321098765432]
+```
+
+### reply_to_message
+
+Reply directly to a specific message in the conversation. This sends a threaded reply that references the original message.
+
+**Arguments:**
+- `message_id` (required): The message ID to reply to.
+- `content` (required): Your reply text.
+- `channel_id` (optional): The channel ID. Defaults to current channel.
+- `mention` (optional): Set to `true` to mention the author of the message you're replying to.
+
+**Example:**
+```
+I see you mentioned the fireball spell. Let me clarify:
+[AIDM-TOOL: reply_to_message | message_id=123456789012345678 | content=Fireball is a 3rd-level evocation spell that deals 8d6 fire damage in a 20-foot radius. | mention=true]
+```
+
+### forward_message
+
+Forward a message's content to another channel. Useful for sharing information across channels while preserving the original context.
+
+**Arguments:**
+- `message_id` (required): The source message ID to forward.
+- `target_channel_id` (required): The channel ID to forward to.
+- `channel_id` (optional): The source channel ID. Defaults to current channel.
+- `include_context` (optional): Set to `false` to omit the original author and timestamp header.
+
+**Example:**
+```
+I'll share this encounter idea in the design channel:
+[AIDM-TOOL: forward_message | message_id=123456789012345678 | target_channel_id=111222333444555666]
+```
+
+### get_message_content
+
+Retrieve the content of a message for reference or processing. This lets you read a message and use its content in your response.
+
+**Arguments:**
+- `message_id` (required): The message ID to fetch.
+- `channel_id` (optional): The channel ID. Defaults to current channel.
+
+**Example:**
+```
+Let me check the earlier message to see what was decided:
+[AIDM-TOOL: get_message_content | message_id=123456789012345678]
+```
+
+## Usage Guidelines
+
+1. **Find message IDs first**: Use `get_message_content` if you need to locate or verify a message ID before editing/replying.
+
+2. **One tool per line**: Each tool invocation must be on its own line. You can include multiple tools in one response.
+
+3. **Be specific with IDs**: Message IDs are 18-digit numbers. Make sure you have the correct channel_id for messages outside the current channel.
+
+4. **Track your edits**: Remember that editing removes the original content. If the conversation needs to preserve both, use `reply_to_message` instead.
+
+5. **Clean invocation markers**: After executing tools, the tool result summary will be sent to Discord. Your response text around tool markers will be edited, so keep tool invocations separate from regular content.
+
+6. **Default behavior**: The `channel_id` argument defaults to the current channel. Only specify it when the target message is in a different channel.
+
+## Error Handling
+
+Tools that fail will return an error message in the tool execution summary. Common failure reasons:
+- Message not found (deleted or wrong ID)
+- Permission issues (bot lacks access to edit/reply)
+- Invalid message ID format
+
+If a tool fails, you can retry with corrected information or explain the limitation to the user.
+
+## When to Use Tools
+
+- **Use `edit_message`** when: You made a factual error, want to update outdated information, or need to correct formatting.
+- **Use `reply_to_message`** when: You want to respond to a specific point made earlier, maintain conversation threading, or address someone directly.
+- **Use `forward_message`** when: Information from one channel is relevant to another, sharing a summary, or routing content appropriately.
+- **Use `get_message_content`** when: You need to verify or reference exact content from earlier messages, check timestamps, or retrieve embeds/attachments.

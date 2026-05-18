@@ -54,6 +54,7 @@ from discord_app.workspace_threads import (
     sync_workspace_cards,
 )
 from .shared_functions import check_always_on, send_response_in_chunks
+from .message_tools import parse_ai_tool_invocation, execute_tool_invocations
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1602,6 +1603,13 @@ async def on_message(message):
                     system_prompt=_channel_system_prompt(channel_name),
                 )
                 response_sent = await send_response(response)
+                # Check for tool invocations in the response
+                if response and isinstance(response, str):
+                    invocations = parse_ai_tool_invocation(response)
+                    if invocations:
+                        tool_results = await execute_tool_invocations(invocations, message.channel)
+                        if tool_results:
+                            await send_response_in_chunks(message.channel, tool_results)
                 if response_sent and channel_name == "gameplay" and thread_id is None:
                     try:
                         await _post_gameplay_workspace_updates(
