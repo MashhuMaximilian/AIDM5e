@@ -245,13 +245,13 @@ async def get_assistant_response(
         guild = getattr(channel, "guild", None)
         guild_id = getattr(guild, "id", None)
 
-        async with channel.typing():
+        # Always go through the function-call path when tools are available
+        tools = ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None
+        if tools:
+            # Raw response path — enables function call detection
+            response_text = None
             try:
-                # Use tools if available for function calling support
-                tools = ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None
-
                 if use_reasoning:
-                    # Use reasoning-enabled generation with function calling
                     if guild_id is not None:
                         with use_guild_gemini_api_key(guild_id):
                             response = await asyncio.to_thread(
@@ -273,39 +273,38 @@ async def get_assistant_response(
                             tools=tools,
                         )
                 else:
-                    # Use regular generation with tools (for function calling)
+                    # Non-reasoning path: still need raw response to detect function calls
                     if guild_id is not None:
                         with use_guild_gemini_api_key(guild_id):
                             response = await asyncio.to_thread(
-                                gemini_client.generate_text,
+                                gemini_client.generate_text_with_reasoning_raw,
                                 prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
+                                thinking_budget=0,  # 0 = no reasoning budget
                                 tools=tools,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
                         response = await asyncio.to_thread(
-                            gemini_client.generate_text,
+                            gemini_client.generate_text_with_reasoning_raw,
                             prompt,
                             _compose_system_prompt(system_prompt),
                             model_name,
+                            thinking_budget=0,
                             tools=tools,
                         )
-
             except Exception as exc:
                 if guild_id is not None:
                     await asyncio.to_thread(raise_for_guild_gemini_exception, guild_id, exc)
                 raise
 
-        # Handle function calls if present (for non-reasoning mode, response is already text)
-        if use_reasoning:
+            # Check for function calls in response
             function_calls = gemini_client.parse_function_calls(response)
             if function_calls:
                 logger.info("Function calls detected: %s", function_calls)
                 tool_results = await handle_function_calls(response, channel)
                 if tool_results:
-                    # Build follow-up prompt with tool results
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
@@ -319,7 +318,6 @@ async def get_assistant_response(
                                     follow_up_prompt,
                                     _compose_system_prompt(system_prompt),
                                     model_name,
-                                    tools=tools,
                                 )
                             await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                         else:
@@ -328,15 +326,35 @@ async def get_assistant_response(
                                 follow_up_prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
-                                tools=tools,
                             )
                 else:
                     response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
             else:
                 response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
         else:
-            # For non-reasoning mode, response is already the text
-            response_text = response if isinstance(response, str) else ""
+            # No tools — plain text generation
+            response_text = None
+            try:
+                if guild_id is not None:
+                    with use_guild_gemini_api_key(guild_id):
+                        response_text = await asyncio.to_thread(
+                            gemini_client.generate_text,
+                            prompt,
+                            _compose_system_prompt(system_prompt),
+                            model_name,
+                        )
+                    await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                else:
+                    response_text = await asyncio.to_thread(
+                        gemini_client.generate_text,
+                        prompt,
+                        _compose_system_prompt(system_prompt),
+                        model_name,
+                    )
+            except Exception as exc:
+                if guild_id is not None:
+                    await asyncio.to_thread(raise_for_guild_gemini_exception, guild_id, exc)
+                raise
 
         if not response_text:
             return "No valid response received from Gemini."

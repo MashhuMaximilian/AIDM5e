@@ -11,10 +11,12 @@ from google.genai import types
 from google.genai.errors import ClientError
 
 # Import tools declarations for function calling support
+# Wrap in types.Tool so GenerateContentConfig accepts them correctly
 try:
     from discord_app.message_tools import TOOLS_DECLARATION
     from discord_app.slash_commands import SLASH_TOOLS_DECLARATION
-    ALL_TOOLS_DECLARATION = TOOLS_DECLARATION + SLASH_TOOLS_DECLARATION
+    _all_decls = TOOLS_DECLARATION + SLASH_TOOLS_DECLARATION
+    ALL_TOOLS_DECLARATION = [types.Tool(function_declarations=_all_decls)] if _all_decls else []
 except ImportError:
     ALL_TOOLS_DECLARATION = []
 
