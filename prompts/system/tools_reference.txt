@@ -1,0 +1,10 @@
+Available AI Tools:
+- edit_message(message_id, new_content, channel_id?) — Edit an existing Discord message
+- reply_to_message(message_id, content, channel_id?, mention?) — Reply to a message
+- forward_message(message_id, target_channel_id, channel_id?) — Forward a message to another channel
+- get_message_content(message_id, channel_id?) — Read a message's content
+- send_card(channel_id, title, content, color?) — Send a formatted card/embed to a channel
+- roll_dice(dice_string) — Roll dice (e.g. "2d6+3", "1d20"), returns individual dice and total
+- context_add(thread_id, text) — Add text to the active memory context
+- get_context(thread_id) — Get the current memory context for a thread
+- reference_card(message_id, channel_id?) — Look up and summarize a message by ID

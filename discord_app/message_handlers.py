@@ -1615,8 +1615,8 @@ async def on_message(message):
                     conversation_history=conversation_history,
                 )
                 response_sent = await send_response(response)
-                # Check for tool invocations in the response
-                if response and isinstance(response, str):
+                # Fallback: if response still contains text-marker invocations, parse and execute them the old way
+                if response and isinstance(response, str) and "[AIDM-TOOL:" in response:
                     invocations = parse_ai_tool_invocation(response)
                     if invocations:
                         tool_results = await execute_tool_invocations(invocations, message.channel)

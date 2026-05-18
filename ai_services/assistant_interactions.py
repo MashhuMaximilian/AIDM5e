@@ -12,7 +12,7 @@ from ai_services.guild_api_keys import (
 from config import AIDM_PROMPT_PATH, client
 from data_store.db_repository import get_memory_name
 from discord_app.shared_functions import send_response_in_chunks
-from .gemini_client import gemini_client
+from .gemini_client import gemini_client, ALL_TOOLS_DECLARATION
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,130 @@ try:
 except FileNotFoundError:
     SYSTEM_PROMPT = "You are AIDM, an AI Dungeon Master for D&D 5e."
     _MESSAGE_TOOLS_PROMPT = ""
+
+
+async def _execute_function_call(func_name: str, args: dict, channel) -> str:
+    """Execute a Gemini function call and return the result string."""
+    try:
+        # Import actual functions from message_tools and slash_commands
+        from discord_app.message_tools import (
+            edit_message,
+            reply_to_message,
+            forward_message,
+            get_message_content,
+        )
+        from discord_app.slash_commands import (
+            send_card,
+            roll_dice,
+            context_add,
+            get_context,
+            reference_card,
+        )
+
+        func_map = {
+            "edit_message": edit_message,
+            "reply_to_message": reply_to_message,
+            "forward_message": forward_message,
+            "get_message_content": get_message_content,
+            "send_card": send_card,
+            "roll_dice": roll_dice,
+            "context_add": context_add,
+            "get_context": get_context,
+            "reference_card": reference_card,
+        }
+
+        func = func_map.get(func_name)
+        if func is None:
+            return f"Error: Unknown function '{func_name}'"
+
+        # Call the function with appropriate args
+        if func_name in ("edit_message",):
+            result = await edit_message(
+                int(args["message_id"]),
+                args["new_content"],
+                int(args.get("channel_id", channel.id)),
+            )
+            return f"Edited message {args['message_id']}" if result else f"Failed to edit message {args['message_id']}"
+        elif func_name == "reply_to_message":
+            result = await reply_to_message(
+                int(args["message_id"]),
+                args["content"],
+                int(args.get("channel_id", channel.id)),
+                args.get("mention", False),
+            )
+            return f"Replied to message {args['message_id']}" if result else f"Failed to reply to message {args['message_id']}"
+        elif func_name == "forward_message":
+            result = await forward_message(
+                int(args["message_id"]),
+                int(args["target_channel_id"]),
+                int(args.get("channel_id", channel.id)),
+            )
+            return f"Forwarded message {args['message_id']} to channel {args['target_channel_id']}" if result else f"Failed to forward message {args['message_id']}"
+        elif func_name == "get_message_content":
+            result = await get_message_content(
+                int(args["message_id"]),
+                int(args.get("channel_id", channel.id)),
+            )
+            return f"Message content: {result}" if result else f"Failed to get message {args['message_id']}"
+        elif func_name == "send_card":
+            result = await send_card(
+                int(args["channel_id"]),
+                args["title"],
+                args["content"],
+                args.get("color"),
+            )
+            return f"Sent card to channel {args['channel_id']}" if result else f"Failed to send card to channel {args['channel_id']}"
+        elif func_name == "roll_dice":
+            result = await roll_dice(args["dice_string"])
+            return result
+        elif func_name == "context_add":
+            result = await context_add(
+                int(args["thread_id"]),
+                args["text"],
+            )
+            return result if result else f"Failed to add context to thread {args['thread_id']}"
+        elif func_name == "get_context":
+            result = await get_context(int(args["thread_id"]))
+            return result if result else f"No context found for thread {args['thread_id']}"
+        elif func_name == "reference_card":
+            result = await reference_card(
+                int(args["message_id"]),
+                int(args["channel_id"]),
+            )
+            return result if result else f"Failed to reference message {args['message_id']}"
+        else:
+            # Generic call for any other function
+            result = await func(**args)
+            return str(result) if result is not None else "Function executed"
+
+    except Exception as exc:
+        logger.error("Error executing function call '%s': %s", func_name, exc)
+        return f"Error executing {func_name}: {exc}"
+
+
+async def handle_function_calls(response, channel) -> str:
+    """Handle function calls from Gemini response and return a summary of results.
+    
+    Args:
+        response: The raw Gemini response object.
+        channel: The Discord channel context.
+    
+    Returns:
+        A string summary of all function call results.
+    """
+    function_calls = gemini_client.parse_function_calls(response)
+    if not function_calls:
+        return ""
+
+    results = []
+    for call in function_calls:
+        func_name = call.get("name", "")
+        args = call.get("args", {})
+        logger.info("Executing function call: %s with args %s", func_name, args)
+        result = await _execute_function_call(func_name, args, channel)
+        results.append(f"- {func_name}: {result}")
+
+    return "\n".join(results)
 
 
 def _normalize_user_message(user_message) -> str:
@@ -99,6 +223,8 @@ async def get_assistant_response(
     context_block: str | None = None,
     system_prompt: str | None = None,
     conversation_history: str | None = None,
+    use_reasoning: bool = False,
+    thinking_budget: int = 1024,
 ):
     try:
         target_id = thread_id or channel_id
@@ -121,26 +247,96 @@ async def get_assistant_response(
 
         async with channel.typing():
             try:
-                if guild_id is not None:
-                    with use_guild_gemini_api_key(guild_id):
-                        response_text = await asyncio.to_thread(
+                # Use tools if available for function calling support
+                tools = ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None
+
+                if use_reasoning:
+                    # Use reasoning-enabled generation with function calling
+                    if guild_id is not None:
+                        with use_guild_gemini_api_key(guild_id):
+                            response = await asyncio.to_thread(
+                                gemini_client.generate_text_with_reasoning_raw,
+                                prompt,
+                                _compose_system_prompt(system_prompt),
+                                model_name,
+                                thinking_budget=thinking_budget,
+                                tools=tools,
+                            )
+                        await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                    else:
+                        response = await asyncio.to_thread(
+                            gemini_client.generate_text_with_reasoning_raw,
+                            prompt,
+                            _compose_system_prompt(system_prompt),
+                            model_name,
+                            thinking_budget=thinking_budget,
+                            tools=tools,
+                        )
+                else:
+                    # Use regular generation with tools (for function calling)
+                    if guild_id is not None:
+                        with use_guild_gemini_api_key(guild_id):
+                            response = await asyncio.to_thread(
+                                gemini_client.generate_text,
+                                prompt,
+                                _compose_system_prompt(system_prompt),
+                                model_name,
+                                tools=tools,
+                            )
+                        await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                    else:
+                        response = await asyncio.to_thread(
                             gemini_client.generate_text,
                             prompt,
                             _compose_system_prompt(system_prompt),
                             model_name,
+                            tools=tools,
                         )
-                    await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
-                else:
-                    response_text = await asyncio.to_thread(
-                        gemini_client.generate_text,
-                        prompt,
-                        _compose_system_prompt(system_prompt),
-                        model_name,
-                    )
+
             except Exception as exc:
                 if guild_id is not None:
                     await asyncio.to_thread(raise_for_guild_gemini_exception, guild_id, exc)
                 raise
+
+        # Handle function calls if present (for non-reasoning mode, response is already text)
+        if use_reasoning:
+            function_calls = gemini_client.parse_function_calls(response)
+            if function_calls:
+                logger.info("Function calls detected: %s", function_calls)
+                tool_results = await handle_function_calls(response, channel)
+                if tool_results:
+                    # Build follow-up prompt with tool results
+                    follow_up_prompt = (
+                        f"{prompt}\n\n"
+                        f"Tool results:\n{tool_results}\n\n"
+                        "Based on the tool results above, provide your final response."
+                    )
+                    async with channel.typing():
+                        if guild_id is not None:
+                            with use_guild_gemini_api_key(guild_id):
+                                response_text = await asyncio.to_thread(
+                                    gemini_client.generate_text,
+                                    follow_up_prompt,
+                                    _compose_system_prompt(system_prompt),
+                                    model_name,
+                                    tools=tools,
+                                )
+                            await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                        else:
+                            response_text = await asyncio.to_thread(
+                                gemini_client.generate_text,
+                                follow_up_prompt,
+                                _compose_system_prompt(system_prompt),
+                                model_name,
+                                tools=tools,
+                            )
+                else:
+                    response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
+            else:
+                response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
+        else:
+            # For non-reasoning mode, response is already the text
+            response_text = response if isinstance(response, str) else ""
 
         if not response_text:
             return "No valid response received from Gemini."

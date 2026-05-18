@@ -8,6 +8,7 @@ import logging
 import re
 from typing import Any
 
+from google.genai import types
 import discord
 
 from config import client
@@ -368,5 +369,65 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
     
     summary = "Tool execution results:\n" + "\n".join(f"- {r}" for r in results)
     logger.info("Executed %d tool invocations: %s", len(invocations), results)
-    
+
     return summary
+
+
+# =============================================================================
+# Gemini Function Declarations for AI Tool Use
+# =============================================================================
+
+TOOLS_DECLARATION = [
+    types.FunctionDeclaration(
+        name="edit_message",
+        description="Edit an existing message in a Discord channel.",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "message_id": types.Schema(type="string", description="The Discord message ID to edit."),
+                "new_content": types.Schema(type="string", description="The new content for the message."),
+                "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID where the message exists. Defaults to current channel."),
+            },
+            required=["message_id", "new_content"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="reply_to_message",
+        description="Reply to an existing Discord message.",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "message_id": types.Schema(type="string", description="The Discord message ID to reply to."),
+                "content": types.Schema(type="string", description="The reply content."),
+                "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID. Defaults to current channel."),
+                "mention": types.Schema(type="boolean", description="Optional: Whether to mention the original message author. Default false."),
+            },
+            required=["message_id", "content"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="forward_message",
+        description="Forward a Discord message to another channel.",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "message_id": types.Schema(type="string", description="The source message ID to forward."),
+                "target_channel_id": types.Schema(type="string", description="The target channel ID to forward to."),
+                "channel_id": types.Schema(type="string", description="Optional: The source channel ID. Defaults to current channel."),
+            },
+            required=["message_id", "target_channel_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="get_message_content",
+        description="Read a Discord message's content and metadata.",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "message_id": types.Schema(type="string", description="The Discord message ID."),
+                "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID. Defaults to current channel."),
+            },
+            required=["message_id"],
+        ),
+    ),
+]

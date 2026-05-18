@@ -10,6 +10,14 @@ from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
 
+# Import tools declarations for function calling support
+try:
+    from discord_app.message_tools import TOOLS_DECLARATION
+    from discord_app.slash_commands import SLASH_TOOLS_DECLARATION
+    ALL_TOOLS_DECLARATION = TOOLS_DECLARATION + SLASH_TOOLS_DECLARATION
+except ImportError:
+    ALL_TOOLS_DECLARATION = []
+
 from config import (
     GEMINI_API_KEY,
     GEMINI_CHAT_MODEL,
@@ -87,12 +95,97 @@ class GeminiClient:
         model_name: str | None = None,
         *,
         api_key: str | None = None,
+        tools: list | None = None,
     ) -> str:
         return self._generate_text_with_model(
             model_name or GEMINI_CHAT_MODEL,
             prompt,
             system_instruction,
             api_key=api_key,
+            tools=tools,
+        )
+
+    def generate_text_with_reasoning(
+        self,
+        prompt: str,
+        system_instruction: str | None = None,
+        model_name: str | None = None,
+        *,
+        api_key: str | None = None,
+        thinking_budget: int = 1024,
+        tools: list | None = None,
+    ) -> str:
+        """Generate text with reasoning budget enabled.
+        
+        Args:
+            prompt: The user prompt.
+            system_instruction: Optional system instruction.
+            model_name: Optional model override.
+            api_key: Optional API key.
+            thinking_budget: Token budget for reasoning (default 1024). Higher values
+                enable more extensive reasoning on supported models.
+            tools: Optional list of tools for function calling.
+        
+        Returns:
+            Generated text string.
+        """
+        config = types.GenerateContentConfig(
+            temperature=GEMINI_TEMPERATURE,
+            top_p=GEMINI_TOP_P,
+            top_k=GEMINI_TOP_K,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            system_instruction=system_instruction,
+            thinking_budget=thinking_budget,
+            tools=tools,
+        )
+        try:
+            return self._generate_with_config(model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key)
+        except Exception as exc:
+            logger.warning("generate_text_with_reasoning failed, falling back to regular generate_text: %s", exc)
+            return self._generate_text_with_model(
+                model_name or GEMINI_CHAT_MODEL,
+                prompt,
+                system_instruction,
+                api_key=api_key,
+                tools=tools,
+            )
+
+    def generate_text_with_reasoning_raw(
+        self,
+        prompt: str,
+        system_instruction: str | None = None,
+        model_name: str | None = None,
+        *,
+        api_key: str | None = None,
+        thinking_budget: int = 1024,
+        tools: list | None = None,
+    ) -> object:
+        """Generate text with reasoning budget, returning the raw response object.
+        
+        This allows callers to access function calls from the response.
+        
+        Args:
+            prompt: The user prompt.
+            system_instruction: Optional system instruction.
+            model_name: Optional model override.
+            api_key: Optional API key.
+            thinking_budget: Token budget for reasoning (default 1024).
+            tools: Optional list of tools for function calling.
+        
+        Returns:
+            The raw Gemini response object.
+        """
+        config = types.GenerateContentConfig(
+            temperature=GEMINI_TEMPERATURE,
+            top_p=GEMINI_TOP_P,
+            top_k=GEMINI_TOP_K,
+            max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            system_instruction=system_instruction,
+            thinking_budget=thinking_budget,
+            tools=tools,
+        )
+        return self._generate_with_config(
+            model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key, return_raw_response=True
         )
 
     def generate_summary_text(
@@ -101,12 +194,14 @@ class GeminiClient:
         system_instruction: str | None = None,
         *,
         api_key: str | None = None,
+        tools: list | None = None,
     ) -> str:
         return self._generate_text_with_model(
             GEMINI_SUMMARY_MODEL,
             prompt,
             system_instruction,
             api_key=api_key,
+            tools=tools,
         )
 
     def generate_text_from_files(
@@ -187,6 +282,7 @@ class GeminiClient:
         system_instruction: str | None = None,
         *,
         api_key: str | None = None,
+        tools: list | None = None,
     ) -> str:
         config = types.GenerateContentConfig(
             temperature=GEMINI_TEMPERATURE,
@@ -194,6 +290,7 @@ class GeminiClient:
             top_k=GEMINI_TOP_K,
             max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
             system_instruction=system_instruction,
+            tools=tools,
         )
         return self._generate_with_config(model_name, prompt, config, api_key=api_key)
 
@@ -204,7 +301,20 @@ class GeminiClient:
         config: types.GenerateContentConfig,
         *,
         api_key: str | None = None,
-    ) -> str:
+        return_raw_response: bool = False,
+    ) -> str | object:
+        """Generate content with the given config.
+        
+        Args:
+            model_name: The model to use.
+            prompt: The prompt text.
+            config: GenerateContentConfig object.
+            api_key: Optional API key.
+            return_raw_response: If True, returns the full response object instead of just text.
+        
+        Returns:
+            Either the response text (str) or the full response object depending on return_raw_response.
+        """
         client = self._get_client(api_key)
         try:
             response = client.models.generate_content(
@@ -223,7 +333,33 @@ class GeminiClient:
                 )
             else:
                 raise
+        if return_raw_response:
+            return response
         return (response.text or "").strip()
+
+    def parse_function_calls(self, response) -> list[dict]:
+        """Extract function calls from Gemini response.
+        
+        Returns list of dicts: [{"name": "func_name", "args": {"arg": "value"}, ...}]
+        """
+        calls = []
+        for candidate in getattr(response, "candidates", []) or []:
+            content = getattr(candidate, "content", None)
+            if content is None:
+                continue
+            for part in getattr(content, "parts", []) or []:
+                fn = getattr(part, "function_call", None)
+                if fn is None:
+                    continue
+                name = getattr(fn, "name", "") or ""
+                args = {}
+                fn_args = getattr(fn, "args", None)
+                if fn_args:
+                    for k, v in fn_args.items():
+                        args[k] = v
+                if name:
+                    calls.append({"name": name, "args": args})
+        return calls
 
     def transcribe_audio(
         self,

@@ -43,6 +43,7 @@ GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "8192"))
 GEMINI_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
 GEMINI_TOP_P = float(os.getenv("GEMINI_TOP_P", "0.95"))
 GEMINI_TOP_K = int(os.getenv("GEMINI_TOP_K", "40"))
+GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))  # 0 = disabled, set to 1024+ for reasoning
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_API_KEY = os.getenv("SUPABASE_API_KEY")
