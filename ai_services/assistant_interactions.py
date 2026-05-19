@@ -137,7 +137,7 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             )
             return result if result else f"Failed to add context to thread {args['thread_id']}"
         elif func_name == "get_context":
-            result = await get_context(int(args["thread_id"]))
+            result = await get_context(args["thread_id"])
             return result if result else f"No context found for thread {args['thread_id']}"
         elif func_name == "reference_card":
             result = await reference_card(

@@ -66,9 +66,8 @@ async def edit_message(
                 embed.title = embed_title if embed_title is not None else (current_embed.title or "")
                 embed.description = embed_description if embed_description is not None else (current_embed.description or "")
                 embed.color = discord.Color(embed_color) if embed_color is not None else current_embed.color
-                # Preserve existing fields unless description replaced them entirely
-                if embed_description is None and current_embed.fields:
-                    for field in current_embed.fields:
+                # Always preserve fields from current embed when we have one
+                for field in current_embed.fields:
                         embed.add_field(name=field.name, value=field.value, inline=field.inline)
                 if current_embed.footer:
                     embed.set_footer(text=current_embed.footer.text, icon_url=current_embed.footer.icon_url)

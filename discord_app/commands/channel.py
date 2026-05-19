@@ -103,7 +103,7 @@ def register(channel_group, h) -> None:
                         files.append(await attachment.to_file())
                     except Exception:
                         pass
-                await target.send(content=msg.content if msg.content else None, embeds=msg.embeds, files=files if files else None)
+                await target.send(content=msg.content if msg.content else None, embeds=msg.embeds if msg.embeds else None, files=files if files else None)
 
         # Build imported_content from original messages (which include embed text)
         if original_messages:

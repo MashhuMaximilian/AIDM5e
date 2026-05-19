@@ -345,6 +345,9 @@ async def select_messages(
 ):
     messages: list[discord.Message] = []
 
+    if channel is None:
+        return None, "Channel object is None. Could not resolve the channel."
+
     if message_ids is not None:
         message_ids_list = message_ids.split(",")
         for message_id in message_ids_list:
@@ -365,8 +368,11 @@ async def select_messages(
             return None, "Invalid message ID format or message not found."
 
         history_messages = []
-        async for message in channel.history(after=start_message.created_at, before=end_message.created_at):
-            history_messages.append(message)
+        async for message in channel.history(limit=200):
+            if start_id <= message.id <= end_id:
+                history_messages.append(message)
+            if message.id > end_id:
+                break
 
         history_messages.reverse()
         messages = [start_message] + history_messages
