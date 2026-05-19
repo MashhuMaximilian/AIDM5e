@@ -113,10 +113,11 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             parts = [f"Message content: {result['text'] or '(no text)'} | Embeds: {len(result['embeds'])} card(s)"]
             if result.get("embeds"):
                 for i, e in enumerate(result["embeds"]):
-                    parts.append(f"  Card {i+1}: title='{e['title']}', description='{e['description'][:200]}...' color={e['color']}")
+                    desc = e["description"] if e["description"] else ""
+                    parts.append(f"  Card {i+1}: title='{e['title']}', description='{desc}', color={e['color']}")
                     if e.get("fields"):
                         for f in e["fields"]:
-                            parts.append(f"    Field: {f['name']} = {f['value'][:100]}")
+                            parts.append(f"    Field: {f['name']} = {f['value']}")
             parts.append(f"Attachments: {len(result['attachments'])}")
             return "\n".join(parts) if result else f"Failed to get message {args['message_id']}"
         elif func_name == "send_card":
@@ -157,11 +158,11 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
 
 async def handle_function_calls(response, channel) -> str:
     """Handle function calls from Gemini response and return a summary of results.
-    
+
     Args:
         response: The raw Gemini response object.
         channel: The Discord channel context.
-    
+
     Returns:
         A string summary of all function call results.
     """
@@ -175,7 +176,7 @@ async def handle_function_calls(response, channel) -> str:
         args = call.get("args", {})
         logger.info("Executing function call: %s with args %s", func_name, args)
         result = await _execute_function_call(func_name, args, channel)
-        results.append(f"- {func_name}: {result}")
+        results.append(f"[message_id: {args.get('message_id', 'unknown')}] {func_name}: {result}")
 
     return "\n".join(results)
 
