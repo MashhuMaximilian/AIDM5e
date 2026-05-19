@@ -368,11 +368,11 @@ async def select_messages(
             return None, "Invalid message ID format or message not found."
 
         history_messages = []
-        async for message in channel.history(limit=200):
+        async for message in channel.history(limit=None):
+            if message.id < start_id:
+                break  # Gone past our range, stop
             if start_id <= message.id <= end_id:
                 history_messages.append(message)
-            if message.id > end_id:
-                break
 
         history_messages.reverse()
         messages = [start_message] + history_messages

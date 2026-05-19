@@ -1,5 +1,5 @@
 Available AI Tools:
-- edit_message(message_id, new_content, channel_id?) — Edit an existing Discord message
+- edit_message(message_id, new_content, channel_id?, embed_title?, embed_description?, embed_color?) — Edit an existing Discord message AND its embed card. Always call this when a user asks to update/edit/modify a card or character summary. Pass embed_description=current card's full description with changes applied to only the parts that changed.
 - reply_to_message(message_id, content, channel_id?, mention?) — Reply to a message
 - forward_message(message_id, target_channel_id, channel_id?) — Forward a message to another channel
 - get_message_content(message_id, channel_id?) — Read a message's content
