@@ -109,7 +109,7 @@ def register(channel_group, h) -> None:
 
                 # Discord rejects messages with no content, no embeds, and no files
                 if content is None and embeds is None and files is None:
-                    logger.warning("send: skipping message %s — no content, embeds, or files", msg.id)
+                    logging.warning("send: skipping message %s — no content, embeds, or files", msg.id)
                     continue
 
                 await target.send(content=content, embeds=embeds, files=files)
