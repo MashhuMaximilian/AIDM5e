@@ -371,10 +371,22 @@ async def select_messages(
         async for message in channel.history(limit=None):
             if message.id < start_id:
                 break  # Gone past our range, stop
-            if start_id <= message.id <= end_id:
-                history_messages.append(message)
+            if message.id > end_id:
+                continue  # Not yet in range
+            if message.id == start_id or message.id == end_id:
+                continue  # Skip endpoints — fetched separately to avoid duplication
+            history_messages.append(message)
 
         history_messages.reverse()
+        # Deduplicate: history_messages may overlap with fetched endpoints if they happen to appear in iterator
+        seen_ids = {start_message.id, end_message.id}
+        deduped = []
+        for msg in history_messages:
+            if msg.id not in seen_ids:
+                deduped.append(msg)
+                seen_ids.add(msg.id)
+        history_messages = deduped
+
         messages = [start_message] + history_messages
         if start_id != end_id:
             messages.append(end_message)
