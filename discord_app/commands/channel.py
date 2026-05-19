@@ -103,7 +103,16 @@ def register(channel_group, h) -> None:
                         files.append(await attachment.to_file())
                     except Exception:
                         pass
-                await target.send(content=msg.content if msg.content else None, embeds=msg.embeds if msg.embeds else None, files=files if files else None)
+                content = msg.content if msg.content else None
+                embeds = msg.embeds if msg.embeds else None
+                files = files if files else None
+
+                # Discord rejects messages with no content, no embeds, and no files
+                if content is None and embeds is None and files is None:
+                    logger.warning("send: skipping message %s — no content, embeds, or files", msg.id)
+                    continue
+
+                await target.send(content=content, embeds=embeds, files=files)
 
         # Build imported_content from original messages (which include embed text)
         if original_messages:
