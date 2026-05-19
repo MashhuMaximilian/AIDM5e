@@ -109,8 +109,15 @@ def register(tree, h) -> None:
             )
 
         reference_chunks: list[str] = []
-        if any(value is not None for value in (start, end, message_ids, last_n)):
+
+        # Determine source channel/thread — default to current context
+        source_channel_obj = interaction.channel
+        if source_thread_id:
+            source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
+        elif source_channel:
             source_channel_obj = interaction.guild.get_channel(source_channel_id)
+
+        if any(value is not None for value in (start, end, message_ids, last_n)):
             # If source_thread specified, fetch from that thread instead
             if source_thread_id:
                 source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
@@ -128,13 +135,16 @@ def register(tree, h) -> None:
 
         has_message_refs = any(value is not None for value in (start, end, message_ids, last_n))
 
-        # If source_channel or source_thread is provided but no selectors, fetch ALL messages
+        # If no selectors provided, use the current channel/thread as source
         if not reference_chunks and not url:
-            if source_channel or source_thread:
-                # Fetch ALL messages as reference material (no limit)
+            source_channel_obj = interaction.channel
+            if source_thread_id:
+                source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
+            elif source_channel:
                 source_channel_obj = interaction.guild.get_channel(source_channel_id)
-                if source_thread_id:
-                    source_channel_obj = await interaction.guild.fetch_channel(source_thread_id)
+
+            if source_channel or source_thread or has_message_refs:
+                # Fetch ALL messages as reference material (no limit)
                 all_messages = []
                 async for msg in source_channel_obj.history(limit=None):
                     all_messages.append(msg)
@@ -145,7 +155,7 @@ def register(tree, h) -> None:
                     reference_material.append(formatted)
                 reference_chunks.extend(reference_material)
             else:
-                await interaction.followup.send("You must provide message selectors and/or a public URL, or specify a source channel/thread.")
+                await interaction.followup.send("Please provide message selectors (start/end, message IDs, last_n, or a source channel/thread).")
                 return
 
         if url and not has_message_refs:
