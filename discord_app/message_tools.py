@@ -17,6 +17,61 @@ from config import client
 logger = logging.getLogger(__name__)
 
 
+# Truncation markers that indicate an abruptly ended description
+_TRUNCATION_MARKERS = ('---', '### ', '`', '**', '[')
+
+
+def _detect_and_merge_truncated_description(
+    new_description: str | None,
+    current_description: str | None,
+) -> str | None:
+    """Detect if new_description appears truncated and merge with current if needed.
+
+    A description is considered truncated if:
+    1. It ends with incomplete markers ('---', '### ', '`', '**', '[')
+    2. OR it is less than 50% the length of current_description
+       AND current_description doesn't itself end with truncation markers
+
+    When truncated, finds the longest common prefix and appends the missing tail
+    from current_description, then closes any unclosed code blocks.
+
+    Returns the (possibly merged) description to use.
+    """
+    if new_description is None:
+        return current_description
+
+    if not current_description:
+        return new_description
+
+    ends_incomplete = any(new_description.endswith(marker) for marker in _TRUNCATION_MARKERS)
+    too_short = len(new_description) < 0.5 * len(current_description)
+    current_ends_incomplete = any(current_description.endswith(marker) for marker in _TRUNCATION_MARKERS)
+
+    # Truncated if ends with incomplete markers, OR (too short relative to current AND current isn't already truncated)
+    is_truncated = ends_incomplete or (too_short and not current_ends_incomplete)
+
+    if not is_truncated:
+        return new_description
+
+    # Find longest common prefix to determine where new diverges from current
+    lcp_end = 0
+    min_len = min(len(new_description), len(current_description))
+    for i in range(min_len):
+        if new_description[i] == current_description[i]:
+            lcp_end = i + 1
+        else:
+            break
+
+    # Append the missing tail from current
+    merged = new_description + current_description[lcp_end:]
+
+    # Fix unclosed code blocks: if odd number of ``` in merged, append closing ```
+    if merged.count('```') % 2 != 0:
+        merged += '\n```'
+
+    return merged
+
+
 # Pattern to match tool invocations like [AIDM-TOOL: edit_message | message_id=123456 | new_content=Hello world]
 TOOL_INVOCATION_RE = re.compile(
     r"\[AIDM-TOOL:\s*(\w+)\s*(?:\|(?:\s*\w+\s*=\s*(?:[^|\]]+))*)?\]",
@@ -63,8 +118,11 @@ async def edit_message(
             current_embed = message.embeds[0] if message.embeds else None
             embed = discord.Embed()
             if current_embed:
-                embed.title = embed_title if embed_title is not None else (current_embed.title or "")
-                embed.description = embed_description if embed_description is not None else (current_embed.description or "")
+                # Title: preserve current title only when None is explicitly passed
+                embed.title = current_embed.title if embed_title is None else embed_title
+                embed.description = _detect_and_merge_truncated_description(
+                    embed_description, current_embed.description
+                )
                 embed.color = discord.Color(embed_color) if embed_color is not None else current_embed.color
                 # Always preserve fields from current embed when we have one
                 for field in current_embed.fields:
