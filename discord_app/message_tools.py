@@ -29,8 +29,12 @@ def _detect_and_merge_truncated_description(
 
     A description is considered truncated if:
     1. It ends with incomplete markers ('---', '### ', '`', '**', '[')
-    2. OR it is less than 50% the length of current_description
-       AND current_description doesn't itself end with truncation markers
+    2. OR it is less than 25% of current_description's length (i.e., AI sent a partial
+       update like just the HP line without the full card — we must merge to avoid
+       losing the rest of the card)
+    3. OR new_description is a strict prefix of current_description (matching byte-for-byte
+       at the start) and current_description doesn't end with truncation markers (this
+       catches the case where the AI started generating the new card but stopped mid-output)
 
     When truncated, finds the longest common prefix and appends the missing tail
     from current_description, then closes any unclosed code blocks.
@@ -44,11 +48,20 @@ def _detect_and_merge_truncated_description(
         return new_description
 
     ends_incomplete = any(new_description.endswith(marker) for marker in _TRUNCATION_MARKERS)
-    too_short = len(new_description) < 0.5 * len(current_description)
-    current_ends_incomplete = any(current_description.endswith(marker) for marker in _TRUNCATION_MARKERS)
+    # If new is less than 25% of current, it's a partial update — must merge to avoid data loss
+    too_short = len(new_description) < 0.25 * len(current_description)
 
-    # Truncated if ends with incomplete markers, OR (too short relative to current AND current isn't already truncated)
-    is_truncated = ends_incomplete or (too_short and not current_ends_incomplete)
+    # True if new is a strict prefix of current (byte-for-byte match at start, then diverges)
+    new_is_prefix_of_current = (
+        len(new_description) < len(current_description)
+        and current_description.startswith(new_description)
+    )
+
+    # Truncated if:
+    # - ends with incomplete markers (---, ###, `, etc.)
+    # - OR too short relative to current (partial update like just HP line)
+    # - OR new is a strict prefix of current (AI started writing new card but stopped)
+    is_truncated = ends_incomplete or too_short or new_is_prefix_of_current
 
     if not is_truncated:
         return new_description
