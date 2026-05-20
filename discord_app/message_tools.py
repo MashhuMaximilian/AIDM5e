@@ -39,6 +39,12 @@ def _detect_and_merge_truncated_description(
     When truncated, finds the longest common prefix and appends the missing tail
     from current_description, then closes any unclosed code blocks.
 
+    However, when lcp_end == 0 (no shared prefix) and the new description is a
+    short partial (just one section like HP bar), blind concatenation would corrupt
+    the card by prepending the partial to the full card. In this case, we detect
+    which section the partial belongs to and REPLACE only that section in current,
+    rather than blindly prepending.
+
     Returns the (possibly merged) description to use.
     """
     if new_description is None:
@@ -75,6 +81,56 @@ def _detect_and_merge_truncated_description(
         else:
             break
 
+    # CASE: lcp_end == 0 with a short partial update.
+    # Blind concatenation (partial + full card) would corrupt the card.
+    # Instead, find which section the partial belongs to and replace only that section.
+    if lcp_end == 0 and too_short and len(new_description) < 200:
+        partial = new_description.strip()
+
+        # Try to find a matching section in current by looking for the partial's
+        # first significant line. Check for section headers or HP/resource patterns.
+        # Strategy: find lines in current that partially match the beginning of partial.
+        partial_first_line = partial.split('\n')[0].strip()
+
+        if partial_first_line:
+            # For HP/resource partials: find the line in current that starts the same way
+            # and replace from there to the next section boundary (---, ###, or end)
+            current_lines = current_description.split('\n')
+            for i, line in enumerate(current_lines):
+                # Check if this line starts the same way as the partial's first line
+                # (allowing for leading whitespace/bullets differences)
+                line_stripped = line.strip()
+                if line_stripped and partial_first_line.strip():
+                    # Check if partial's first line appears as a substring at the start of this line
+                    if line_stripped.startswith(partial_first_line.strip()[:10]) or \
+                       (len(partial_first_line) > 5 and partial_first_line[:10] in line_stripped):
+                        # Found the section. Replace from this line to the next section marker or end.
+                        # Find next section boundary
+                        j = i + 1
+                        section_end = len(current_lines)
+                        while j < len(current_lines):
+                            next_line = current_lines[j].strip()
+                            if next_line.startswith('---') or next_line.startswith('### '):
+                                section_end = j
+                                break
+                            j += 1
+
+                        # Replace section with partial
+                        new_section = partial.rstrip('\n')
+                        merged_lines = current_lines[:i] + [new_section] + current_lines[section_end:]
+                        merged = '\n'.join(merged_lines)
+
+                        # Fix unclosed code blocks
+                        if merged.count('```') % 2 != 0:
+                            merged += '\n```'
+
+                        return merged
+
+        # If we couldn't find a matching section, preserve current entirely
+        # Don't risk corruption by blindly concatenating
+        return current_description
+
+    # Standard case: merge using longest common prefix
     # Append the missing tail from current
     merged = new_description + current_description[lcp_end:]
 
