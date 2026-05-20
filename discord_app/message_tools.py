@@ -521,8 +521,20 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
                 
                 content = await get_message_content(message_id, source_channel_id)
                 if content["success"]:
-                    preview = content["text"][:200] + "..." if len(content["text"]) > 200 else content["text"]
-                    results.append(f"Fetched message {message_id}: {preview}")
+                    # Include full card content — embed descriptions are critical for card edits
+                    display_parts = [f"Message ID: {message_id}"]
+                    if content.get("text"):
+                        display_parts.append(f"Message content:\n{content['text']}")
+                    # Include full embed descriptions (not truncated — AI needs the full card text)
+                    if content.get("embeds"):
+                        for i, embed in enumerate(content["embeds"]):
+                            if embed.get("title"):
+                                display_parts.append(f"Embed {i+1} title: {embed['title']}")
+                            if embed.get("description"):
+                                display_parts.append(f"Embed {i+1} description:\n{embed['description']}")
+                            if embed.get("color"):
+                                display_parts.append(f"Embed {i+1} color: #{embed['color']:06x}")
+                    results.append("\n".join(display_parts))
                 else:
                     results.append(f"Failed to fetch message {message_id}: {content.get('error')}")
             
@@ -547,7 +559,25 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
 TOOLS_DECLARATION = [
     types.FunctionDeclaration(
         name="edit_message",
-        description="Edit an existing message AND its embed card in a Discord channel. Use when you need to update a card's title, body text, color, or any field.",
+        description="""Edit an existing message AND its embed card in a Discord channel.
+
+IMPORTANT — How to use for character card updates:
+1. FIRST call get_message_content to read the current card.
+2. Copy the EXACT embed_description from the card you read.
+3. Modify ONLY the specific fields the user requested — copy everything else verbatim.
+4. Send the complete embed_description with all original content preserved.
+
+CRITICAL RULE: Do NOT generate new stat values or invent content. Copy every field you did not change exactly as it appears in the card you read.
+
+CORRECT USAGE:
+  - Read card → see "HP: 130/130" → user says "Veton took 80 damage" → send embed_description with "HP: 50/130" and ALL OTHER content unchanged
+  - Read card → user says "add Poisoned condition" → send embed_description with conditions list updated and ALL OTHER content unchanged
+
+INCORRECT USAGE:
+  - Read card → then IGNORE it and generate an entirely new card with different stat values for fields the user didn't mention
+  - Send only the changed fields as a partial body — always send the full card description with only those fields modified
+
+The embed_description is the FULL card body as it should appear after your edit. Preserve everything from the original card and only change what was requested.""",
         parameters=types.Schema(
             type="object",
             properties={
@@ -555,7 +585,7 @@ TOOLS_DECLARATION = [
                 "new_content": types.Schema(type="string", description="The new plain-text content for the message (line above the card)."),
                 "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID where the message exists. Defaults to current channel."),
                 "embed_title": types.Schema(type="string", description="Optional: New title for the embed card."),
-                "embed_description": types.Schema(type="string", description="Optional: New body/description text for the embed card. Supports full card content."),
+                "embed_description": types.Schema(type="string", description="Optional: New body/description text for the embed card. Must be the complete updated card — copy all existing content and only modify what the user requested."),
                 "embed_color": types.Schema(type="string", description="Optional: Color as hex string (e.g. '0x1f8b4c' for green, '0xe74c3c' for red, '0x3498db' for blue)."),
             },
             required=["message_id", "new_content"],
