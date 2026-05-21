@@ -4,6 +4,8 @@ import asyncio
 import logging
 from pathlib import Path
 
+from google.genai import types
+
 from ai_services.guild_api_keys import (
     raise_for_guild_gemini_exception,
     record_guild_gemini_key_success,
@@ -16,6 +18,23 @@ from .gemini_client import gemini_client, ALL_TOOLS_DECLARATION
 
 
 logger = logging.getLogger(__name__)
+
+
+# Restricted tool set for the follow-up turn: only edit_message, no get_context
+# This prevents the AI from "escaping" to get_context while still allowing it to call edit_message
+def _build_restricted_tools() -> list:
+    """Build a restricted tools list containing only edit_message declarations."""
+    try:
+        from discord_app.message_tools import TOOLS_DECLARATION
+        edit_only = [d for d in TOOLS_DECLARATION if d.name == "edit_message"]
+        if edit_only:
+            return [types.Tool(function_declarations=edit_only)]
+    except ImportError:
+        pass
+    return []
+
+
+_FOLLOWUP_TOOLS = _build_restricted_tools()
 
 
 _MESSAGE_TOOLS_PATH = Path(__file__).parent.parent / "prompts" / "system" / "message_tools_prompt.txt"
@@ -434,7 +453,7 @@ async def get_assistant_response(
                                     follow_up_prompt,
                                     _compose_system_prompt(system_prompt),
                                     model_name,
-                                    tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
+                                    tools=_FOLLOWUP_TOOLS if _FOLLOWUP_TOOLS else None,
                                     return_raw_response=True,
                                 )
                             await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
@@ -444,7 +463,7 @@ async def get_assistant_response(
                                 follow_up_prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
-                                tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
+                                tools=_FOLLOWUP_TOOLS if _FOLLOWUP_TOOLS else None,
                                 return_raw_response=True,
                             )
                         # Parse and handle any follow-up function calls (e.g. edit_message after reading)
