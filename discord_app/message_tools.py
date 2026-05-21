@@ -561,23 +561,36 @@ TOOLS_DECLARATION = [
         name="edit_message",
         description="""Edit an existing message AND its embed card in a Discord channel.
 
-IMPORTANT — How to use for character card updates:
-1. FIRST call get_message_content to read the current card.
-2. Copy the EXACT embed_description from the card you read.
-3. Modify ONLY the specific fields the user requested — copy everything else verbatim.
-4. Send the complete embed_description with all original content preserved.
+HOW TO USE FOR CHARACTER CARD EDITS — FOLLOW THIS EXACT SEQUENCE:
+1. FIRST call get_message_content to read the current card
+2. The card body will be returned with a "--- CARD BODY ---" section
+3. Copy the EXACT text from the "Body:" section — do not summarize or rephrase it
+4. Modify ONLY the specific field the user requested (e.g. HP value, conditions list)
+5. Paste the copied body into embed_description and only change what was asked
+6. Call edit_message with the complete embed_description
 
-CRITICAL RULE: Do NOT generate new stat values or invent content. Copy every field you did not change exactly as it appears in the card you read.
+CRITICAL — DO NOT HALLUCINATE VALUES:
+- Do NOT generate any stat, number, or value that wasn't in the card you read
+- Do NOT recalculate HP, AC, ability scores, or any other field
+- Copy every value directly from the card body you read
+- If you see "HP: 130/130" in the card, you MUST preserve "130/130" for all unchanged fields
 
-CORRECT USAGE:
-  - Read card → see "HP: 130/130" → user says "Veton took 80 damage" → send embed_description with "HP: 50/130" and ALL OTHER content unchanged
-  - Read card → user says "add Poisoned condition" → send embed_description with conditions list updated and ALL OTHER content unchanged
+CORRECT EXAMPLE:
+  - Card body shows: "HP: 130/130 | AC: 16 | STR: 18"
+  - User says: "Veton took 80 damage"
+  - You call: edit_message(message_id=..., embed_description="...HP: 50/130...AC: 16...STR: 18...")
+  - Notice HP changed to 50/130 but AC and STR are copied exactly from the card
 
-INCORRECT USAGE:
-  - Read card → then IGNORE it and generate an entirely new card with different stat values for fields the user didn't mention
-  - Send only the changed fields as a partial body — always send the full card description with only those fields modified
+INCORRECT EXAMPLE:
+  - Card body shows: "HP: 130/130 | AC: 16 | STR: 18"
+  - User says: "Veton took 80 damage"
+  - You call: edit_message(message_id=..., embed_description="...HP: 50/180...AC: 15...STR: 16...")
+  - WRONG: AC and STR values were invented, not copied from the card
 
-The embed_description is the FULL card body as it should appear after your edit. Preserve everything from the original card and only change what was requested.""",
+SEND THE FULL CARD: The embed_description must be the complete card body with only the requested changes. Never send only the changed fields.
+
+If the user says "add Poisoned condition" — copy the entire card body and add Poisoned to the conditions section, keeping everything else identical.
+If the user says "Veton took 60 damage" — copy the entire card body, reduce only the HP value, keep every other field exactly the same.""",
         parameters=types.Schema(
             type="object",
             properties={

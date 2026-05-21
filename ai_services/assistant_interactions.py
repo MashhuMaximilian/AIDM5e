@@ -110,16 +110,27 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
                 int(args["message_id"]),
                 int(args.get("channel_id", channel.id)),
             )
-            parts = [f"Message content: {result['text'] or '(no text)'} | Embeds: {len(result['embeds'])} card(s)"]
+            if not result["success"]:
+                return f"Failed to get message {args['message_id']}: {result.get('error', 'unknown error')}"
+            parts = [f"Message ID: {args['message_id']} | Author: {result['author']} | Timestamp: {result['timestamp']}"]
+            if result.get("text"):
+                parts.append(f"--- Message Text ---\n{result['text']}")
+            # Include FULL card body with a clear header so the follow-up prompt can extract it
             if result.get("embeds"):
                 for i, e in enumerate(result["embeds"]):
-                    desc = e["description"] if e["description"] else ""
-                    parts.append(f"  Card {i+1}: title='{e['title']}', description='{desc}', color={e['color']}")
+                    parts.append(f"\n--- CARD {i+1} BODY (copy this EXACTLY, only modify what user requested) ---")
+                    if e.get("title"):
+                        parts.append(f"Title: {e['title']}")
+                    if e.get("description"):
+                        parts.append(f"Body:\n{e['description']}")
+                    if e.get("color"):
+                        parts.append(f"Color: #{e['color']:06x}")
                     if e.get("fields"):
                         for f in e["fields"]:
-                            parts.append(f"    Field: {f['name']} = {f['value']}")
+                            parts.append(f"Field: {f['name']} = {f['value']}")
+            parts.append(f"\n--- END CARD DATA ---")
             parts.append(f"Attachments: {len(result['attachments'])}")
-            return "\n".join(parts) if result else f"Failed to get message {args['message_id']}"
+            return "\n".join(parts)
         elif func_name == "send_card":
             result = await send_card(
                 int(args["channel_id"]),
@@ -345,11 +356,40 @@ async def get_assistant_response(
 
                     ids_examples = ", ".join(f"`{mid}`" for mid in mentioned_ids) if mentioned_ids else "[message_id]"
 
+                    # Extract card bodies from tool results for injection into follow-up prompt
+                    card_bodies = []
+                    in_card = False
+                    current_card = []
+                    for line in tool_results.split('\n'):
+                        if '--- CARD' in line and 'BODY' in line:
+                            in_card = True
+                            current_card = [line]
+                        elif in_card:
+                            if line.strip() == '--- END CARD DATA ---':
+                                card_bodies.append('\n'.join(current_card))
+                                in_card = False
+                                current_card = []
+                            else:
+                                current_card.append(line)
+                    
+                    card_injection = ""
+                    if card_bodies:
+                        card_injection = (
+                            "\n\n" + "\n\n".join(card_bodies) + "\n\n"
+                            "CARD CONTENT ABOVE — copy it into your edit_message call. "
+                            "You MUST preserve every field from the card body above except the ones the user explicitly changed. "
+                            "If you see HP or stat values in the card above, copy them exactly — do not recalculate or generate new values.\n\n"
+                            "VERIFICATION STEP before you call edit_message:\n"
+                            "  1. Confirm your embed_description contains EVERY field from the card body above\n"
+                            "  2. Confirm the values you want to change are correct\n"
+                            "  3. Confirm unchanged values are IDENTICAL to what is in the card body above\n\n"
+                        )
+                    
                     follow_up_prompt = (
                         f"{prompt}\n\n"
                         f"Tool results:\n{tool_results}\n\n"
                         "EXPLICIT INSTRUCTION: You have just read the content of message(s) with ID(s): "
-                        f"{ids_examples}. These are Discord cards you need to update.\n\n"
+                        f"{ids_examples}. These are Discord cards you need to update.{card_injection}"
                         "Action required: For EACH message that needs updating, you MUST call "
                         "the `edit_message` tool with the correct message_id — do NOT call "
                         "`get_message_content` again, you already have the content.\n\n"
