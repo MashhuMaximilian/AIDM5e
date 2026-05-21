@@ -402,61 +402,51 @@ async def get_assistant_response(
                         "Example of wrong behavior: \"Veton takes 80 damage! Here's the updated card...\"\n"
                         "Example of correct behavior: call `edit_message(message_id=150..., embed_title=..., embed_description=...)` then say \"Cards updated.\""
                     )
-                    async with channel.typing():
-                        if guild_id is not None:
-                            with use_guild_gemini_api_key(guild_id):
-                                follow_up_response = await asyncio.to_thread(
-                                    gemini_client.generate_text,
-                                    follow_up_prompt,
-                                    _compose_system_prompt(system_prompt),
-                                    model_name,
-                                    tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
-                                    return_raw_response=True,
-                                )
-                            await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
-                        else:
-                            follow_up_response = await asyncio.to_thread(
-                                gemini_client.generate_text,
-                                follow_up_prompt,
-                                _compose_system_prompt(system_prompt),
-                                model_name,
-                                tools=ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None,
-                                return_raw_response=True,
+                    # IMPORTANT: Do NOT pass tools in the follow-up turn.
+                    # The AI already has the card content from the tool results above.
+                    # Passing tools lets the AI call get_context again instead of edit_message.
+                    # The system prompt already tells it what to do — it should respond directly.
+                    follow_up_response = await asyncio.to_thread(
+                        gemini_client.generate_text,
+                        follow_up_prompt,
+                        _compose_system_prompt(system_prompt),
+                        model_name,
+                        tools=None,  # No tools — AI must respond directly, not call more functions
+                    )
+                    # Parse function calls from follow-up response (edit_message is the expected outcome)
+                    extra_calls = gemini_client.parse_function_calls(follow_up_response)
+                    if extra_calls:
+                        logger.info("Follow-up function calls: %s", extra_calls)
+                        extra_results = await handle_function_calls(follow_up_response, channel)
+                        if extra_results:
+                            follow_up_prompt2 = (
+                                f"Previous tool results:\n{extra_results}\n\n"
+                                "FINAL INSTRUCTION: All edits should now be complete. "
+                                "If any `edit_message` calls were made above, confirm what was changed "
+                                "with a single short reply (e.g. 'Updated 2 cards.'). "
+                                "Do NOT narrate, describe stats, or generate new content."
                             )
-                        # Parse and handle any follow-up function calls (e.g. edit_message after reading)
-                        extra_calls = gemini_client.parse_function_calls(follow_up_response)
-                        if extra_calls:
-                            logger.info("Follow-up function calls: %s", extra_calls)
-                            extra_results = await handle_function_calls(follow_up_response, channel)
-                            if extra_results:
-                                follow_up_prompt2 = (
-                                    f"Previous tool results:\n{extra_results}\n\n"
-                                    "FINAL INSTRUCTION: All edits should now be complete. "
-                                    "If any `edit_message` calls were made above, confirm what was changed "
-                                    "with a single short reply (e.g. 'Updated 2 cards.'). "
-                                    "Do NOT narrate, describe stats, or generate new content."
-                                )
-                                async with channel.typing():
-                                    if guild_id is not None:
-                                        with use_guild_gemini_api_key(guild_id):
-                                            response_text = await asyncio.to_thread(
-                                                gemini_client.generate_text,
-                                                follow_up_prompt2,
-                                                _compose_system_prompt(system_prompt),
-                                                model_name,
-                                            )
-                                        await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
-                                    else:
+                            async with channel.typing():
+                                if guild_id is not None:
+                                    with use_guild_gemini_api_key(guild_id):
                                         response_text = await asyncio.to_thread(
                                             gemini_client.generate_text,
                                             follow_up_prompt2,
                                             _compose_system_prompt(system_prompt),
                                             model_name,
                                         )
-                            else:
-                                response_text = (follow_up_response.text or "").strip() if hasattr(follow_up_response, "text") else str(follow_up_response)
+                                    await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
+                                else:
+                                    response_text = await asyncio.to_thread(
+                                        gemini_client.generate_text,
+                                        follow_up_prompt2,
+                                        _compose_system_prompt(system_prompt),
+                                        model_name,
+                                    )
                         else:
                             response_text = (follow_up_response.text or "").strip() if hasattr(follow_up_response, "text") else str(follow_up_response)
+                    else:
+                        response_text = (follow_up_response.text or "").strip() if hasattr(follow_up_response, "text") else str(follow_up_response)
                 else:
                     response_text = (response.text or "").strip() if hasattr(response, "text") else str(response)
             else:
