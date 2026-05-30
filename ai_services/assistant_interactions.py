@@ -12,7 +12,7 @@ from ai_services.guild_api_keys import (
     use_guild_gemini_api_key,
 )
 from config import AIDM_PROMPT_PATH, client
-from data_store.db_repository import get_memory_name
+from data_store.db_repository import get_guild_tools_mode, get_memory_name
 from discord_app.shared_functions import send_response_in_chunks
 from .gemini_client import gemini_client, ALL_TOOLS_DECLARATION
 
@@ -329,9 +329,14 @@ async def get_assistant_response(
         guild = getattr(channel, "guild", None)
         guild_id = getattr(guild, "id", None)
 
-        # Always go through the function-call path when tools are available
-        tools = ALL_TOOLS_DECLARATION if ALL_TOOLS_DECLARATION else None
-        if tools:
+        # Check guild tools mode — if 'off', pass no tools (chat-only mode)
+        if guild_id is not None:
+            tools_mode = await asyncio.to_thread(get_guild_tools_mode, guild_id)
+        else:
+            tools_mode = 'on'
+
+        effective_tools = ALL_TOOLS_DECLARATION if (tools_mode == 'on' and ALL_TOOLS_DECLARATION) else None
+        if effective_tools:
             # Raw response path — enables function call detection
             response_text = None
             try:
@@ -344,7 +349,7 @@ async def get_assistant_response(
                                 _compose_system_prompt(system_prompt),
                                 model_name,
                                 thinking_budget=thinking_budget,
-                                tools=tools,
+                                tools=effective_tools,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
@@ -354,7 +359,7 @@ async def get_assistant_response(
                             _compose_system_prompt(system_prompt),
                             model_name,
                             thinking_budget=thinking_budget,
-                            tools=tools,
+                            tools=effective_tools,
                         )
                 else:
                     # Non-reasoning path: use generate_text with return_raw_response=True
@@ -365,7 +370,7 @@ async def get_assistant_response(
                                 prompt,
                                 _compose_system_prompt(system_prompt),
                                 model_name,
-                                tools=tools,
+                                tools=effective_tools,
                                 return_raw_response=True,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
@@ -375,7 +380,7 @@ async def get_assistant_response(
                             prompt,
                             _compose_system_prompt(system_prompt),
                             model_name,
-                            tools=tools,
+                            tools=effective_tools,
                             return_raw_response=True,
                         )
             except Exception as exc:
@@ -443,7 +448,11 @@ async def get_assistant_response(
                         "Do NOT: re-read content, ask questions, narrate character stats, "
                         "or send new messages. ONLY call `edit_message` then confirm.\n\n"
                         "Example of wrong behavior: \"Veton takes 80 damage! Here's the updated card...\"\n"
-                        "Example of correct behavior: call `edit_message(message_id=150..., embed_title=..., embed_description=...)` then say \"Cards updated.\""
+                        "Example of correct behavior: call `edit_message(message_id=150..., embed_title=..., embed_description=...)` then say \"Cards updated.\"\n\n"
+                        "IMPORTANT — answering questions vs. new edit requests:\n"
+                        "  - If the user's message asks a question (? or what/how/why/who/where/when/can/could), ANSWER DIRECTLY from the card content and conversation above. Do NOT call `edit_message` or any other tool. The card content you just read is sufficient to answer.\n"
+                        "  - Only call `edit_message` if the user explicitly asks to update, change, add, or edit something in a card.\n"
+                        "  - When answering a question, reference the card content directly — do not mention tool calls or internal IDs.\n"
                     )
                     async with channel.typing():
                         if guild_id is not None:

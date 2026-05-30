@@ -162,6 +162,9 @@ def ensure_runtime_schema() -> None:
 
 def _ensure_guild(cur: psycopg.Cursor, discord_guild_id: int, name: str, dm_role_name: str | None = None) -> str:
     cur.execute(
+        "ALTER TABLE guilds ADD COLUMN IF NOT EXISTS tools_mode TEXT NOT NULL DEFAULT 'on'"
+    )
+    cur.execute(
         """
         insert into guilds (discord_guild_id, name, dm_role_name)
         values (%s, %s, %s)
@@ -174,6 +177,33 @@ def _ensure_guild(cur: psycopg.Cursor, discord_guild_id: int, name: str, dm_role
         (discord_guild_id, name, dm_role_name or DM_ROLE_NAME),
     )
     return str(cur.fetchone()["id"])
+
+
+def get_guild_tools_mode(discord_guild_id: int) -> str:
+    """Returns 'on' or 'off', defaults to 'on'."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT tools_mode FROM guilds WHERE discord_guild_id = %s",
+                (discord_guild_id,),
+            )
+            row = cur.fetchone()
+    return row["tools_mode"] if row and row["tools_mode"] else "on"
+
+
+def set_guild_tools_mode(discord_guild_id: int, mode: str) -> None:
+    """Upserts the tools mode for a guild."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE guilds ADD COLUMN IF NOT EXISTS tools_mode TEXT NOT NULL DEFAULT 'on'"
+            )
+            _ensure_guild(cur, discord_guild_id, "", DM_ROLE_NAME)
+            cur.execute(
+                "UPDATE guilds SET tools_mode = %s WHERE discord_guild_id = %s",
+                (mode, discord_guild_id),
+            )
+        conn.commit()
 
 
 def _ensure_campaign(cur: psycopg.Cursor, guild_id: str, discord_category_id: int, name: str) -> str:

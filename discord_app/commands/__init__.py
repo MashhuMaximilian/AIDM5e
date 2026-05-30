@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from discord import app_commands
 
-from . import ask, channel, context, create, encounter, generate, memory, settings, standalone
+from . import ask, channel, context, create, encounter, generate, memory, set_, settings, standalone
 from ._base import build_helpers, register_tree_error_handler
 
 
@@ -14,6 +14,7 @@ def setup_commands(tree, get_assistant_response, module_globals: dict) -> None:
     memory_group = app_commands.Group(name="memory", description="Memory management commands.")
     context_group = app_commands.Group(name="context", description="Context helpers for summaries and transcripts.")
     settings_group = app_commands.Group(name="settings", description="Campaign settings commands.")
+    set_group = app_commands.Group(name="set", description="Server-wide settings.")
     generate_group = app_commands.Group(name="generate", description="Image and media generation commands.")
     create_group = app_commands.Group(name="create", description="Character creation workflows.")
     encounter_group = app_commands.Group(name="encounter", description="DM-only encounter workspace helpers.")
@@ -25,6 +26,7 @@ def setup_commands(tree, get_assistant_response, module_globals: dict) -> None:
     channel.register(channel_group, h)
     memory.register(memory_group, h)
     settings.register(settings_group, h)
+    set_.register(set_group, h)
     context.register(context_group, h)
     generate.register(generate_group, h)
 
@@ -37,4 +39,5 @@ def setup_commands(tree, get_assistant_response, module_globals: dict) -> None:
     tree.add_command(encounter_group)
     tree.add_command(memory_group)
     tree.add_command(settings_group)
+    tree.add_command(set_group)
     tree.add_command(generate_group)

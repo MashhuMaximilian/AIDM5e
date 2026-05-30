@@ -419,6 +419,195 @@ async def get_message_content(message_id: int, channel_id: int) -> dict[str, Any
         return result
 
 
+async def merge_card_delta(
+    thread_id: int,
+    card_title: str,
+    *,
+    hp_delta: int | None = None,
+    temp_hp_delta: int | None = None,
+    conditions_add: list[str] | None = None,
+    conditions_remove: list[str] | None = None,
+    stat_changes: dict[str, int] | None = None,
+    full_replacement: str | None = None,
+) -> str:
+    """
+    Apply a targeted delta update to a card in a workspace thread.
+
+    This is the preferred way to update character cards — pass explicit changes
+    (hp_delta, conditions_add, stat_changes) and the server applies them to the
+    existing card without requiring the AI to reconstruct the full card body.
+
+    Args:
+        thread_id: Discord thread/channel ID where the card exists
+        card_title: Title of the card to update (e.g. "Character Summary", "Skills & Actions")
+        hp_delta: Change to apply to HP (e.g. -80 to remove 80 HP, +20 to heal 20)
+        temp_hp_delta: Change to apply to temp HP
+        conditions_add: Conditions to add (e.g. ["Poisoned", "Prone"])
+        conditions_remove: Conditions to remove from the character
+        stat_changes: Dict of stat changes, e.g. {"STR": 19, "DEX": 14}. Changes cascade to modifiers/skills.
+        full_replacement: If delta is too complex, pass the complete new card body instead
+
+    Returns:
+        Confirmation string or error message
+    """
+    try:
+        channel = client.get_channel(thread_id)
+        if not channel:
+            return f"Error: Could not find channel {thread_id}"
+
+        # Discover the card message by title
+        card_message = None
+        async for msg in channel.history(limit=50):
+            for embed in msg.embeds:
+                if embed.title and card_title.lower() in embed.title.lower():
+                    card_message = msg
+                    break
+            if card_message:
+                break
+
+        if not card_message:
+            return f"Error: Could not find a card with title '{card_title}' in thread {thread_id}"
+
+        current_content = await get_message_content(card_message.id, thread_id)
+        if not current_content["success"]:
+            return f"Error: Could not read card content: {current_content.get('error')}"
+
+        # Build updated content
+        new_description = None
+
+        if full_replacement is not None:
+            new_description = full_replacement
+        else:
+            # Parse and update the card
+            for embed in current_content.get("embeds", []):
+                if embed.get("description"):
+                    desc = embed["description"]
+                    original_desc = desc
+
+                    # Apply HP delta
+                    if hp_delta is not None:
+                        hp_match = re.search(r"HP:\s*(\d+)\s*/\s*(\d+)", desc)
+                        if hp_match:
+                            current_hp = int(hp_match.group(1))
+                            max_hp = int(hp_match.group(2))
+                            new_hp = max(0, current_hp + hp_delta)
+                            desc = desc.replace(
+                                f"HP: {current_hp}/{max_hp}",
+                                f"HP: {new_hp}/{max_hp}",
+                                1
+                            )
+
+                    # Apply temp HP delta
+                    if temp_hp_delta is not None:
+                        temp_hp_match = re.search(r"Temp HP:\s*(\d+)", desc)
+                        if temp_hp_match:
+                            current_temp = int(temp_hp_match.group(1))
+                            new_temp = max(0, current_temp + temp_hp_delta)
+                            desc = desc.replace(f"Temp HP: {current_temp}", f"Temp HP: {new_temp}", 1)
+
+                    # Apply conditions add/remove
+                    if conditions_add or conditions_remove:
+                        # Look for Conditions: or Condition: line
+                        cond_match = re.search(r"Conditions?:\s*([^\n]*)", desc, re.IGNORECASE)
+                        if cond_match:
+                            cond_text = cond_match.group(1).strip()
+                            existing_conditions = [c.strip() for c in cond_text.split(",") if c.strip()] if cond_text else []
+
+                            if conditions_remove:
+                                for cond in conditions_remove:
+                                    existing_conditions = [c for c in existing_conditions if c.lower() != cond.lower()]
+
+                            if conditions_add:
+                                for cond in conditions_add:
+                                    if not any(c.lower() == cond.lower() for c in existing_conditions):
+                                        existing_conditions.append(cond)
+
+                            new_cond_text = ", ".join(existing_conditions)
+                            if new_cond_text:
+                                desc = re.sub(
+                                    r"Conditions?:\s*[^\n]*",
+                                    f"Conditions: {new_cond_text}",
+                                    desc,
+                                    count=1,
+                                    flags=re.IGNORECASE
+                                )
+                            else:
+                                # Remove the conditions line entirely if empty
+                                desc = re.sub(r"Conditions?:\s*[^\n]*\n?", "", desc, count=1, flags=re.IGNORECASE)
+
+                    # Apply stat changes
+                    if stat_changes:
+                        for stat, new_value in stat_changes.items():
+                            stat_upper = stat.upper()
+                            # Match stat line like "STR: 18" or "Strength: 18"
+                            stat_pattern = rf"({stat_upper}|{stat.title()}):\s*(\d+)"
+                            stat_match = re.search(stat_pattern, desc)
+                            if stat_match:
+                                old_value = int(stat_match.group(2))
+                                desc = re.sub(
+                                    stat_pattern,
+                                    f"{stat_match.group(1)}: {new_value}",
+                                    desc,
+                                    count=1
+                                )
+                                # Recalculate modifier and update it if present
+                                new_mod = (new_value - 10) // 2
+                                sign = "+" if new_mod >= 0 else ""
+                                old_mod_pattern = rf"\\(({sign}{old_value - 10})//2\\)"
+                                old_mod_match = re.search(rf"\({sign}{new_mod}\)".replace("+", r"\+"), desc)
+                                if old_mod_match:
+                                    desc = desc.replace(old_mod_match.group(0), f"({sign}{new_mod})", 1)
+                                else:
+                                    # Try to find modifier pattern near the stat
+                                    mod_pattern = rf"({stat_upper}|{stat.title()}):\s*{new_value}\s*\(([+-]?\d+)\)"
+                                    mod_match = re.search(mod_pattern, desc)
+                                    if mod_match:
+                                        desc = re.sub(mod_pattern, f"{mod_match.group(1)}: {new_value} ({sign}{new_mod})", desc, count=1)
+
+                    new_description = desc
+                    break
+
+        # Build the updated embed
+        embed_to_update = card_message.embeds[0] if card_message.embeds else None
+        if not embed_to_update:
+            return "Error: Card has no embed to update"
+
+        from discord import Embed
+        updated_embed = Embed(
+            title=embed_to_update.title,
+            description=new_description if new_description else embed_to_update.description,
+            color=embed_to_update.color,
+        )
+        for field in embed_to_update.fields:
+            updated_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+
+        await card_message.edit(embed=updated_embed)
+
+        # Build confirmation summary
+        summary_parts = [f"Card updated: {card_title}"]
+        if hp_delta is not None:
+            summary_parts.append(f"HP: {hp_delta:+d}")
+        if temp_hp_delta is not None:
+            summary_parts.append(f"Temp HP: {temp_hp_delta:+d}")
+        if conditions_add:
+            summary_parts.append(f"Added: {', '.join(conditions_add)}")
+        if conditions_remove:
+            summary_parts.append(f"Removed: {', '.join(conditions_remove)}")
+        if stat_changes:
+            summary_parts.append(f"Stats: {', '.join(f'{k}={v}' for k, v in stat_changes.items())}")
+
+        return ", ".join(summary_parts)
+
+    except discord.NotFound:
+        return f"Error: Thread {thread_id} not found"
+    except discord.HTTPException as e:
+        logger.error("merge_card_delta: HTTP error updating card in thread %s: %s", thread_id, e)
+        return f"Error: HTTP error updating card: {e}"
+    except Exception as e:
+        logger.error("merge_card_delta: Unexpected error updating card in thread %s: %s", thread_id, e)
+        return f"Error: Unexpected error: {e}"
+
+
 def parse_ai_tool_invocation(text: str) -> list[dict[str, Any]]:
     """Parse tool invocations from AI response text.
     
@@ -537,7 +726,36 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
                     results.append("\n".join(display_parts))
                 else:
                     results.append(f"Failed to fetch message {message_id}: {content.get('error')}")
-            
+
+            elif name == "merge_card_delta":
+                thread_id = int(args.get("thread_id", 0))
+                card_title = args.get("card_title", "")
+                hp_delta = int(args["hp_delta"]) if args.get("hp_delta") else None
+                temp_hp_delta = int(args["temp_hp_delta"]) if args.get("temp_hp_delta") else None
+                conditions_add = [c.strip() for c in args["conditions_add"].split(",")] if args.get("conditions_add") else None
+                conditions_remove = [c.strip() for c in args["conditions_remove"].split(",")] if args.get("conditions_remove") else None
+                stat_changes_raw = args.get("stat_changes", "")
+                stat_changes = None
+                if stat_changes_raw:
+                    stat_changes = {}
+                    for pair in stat_changes_raw.split(","):
+                        if ":" in pair:
+                            k, v = pair.split(":", 1)
+                            stat_changes[k.strip()] = int(v.strip())
+                full_replacement = args.get("full_replacement")
+
+                result_msg = await merge_card_delta(
+                    thread_id,
+                    card_title,
+                    hp_delta=hp_delta,
+                    temp_hp_delta=temp_hp_delta,
+                    conditions_add=conditions_add,
+                    conditions_remove=conditions_remove,
+                    stat_changes=stat_changes,
+                    full_replacement=full_replacement,
+                )
+                results.append(result_msg)
+
             else:
                 results.append(f"Unknown tool: {name}")
         
@@ -641,6 +859,47 @@ If the user says "Veton took 60 damage" — copy the entire card body, reduce on
                 "channel_id": types.Schema(type="string", description="Optional: The Discord channel ID. Defaults to current channel."),
             },
             required=["message_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="merge_card_delta",
+        description="""Apply a targeted delta update to a character card in a workspace thread.
+
+Use this when a user tells you to update a character stat, HP, or condition.
+Instead of reconstructing the full card body, pass the specific change (delta) and
+the server applies it to the existing card without requiring you to reconstruct the full card body.
+
+EXAMPLES:
+  - "Veton took 80 damage" → merge_card_delta(thread_id=..., card_title="Character Summary", hp_delta=-80)
+  - "add Poisoned condition" → merge_card_delta(thread_id=..., card_title="Character Summary", conditions_add=["Poisoned"])
+  - "Veton is no longer poisoned" → merge_card_delta(thread_id=..., card_title="Character Summary", conditions_remove=["Poisoned"])
+  - "buff Veton with Bless" → merge_card_delta(thread_id=..., card_title="Character Summary", conditions_add=["Blessed"])
+  - "Veton gains 5 temp HP" → merge_card_delta(thread_id=..., card_title="Character Summary", temp_hp_delta=5)
+  - "Veton's STR increases to 20" → merge_card_delta(thread_id=..., card_title="Character Summary", stat_changes={"STR": 20})
+
+CRITICAL: You MUST know the thread_id and card_title. Use get_message_content to discover the thread_id and card title from a message ID if needed.
+
+Do NOT use this for freeform text changes — only for HP, conditions, temp HP, and stat changes.
+
+HOW IT WORKS:
+1. The function finds the card message by matching the card_title in the thread
+2. It parses the current HP, conditions, and stat values from the card description
+3. It applies your delta changes and recalculates derived values (modifiers)
+4. It updates the card with the new values
+5. Returns a confirmation summary of what was changed""",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "thread_id": types.Schema(type="string", description="Discord thread/channel ID where the card exists."),
+                "card_title": types.Schema(type="string", description="Title of the card to update (e.g. 'Character Summary', 'Skills & Actions')."),
+                "hp_delta": types.Schema(type="integer", description="HP change to apply (negative for damage, positive for healing). Clamped to 0 minimum."),
+                "temp_hp_delta": types.Schema(type="integer", description="Temp HP change to apply (negative to remove temp HP, positive to add)."),
+                "conditions_add": types.Schema(type="array", items=types.Schema(type="string"), description="Conditions to add to the character (e.g. ['Poisoned', 'Prone'])."),
+                "conditions_remove": types.Schema(type="array", items=types.Schema(type="string"), description="Conditions to remove from the character (e.g. ['Poisoned'])."),
+                "stat_changes": types.Schema(type="object", additionalProperties=types.Schema(type="integer"), description="Stat score changes, e.g. {'STR': 19, 'DEX': 14}. Derived values (modifiers) are recalculated automatically."),
+                "full_replacement": types.Schema(type="string", description="If delta is too complex, pass the complete new card body as a string and it will replace the entire embed description."),
+            },
+            required=["thread_id", "card_title"],
         ),
     ),
 ]
