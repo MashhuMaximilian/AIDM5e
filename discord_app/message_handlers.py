@@ -1354,8 +1354,9 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         url_context = await _fetch_url_context(urls) if urls else ""
         attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
-        # Extract image URLs for direct Gemini vision processing (not text URL passthrough)
+        # Extract image URLs for direct Gemini vision processing
         image_attachment_urls = [a.url for a in message.attachments if a.content_type and "image" in a.content_type] if message.attachments else []
+        logger.debug("Image attachments: urls=%s", image_attachment_urls)
         context_limit = 24 if workspace_kind == "player" else 12 if (explicit_card_action or approved_recent_update) else 6
         recent_context = await _collect_recent_workspace_context(message, limit=context_limit)
 
