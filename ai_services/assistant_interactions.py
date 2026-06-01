@@ -348,7 +348,7 @@ async def get_assistant_response(
         normalized_message, parsed_image_urls = _normalize_user_message(user_message)
         # Prefer parsed URLs from structured message, fall back to explicit parameter
         all_image_urls = parsed_image_urls if parsed_image_urls else (image_urls or [])
-        logger.debug("Image URLs being sent to Gemini: explicit=%s, parsed=%s, merged=%s", image_urls, parsed_image_urls, all_image_urls)
+        logger.info("Image URLs sent to Gemini: explicit=%s, parsed=%s, merged=%s", image_urls, parsed_image_urls, all_image_urls)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
         prompt = _build_prompt(memory_name, normalized_message, context_block=context_block, conversation_history=conversation_history)
         guild = getattr(channel, "guild", None)
