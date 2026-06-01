@@ -345,7 +345,9 @@ async def get_assistant_response(
             logger.error(error_message)
             return error_message
 
-        normalized_message, image_urls = _normalize_user_message(user_message)
+        normalized_message, parsed_image_urls = _normalize_user_message(user_message)
+        # Prefer parsed URLs from structured message, fall back to explicit parameter
+        all_image_urls = parsed_image_urls if parsed_image_urls else (image_urls or [])
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
         prompt = _build_prompt(memory_name, normalized_message, context_block=context_block, conversation_history=conversation_history)
         guild = getattr(channel, "guild", None)
@@ -372,7 +374,7 @@ async def get_assistant_response(
                                 model_name,
                                 thinking_budget=thinking_budget,
                                 tools=effective_tools,
-                                image_urls=image_urls or None,
+                                image_urls=all_image_urls or None,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
@@ -383,7 +385,7 @@ async def get_assistant_response(
                             model_name,
                             thinking_budget=thinking_budget,
                             tools=effective_tools,
-                            image_urls=image_urls or None,
+                            image_urls=all_image_urls or None,
                         )
                 else:
                     # Non-reasoning path: use generate_text with return_raw_response=True
@@ -396,7 +398,7 @@ async def get_assistant_response(
                                 model_name,
                                 tools=effective_tools,
                                 return_raw_response=True,
-                                image_urls=image_urls or None,
+                                image_urls=all_image_urls or None,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
@@ -407,7 +409,7 @@ async def get_assistant_response(
                             model_name,
                             tools=effective_tools,
                             return_raw_response=True,
-                            image_urls=image_urls or None,
+                            image_urls=all_image_urls or None,
                         )
             except Exception as exc:
                 if guild_id is not None:
@@ -564,7 +566,7 @@ async def get_assistant_response(
                             prompt,
                             _compose_system_prompt(system_prompt),
                             model_name,
-                            image_urls=image_urls or None,
+                            image_urls=all_image_urls or None,
                         )
                     await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                 else:
@@ -573,7 +575,7 @@ async def get_assistant_response(
                         prompt,
                         _compose_system_prompt(system_prompt),
                         model_name,
-                        image_urls=image_urls or None,
+                        image_urls=all_image_urls or None,
                     )
             except Exception as exc:
                 if guild_id is not None:
