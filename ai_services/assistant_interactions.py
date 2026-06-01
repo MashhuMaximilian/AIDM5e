@@ -493,6 +493,7 @@ async def get_assistant_response(
                                     model_name,
                                     tools=_FOLLOWUP_TOOLS if _FOLLOWUP_TOOLS else None,
                                     return_raw_response=True,
+                                    image_urls=all_image_urls or None,
                                 )
                             await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                         else:
@@ -503,6 +504,7 @@ async def get_assistant_response(
                                 model_name,
                                 tools=_FOLLOWUP_TOOLS if _FOLLOWUP_TOOLS else None,
                                 return_raw_response=True,
+                                image_urls=all_image_urls or None,
                             )
                         # Parse and handle any follow-up function calls (e.g. edit_message after reading)
                         extra_calls = gemini_client.parse_function_calls(follow_up_response)
