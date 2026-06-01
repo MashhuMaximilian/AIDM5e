@@ -733,6 +733,48 @@ def _normalize_player_update_titles(updates: dict[str, str], canonical_titles: l
     return normalized
 
 
+def _normalize_other_update_titles(updates: dict[str, str], existing_titles: list[str]) -> dict[str, str]:
+    """
+    For non-player workspaces (npc, monster, other): fuzzy-match AI-generated card titles
+    to existing cards by checking if the AI title shares the same prefix (before ' — ')
+    as an existing card. E.g. AI returns '🐾 FAMILIAR — Goose Hydra' but existing card
+    is '🐾 FAMILIAR — [Species Name]' → match via shared '🐾 FAMILIAR —' prefix.
+    """
+    if not updates or not existing_titles:
+        return updates
+
+    # Build prefix map: for each existing title, extract the part before " — " (case-insensitive)
+    prefix_map: dict[str, str] = {}  # normalized_prefix → original_existing_title
+    for title in existing_titles:
+        sep = " — "
+        if sep in title:
+            prefix = title.split(sep)[0].strip().lower()
+        else:
+            prefix = title.strip().lower()
+        prefix_map[prefix] = title
+
+    normalized: dict[str, str] = {}
+    for raw_title, body in updates.items():
+        # Try exact match first
+        if raw_title in existing_titles:
+            normalized[raw_title] = body
+            continue
+
+        # Try prefix match: extract raw prefix and look up
+        sep = " — "
+        if sep in raw_title:
+            raw_prefix = raw_title.split(sep)[0].strip().lower()
+            matched_existing = prefix_map.get(raw_prefix)
+            if matched_existing:
+                normalized[matched_existing] = body
+                continue
+
+        # No match found — keep as-is (AI may want a genuinely new card)
+        normalized[raw_title] = body
+
+    return normalized
+
+
 def _player_missing_followup(cards: dict[str, str]) -> str | None:
     prompts: list[str] = []
     summary = cards.get("Character Summary", "")
@@ -1415,6 +1457,10 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
             updates = parse_card_update_response(response)
             if workspace_kind == "player" and not _is_new_card_request(message.content):
                 updates = _normalize_player_update_titles(updates, list(card_messages.keys()))
+            elif workspace_kind in {"npc", "monster", "other"} and not _is_new_card_request(message.content):
+                # Fuzzy match for non-player workspaces: if AI title shares prefix with an existing card title, use the existing title.
+                # This handles cases where AI generates "Goose Hydra" but existing card is "[Species Name]".
+                updates = _normalize_other_update_titles(updates, list(card_messages.keys()))
             if not updates:
                 await send_response_in_chunks(
                     message.channel,

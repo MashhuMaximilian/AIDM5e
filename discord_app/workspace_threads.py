@@ -637,6 +637,9 @@ def build_card_update_prompt(
         f"{scope_rule}\n"
         "Do not create new cards unless the user explicitly asked for a new separate card.\n"
         "Prefer revising existing cards over creating replacement structures.\n"
+        # Preserve existing placeholder card titles exactly. If an existing card is titled
+        # "[Species Name]", use that exact title in your response — do NOT rename it to the
+        # detected name (e.g. "Goose Hydra"). Only update the card BODY to fill in the placeholder.\n"
         "Do not return explanations, chat, or analysis.\n"
         "Return only the full updated card bodies using exactly this format:\n"
         "### CARD: Card Title\n"
