@@ -108,8 +108,6 @@ def _color_from_name(color_name: str) -> discord.Color:
         "yellow": discord.Color.yellow(),
     }
     
-    if color_name is None:
-        color_name = "DarkBlue"
     normalized = color_name.strip().lower().replace(" ", "")
     
     # Check if it's a hex color

@@ -99,10 +99,14 @@ class GeminiClient:
         api_key: str | None = None,
         tools: list | None = None,
         return_raw_response: bool = False,
+        image_urls: list | None = None,
     ) -> str | object:
+        contents: str | list = prompt
+        if image_urls:
+            contents = self._build_content_parts(prompt, image_urls)
         return self._generate_text_with_model(
             model_name or GEMINI_CHAT_MODEL,
-            prompt,
+            contents,
             system_instruction,
             api_key=api_key,
             tools=tools,
@@ -119,6 +123,7 @@ class GeminiClient:
         thinking_budget: int = 1024,
         tools: list | None = None,
         return_raw_response: bool = False,
+        image_urls: list | None = None,
     ) -> str | object:
         """Generate text with reasoning budget enabled.
         
@@ -131,6 +136,7 @@ class GeminiClient:
                 enable more extensive reasoning on supported models.
             tools: Optional list of tools for function calling.
             return_raw_response: If True, returns the full response object.
+            image_urls: Optional list of image URLs to include as actual image parts.
         
         Returns:
             Generated text string, or full response object if return_raw_response=True.
@@ -144,13 +150,16 @@ class GeminiClient:
             thinking_budget=thinking_budget,
             tools=tools,
         )
+        contents: str | list = prompt
+        if image_urls:
+            contents = self._build_content_parts(prompt, image_urls)
         try:
-            return self._generate_with_config(model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key, return_raw_response=return_raw_response)
+            return self._generate_with_config(model_name or GEMINI_CHAT_MODEL, contents, config, api_key=api_key, return_raw_response=return_raw_response)
         except Exception as exc:
             logger.warning("generate_text_with_reasoning failed, falling back to regular generate_text: %s", exc)
             return self._generate_text_with_model(
                 model_name or GEMINI_CHAT_MODEL,
-                prompt,
+                contents,
                 system_instruction,
                 api_key=api_key,
                 tools=tools,
@@ -166,6 +175,7 @@ class GeminiClient:
         api_key: str | None = None,
         thinking_budget: int = 1024,
         tools: list | None = None,
+        image_urls: list | None = None,
     ) -> object:
         """Generate text with reasoning budget, returning the raw response object.
         
@@ -178,6 +188,7 @@ class GeminiClient:
             api_key: Optional API key.
             thinking_budget: Token budget for reasoning (default 1024).
             tools: Optional list of tools for function calling.
+            image_urls: Optional list of image URLs to include as actual image parts.
         
         Returns:
             The raw Gemini response object.
@@ -191,8 +202,11 @@ class GeminiClient:
             thinking_budget=thinking_budget,
             tools=tools,
         )
+        contents: str | list = prompt
+        if image_urls:
+            contents = self._build_content_parts(prompt, image_urls)
         return self._generate_with_config(
-            model_name or GEMINI_CHAT_MODEL, prompt, config, api_key=api_key, return_raw_response=True
+            model_name or GEMINI_CHAT_MODEL, contents, config, api_key=api_key, return_raw_response=True
         )
 
     def generate_summary_text(
@@ -282,10 +296,27 @@ class GeminiClient:
         )
         return self._generate_with_config(GEMINI_CHAT_MODEL, contextual_prompt, config, api_key=api_key)
 
+    def _build_content_parts(self, prompt: str, image_urls: list[str]) -> list:
+        """Build content parts list with prompt text + loaded images as Parts."""
+        from google.genai import types
+        parts = [prompt]
+        for url in image_urls:
+            try:
+                image_bytes, mime_type = self._load_image_bytes(url)
+                parts.append(
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type or "image/png",
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Skipping unusable image %r: %s", url, exc)
+        return parts
+
     def _generate_text_with_model(
         self,
         model_name: str,
-        prompt: str,
+        contents: str | list,
         system_instruction: str | None = None,
         *,
         api_key: str | None = None,
@@ -300,12 +331,12 @@ class GeminiClient:
             system_instruction=system_instruction,
             tools=tools,
         )
-        return self._generate_with_config(model_name, prompt, config, api_key=api_key, return_raw_response=return_raw_response)
+        return self._generate_with_config(model_name, contents, config, api_key=api_key, return_raw_response=return_raw_response)
 
     def _generate_with_config(
         self,
         model_name: str,
-        prompt: str,
+        contents: str | list,
         config: types.GenerateContentConfig,
         *,
         api_key: str | None = None,
@@ -315,7 +346,7 @@ class GeminiClient:
         
         Args:
             model_name: The model to use.
-            prompt: The prompt text.
+            contents: The prompt text or list of content parts.
             config: GenerateContentConfig object.
             api_key: Optional API key.
             return_raw_response: If True, returns the full response object instead of just text.
@@ -327,7 +358,7 @@ class GeminiClient:
         try:
             response = client.models.generate_content(
                 model=model_name,
-                contents=prompt,
+                contents=contents,
                 config=config,
             )
         except ClientError as exc:
@@ -336,7 +367,7 @@ class GeminiClient:
                 logger.warning("Gemini model %s unavailable; retrying with %s", model_name, GEMINI_FALLBACK_MODEL)
                 response = client.models.generate_content(
                     model=GEMINI_FALLBACK_MODEL,
-                    contents=prompt,
+                    contents=contents,
                     config=config,
                 )
             else:

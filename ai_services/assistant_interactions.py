@@ -55,6 +55,7 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             reply_to_message,
             forward_message,
             get_message_content,
+            find_message_by_title,
         )
         from discord_app.slash_commands import (
             send_card,
@@ -69,6 +70,7 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             "reply_to_message": reply_to_message,
             "forward_message": forward_message,
             "get_message_content": get_message_content,
+            "find_message_by_title": find_message_by_title,
             "send_card": send_card,
             "roll_dice": roll_dice,
             "context_add": context_add,
@@ -150,6 +152,18 @@ async def _execute_function_call(func_name: str, args: dict, channel) -> str:
             parts.append(f"\n--- END CARD DATA ---")
             parts.append(f"Attachments: {len(result['attachments'])}")
             return "\n".join(parts)
+        elif func_name == "find_message_by_title":
+            result = await find_message_by_title(
+                int(args.get("channel_id", channel.id)),
+                args["title_search"],
+            )
+            if not result.get("found"):
+                return f"Card not found: {result.get('error', 'unknown error')}"
+            return (
+                f"Found card: '{result['title']}' "
+                f"with message_id={result['message_id']}. "
+                f"Use edit_message(message_id={result['message_id']}, ...) to update it."
+            )
         elif func_name == "send_card":
             result = await send_card(
                 int(args["channel_id"]),
@@ -235,26 +249,33 @@ async def handle_function_calls_from_dicts(calls: list[dict], channel) -> str:
     return "\n".join(results)
 
 
-def _normalize_user_message(user_message) -> str:
+def _normalize_user_message(user_message) -> tuple[str, list[str]]:
+    """Normalize user message into (text, image_urls) tuple.
+    
+    Returns the cleaned text and any extracted image URLs for proper
+    Gemini vision processing (not text URLs).
+    """
+    image_urls: list[str] = []
+    text_parts: list[str] = []
+
     if isinstance(user_message, str):
-        return user_message
+        return user_message, []
 
     if isinstance(user_message, list):
-        parts = []
         for item in user_message:
             if not isinstance(item, dict):
-                parts.append(str(item))
+                text_parts.append(str(item))
                 continue
             item_type = item.get("type")
             if item_type == "text":
-                parts.append(item.get("text", ""))
+                text_parts.append(item.get("text", ""))
             elif item_type == "image_url":
                 image_url = item.get("image_url", {}).get("url")
                 if image_url:
-                    parts.append(f"[User attached image: {image_url}]")
-        return "\n".join(part for part in parts if part)
+                    image_urls.append(image_url)
+        return "\n".join(part for part in text_parts if part), image_urls
 
-    return str(user_message)
+    return str(user_message), []
 
 
 def _build_prompt(
@@ -309,6 +330,7 @@ async def get_assistant_response(
     conversation_history: str | None = None,
     use_reasoning: bool = False,
     thinking_budget: int = 1024,
+    image_urls: list | None = None,
 ):
     try:
         target_id = thread_id or channel_id
@@ -323,7 +345,7 @@ async def get_assistant_response(
             logger.error(error_message)
             return error_message
 
-        normalized_message = _normalize_user_message(user_message)
+        normalized_message, image_urls = _normalize_user_message(user_message)
         memory_name = await asyncio.to_thread(get_memory_name, assigned_memory)
         prompt = _build_prompt(memory_name, normalized_message, context_block=context_block, conversation_history=conversation_history)
         guild = getattr(channel, "guild", None)
@@ -350,6 +372,7 @@ async def get_assistant_response(
                                 model_name,
                                 thinking_budget=thinking_budget,
                                 tools=effective_tools,
+                                image_urls=image_urls or None,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
@@ -360,6 +383,7 @@ async def get_assistant_response(
                             model_name,
                             thinking_budget=thinking_budget,
                             tools=effective_tools,
+                            image_urls=image_urls or None,
                         )
                 else:
                     # Non-reasoning path: use generate_text with return_raw_response=True
@@ -372,6 +396,7 @@ async def get_assistant_response(
                                 model_name,
                                 tools=effective_tools,
                                 return_raw_response=True,
+                                image_urls=image_urls or None,
                             )
                         await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                     else:
@@ -382,6 +407,7 @@ async def get_assistant_response(
                             model_name,
                             tools=effective_tools,
                             return_raw_response=True,
+                            image_urls=image_urls or None,
                         )
             except Exception as exc:
                 if guild_id is not None:
@@ -538,6 +564,7 @@ async def get_assistant_response(
                             prompt,
                             _compose_system_prompt(system_prompt),
                             model_name,
+                            image_urls=image_urls or None,
                         )
                     await asyncio.to_thread(record_guild_gemini_key_success, guild_id)
                 else:
@@ -546,6 +573,7 @@ async def get_assistant_response(
                         prompt,
                         _compose_system_prompt(system_prompt),
                         model_name,
+                        image_urls=image_urls or None,
                     )
             except Exception as exc:
                 if guild_id is not None:

@@ -342,6 +342,43 @@ async def forward_message(
         return None
 
 
+async def find_message_by_title(channel_id: int, title_search: str) -> dict[str, Any]:
+    """Find a Discord message by searching embed titles in a channel.
+
+    Use this when you have a card title (e.g. "Rules Card", "Items Card", "Veton")
+    but NOT the message_id. This searches recent messages for matching embed titles.
+
+    Args:
+        channel_id: The Discord channel or thread ID to search.
+        title_search: The card title or a substring to match against embed titles.
+
+    Returns:
+        A dict with:
+        - found: True if a message was found
+        - message_id: The Discord message ID (as int)
+        - title: The matched embed title
+        - error: Error message if not found
+    """
+    try:
+        channel = client.get_channel(channel_id)
+        if not channel:
+            return {"found": False, "error": f"Could not find channel {channel_id}"}
+
+        title_lower = title_search.lower()
+        async for msg in channel.history(limit=100):
+            for embed in msg.embeds:
+                if embed.title and title_lower in embed.title.lower():
+                    return {
+                        "found": True,
+                        "message_id": msg.id,
+                        "title": embed.title,
+                    }
+        return {"found": False, "error": f"No message with title containing '{title_search}' found in channel {channel_id}"}
+    except Exception as exc:
+        logger.error("find_message_by_title: Error searching channel %s: %s", channel_id, exc)
+        return {"found": False, "error": str(exc)}
+
+
 async def get_message_content(message_id: int, channel_id: int) -> dict[str, Any]:
     """Get the content and metadata of a message.
     
@@ -727,6 +764,20 @@ async def execute_tool_invocations(invocations: list[dict[str, Any]], channel: d
                 else:
                     results.append(f"Failed to fetch message {message_id}: {content.get('error')}")
 
+            elif name == "find_message_by_title":
+                source_channel_id = int(args.get("channel_id", channel.id))
+                title_search = args.get("title_search", "")
+                
+                result = await find_message_by_title(source_channel_id, title_search)
+                if result.get("found"):
+                    results.append(
+                        f"Found card: '{result['title']}' "
+                        f"with message_id={result['message_id']}. "
+                        f"Use edit_message(message_id={result['message_id']}, ...) to update it."
+                    )
+                else:
+                    results.append(f"Card not found: {result.get('error', 'unknown error')}")
+
             elif name == "merge_card_delta":
                 thread_id = int(args.get("thread_id", 0))
                 card_title = args.get("card_title", "")
@@ -896,10 +947,35 @@ HOW IT WORKS:
                 "temp_hp_delta": types.Schema(type="integer", description="Temp HP change to apply (negative to remove temp HP, positive to add)."),
                 "conditions_add": types.Schema(type="array", items=types.Schema(type="string"), description="Conditions to add to the character (e.g. ['Poisoned', 'Prone'])."),
                 "conditions_remove": types.Schema(type="array", items=types.Schema(type="string"), description="Conditions to remove from the character (e.g. ['Poisoned'])."),
-                "stat_changes": types.Schema(type="object", additionalProperties=types.Schema(type="integer"), description="Stat score changes, e.g. {'STR': 19, 'DEX': 14}. Derived values (modifiers) are recalculated automatically."),
+                "stat_changes": types.Schema(type="object", description="Stat score changes, e.g. {'STR': 19, 'DEX': 14}. Derived values (modifiers) are recalculated automatically."),
                 "full_replacement": types.Schema(type="string", description="If delta is too complex, pass the complete new card body as a string and it will replace the entire embed description."),
             },
             required=["thread_id", "card_title"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="find_message_by_title",
+        description="""Find a Discord message by searching for its embed card title.
+
+Use this when you know the card's title (e.g. "Rules Card", "Items Card", "Veton")
+but do NOT know the message_id. This searches the channel for matching embed titles.
+
+REQUIRED STEP before edit_message when you don't have the message_id:
+  1. Call find_message_by_title with the card title you want to edit
+  2. Use the returned message_id in your edit_message call
+
+Example:
+  - User says: "Update the Rules Card"
+  - You call: find_message_by_title(channel_id="1234567890", title_search="Rules Card")
+  - Response: {"found": true, "message_id": "9876543210", "title": "Rules Card"}
+  - You call: edit_message(message_id="9876543210", ...)""",
+        parameters=types.Schema(
+            type="object",
+            properties={
+                "channel_id": types.Schema(type="string", description="The Discord channel or thread ID to search."),
+                "title_search": types.Schema(type="string", description="The card title or a substring to match. Case-insensitive partial match (e.g. 'Rules' matches 'Rules Card')."),
+            },
+            required=["channel_id", "title_search"],
         ),
     ),
 ]

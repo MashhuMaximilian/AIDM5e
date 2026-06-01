@@ -3,6 +3,8 @@ import aiohttp
 import discord
 import logging
 import json
+
+logger = logging.getLogger(__name__)
 import re
 from pathlib import Path
 from config import client
@@ -1352,6 +1354,8 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
         url_context = await _fetch_url_context(urls) if urls else ""
         attachment_context = await _fetch_attachment_context(list(message.attachments)) if message.attachments else ""
         extra_context = "\n\n".join(block for block in [url_context, attachment_context] if block).strip()
+        # Extract image URLs for direct Gemini vision processing (not text URL passthrough)
+        image_attachment_urls = [a.url for a in message.attachments if a.content_type and "image" in a.content_type] if message.attachments else []
         context_limit = 24 if workspace_kind == "player" else 12 if (explicit_card_action or approved_recent_update) else 6
         recent_context = await _collect_recent_workspace_context(message, limit=context_limit)
 
@@ -1405,6 +1409,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 assigned_memory,
                 context_block="\n\n".join(block for block in [workspace_update_recap, recent_context, extra_context] if block).strip() or None,
                 system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
+                image_urls=image_attachment_urls or None,
             )
             updates = parse_card_update_response(response)
             if workspace_kind == "player" and not _is_new_card_request(message.content):
@@ -1460,6 +1465,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                 assigned_memory,
                 context_block=context_block,
                 system_prompt=_conversation_only_workspace_system_prompt(system_prompt),
+                image_urls=image_attachment_urls or None,
             )
             if response and workspace_kind == "player" and _looks_like_card_update_payload(response) and _is_explicit_edit_request(message.content):
                 card_bodies = {
@@ -1491,6 +1497,7 @@ async def _handle_workspace_thread_message(message: discord.Message, channel_id:
                     assigned_memory,
                     context_block="\n\n".join(block for block in [player_update_recap, recent_context, extra_context] if block).strip() or None,
                     system_prompt=_card_maintenance_workspace_system_prompt(system_prompt),
+                    image_urls=image_attachment_urls or None,
                 )
                 updates = _normalize_player_update_titles(parse_card_update_response(update_response), list(card_messages.keys()))
                 if updates:
